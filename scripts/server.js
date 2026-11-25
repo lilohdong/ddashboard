@@ -37,6 +37,7 @@ const config = require('./core/config');
 const lifecycle = require('./app/lifecycle');
 const { createRouter } = require('./http/router');
 const migrate = require('./store/migrate');
+const retention = require('./store/retention');
 const routes = require('./http/routes');
 
 // Orca terminal state per handle, never blocking a request: the cached answer is returned (null = not known
@@ -97,6 +98,14 @@ function sweep() {
   });
 }
 
+// Retention (store/retention.js): old done messages and logs, stray replies.jsonl lines, stale archive entries.
+function retain() {
+  try {
+    const r = retention.run();
+    if (r.done || r.logs || r.replies || r.archived) console.log(`ddashboard: retention ${JSON.stringify(r)}`);
+  } catch (err) { console.log(`ddashboard: retention failed: ${err.message}`); }
+}
+
 const server = http.createServer(createRouter(routes));
 
 // Leave a pid file so hooks and control.js can tell whether the server is up; remove it on exit.
@@ -120,4 +129,6 @@ server.listen(PORT, '127.0.0.1', () => {
   sweep();
   setInterval(sweep, SWEEP_MS).unref();
   setInterval(tick, TICK_MS).unref();
+  setTimeout(retain, 5000).unref();
+  setInterval(retain, retention.DAY_MS).unref();
 });

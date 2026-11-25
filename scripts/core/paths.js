@@ -33,6 +33,7 @@ const paths = {
   serverLog: path.join(BOARD_DIR, 'server.log'),
   usageDir: path.join(BOARD_DIR, 'usage'),
   usageFor: (iso) => path.join(BOARD_DIR, 'usage', `${String(iso).slice(0, 7)}.jsonl`), // usage/YYYY-MM.jsonl
+  inboxDir: path.join(BOARD_DIR, 'inbox'),
   inbox: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid)),
   done: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid), 'done'),
 };

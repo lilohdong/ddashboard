@@ -76,4 +76,4 @@ function setArchived(id, archived) {
   archivedStore.update((m) => { m[id] = { archived: Boolean(archived), ts: new Date().toISOString() }; });
 }
 
-module.exports = { files, append, reader, readArchived, setArchived };
+module.exports = { files, append, reader, readArchived, setArchived, archivedStore };

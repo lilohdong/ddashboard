@@ -14,6 +14,9 @@ Environment variables, read by `scripts/core/config.js` only. Dashboard choices 
 | `DDASH_SWEEP_MS` | pos | `60000` | Server sweep interval for orphan wait commands (ms). |
 | `DDASH_CONTEXT_WARN` | pos | `150000` | Context size (tokens) at which the dashboard marks a session. |
 | `DDASH_STALE_MIN` | pos | `60` | Minutes without activity after which an idle session without a waiter is unresponsive. |
+| `DDASH_RETAIN_DONE_DAYS` | pos | `7` | Days a taken inbox message (inbox/<sid>/done/) is kept. |
+| `DDASH_RETAIN_LOG_DAYS` | pos | `30` | Days a file in logs/ is kept after its last change. |
+| `DDASH_RETAIN_LOG_MB` | pos | `50` | Size cap of logs/ (MB); the oldest files go first. |
 | `DDASH_NAME` | str | — | Session name shown on the dashboard (default: the folder name, or the member role). |
 | `DDASH_POLL_MS` | pos | `1500` | Wait command inbox poll interval (ms). |
 | `DDASH_WAIT_CHECK_MS` | pos | `60000` | Wait command owner identity re-check interval (ms, pid reuse). |

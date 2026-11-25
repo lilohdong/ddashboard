@@ -34,6 +34,10 @@ const TABLE = [
   { name: 'DDASH_SWEEP_MS', type: 'pos', def: 60000, doc: 'Server sweep interval for orphan wait commands (ms).' },
   { name: 'DDASH_CONTEXT_WARN', type: 'pos', def: 150000, doc: 'Context size (tokens) at which the dashboard marks a session.' },
   { name: 'DDASH_STALE_MIN', type: 'pos', def: 60, doc: 'Minutes without activity after which an idle session without a waiter is unresponsive.' },
+  // Retention (server, daily)
+  { name: 'DDASH_RETAIN_DONE_DAYS', type: 'pos', def: 7, doc: 'Days a taken inbox message (inbox/<sid>/done/) is kept.' },
+  { name: 'DDASH_RETAIN_LOG_DAYS', type: 'pos', def: 30, doc: 'Days a file in logs/ is kept after its last change.' },
+  { name: 'DDASH_RETAIN_LOG_MB', type: 'pos', def: 50, doc: 'Size cap of logs/ (MB); the oldest files go first.' },
   // Sessions
   { name: 'DDASH_NAME', type: 'str', def: '', doc: 'Session name shown on the dashboard (default: the folder name, or the member role).' },
   // Wait command
