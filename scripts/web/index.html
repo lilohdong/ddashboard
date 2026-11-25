@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDashboard</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside id="side"></aside>
+  <div class="main">
+    <header>
+      <button class="toggle" id="toggle" data-i18n-title="side.toggle" data-i18n-aria="side.toggle" title="Toggle sidebar ( [ )" aria-label="Toggle sidebar">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6 3v10"/></svg>
+      </button>
+      <h1><span class="brand-inline">DDashboard / </span><span id="scope"></span></h1>
+      <div class="search">
+        <input id="q" type="search" data-i18n-placeholder="search.placeholder" data-i18n-aria="search.placeholder" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </div>
+      <div class="filters" id="filters"></div>
+      <button class="pill" id="reports" hidden data-i18n-title="reports.title"></button>
+      <select class="lang-sel" id="lang" data-i18n-title="lang.title" aria-label="Language"></select>
+    </header>
+    <div class="mode-bar" id="mode"></div>
+    <div id="cards"></div>
+  </div>
+</div>
+<script src="/i18n.js"></script>
+<script type="module" src="/web/main.mjs"></script>
+</body>
+</html>
