@@ -19,6 +19,7 @@ const {
 const sessionsStore = require('../store/sessions');
 const { clone } = require('../store/record');
 const { parseCard } = require('../domain/card');
+const { transition } = require('../domain/session');
 
 const MAX_MARK_IDS = 500;
 
@@ -142,11 +143,13 @@ function recordUsage(s, sid, rows) {
     rules = rulesUpdate(sessions[sid], projects[sessions[sid].project_key]);
   }
   if (branch) sessions[sid].branch = branch;
-  sessions[sid].state = msgs.length || notice ? 'working' : 'idle';
-  sessions[sid].last_seen = new Date().toISOString();
-  // A session ended meanwhile (team end, handoff, marked ended) stays ended.
+  const busy = Boolean(msgs.length || notice);
+  const stop = transition(sessions[sid], 'stop', { busy });
+  Object.assign(sessions[sid], stop.patch, { last_seen: new Date().toISOString() });
+  // A session ended meanwhile (team end, handoff, marked ended) stays ended: the transition is checked again on
+  // the current record, under the lock.
   sessionsStore.patchDiff(sid, before, sessions[sid], (cur, changes) => {
-    if (cur.state === 'ended' || cur.ended) delete changes.state;
+    if (!transition(cur, 'stop', { busy }).ok) delete changes.state;
   });
 
   const parts = [];

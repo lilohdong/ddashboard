@@ -14,7 +14,8 @@ const path = require('path');
 const lib = require('./lib');
 const config = require('./core/config');
 const sessionsStore = require('./store/sessions');
-const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, setState, pendingRules, readJson, writeJson } = lib;
+const lifecycle = require('./app/lifecycle');
+const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, pendingRules, readJson, writeJson } = lib;
 
 try { process.chdir(os.homedir()); } catch { /* stay where we are */ }
 
@@ -99,7 +100,7 @@ const timer = setInterval(() => {
   const msgs = takeInbox(sid);
   if (!msgs.length) return;
   clearInterval(timer);
-  setState(sid, 'working');
+  lifecycle.apply(sid, 'prompt');
   const rules = pendingRules(sid); // new instructions once, after a mode switch
   console.log(`${formatMessages(msgs)}\n\n${rules ? `${rules}\n` : ''}(Start this wait command again in the background now, in the same response as your first tool calls for it.)`);
   process.exit(0);

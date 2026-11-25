@@ -10,12 +10,13 @@
 // - After a mode switch, the next prompt gets the new instructions once.
 // - Connected sessions are marked "working". Anything else prints nothing (zero tokens).
 const {
-  paths, readJson, writeJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, setState,
+  paths, readJson, writeJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession,
   isRegistered, injectRules, pendingRules, parseTag, setMember, performHandoff, recordClaudePid, replacedText,
   memberStart, addTeam, removeTeams, teamOfLead, readProjects,
 } = require('../lib');
 const control = require('../control');
 const sessionsStore = require('../store/sessions');
+const lifecycle = require('../app/lifecycle');
 
 const ACTIVATE = /^\s*\/(?:ddashboard:)?dashboard\b(.*)$/i;
 
@@ -63,7 +64,7 @@ function recordPidOnce(sid) {
     const started = await control.start();
     setProject(cwd, true);
     registerSession(sid, cwd);
-    setState(sid, 'working');
+    lifecycle.apply(sid, 'prompt');
     let note = '';
     const key = projectKey(cwd);
     if (team) {
@@ -98,7 +99,7 @@ function recordPidOnce(sid) {
       const res = performHandoff(tag.from, sid, tag.doc);
       process.stdout.write(`${handoffNote(tag, res)}${injectRules(sid)}`);
     }
-    setState(sid, 'working');
+    lifecycle.apply(sid, 'prompt');
     return;
   }
 
@@ -111,5 +112,5 @@ function recordPidOnce(sid) {
     const update = pendingRules(sid);
     if (update) process.stdout.write(update);
   }
-  setState(sid, 'working');
+  lifecycle.apply(sid, 'prompt');
 })();

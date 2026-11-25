@@ -41,6 +41,7 @@ const usage = require('./usage');
 const team = require('./team');
 const config = require('./core/config');
 const { newId } = require('./core/ids');
+const { view } = require('./domain/session');
 
 const CONTEXT_WARN = config.get('DDASH_CONTEXT_WARN');
 
@@ -182,10 +183,11 @@ const server = http.createServer((req, res) => {
       s.pending = pendingCount(s.session_id);
       s.waiting = waiting(s.session_id);
       s.project = s.project || s.name;
-      // Displayed state: ended > working > listening (wait command alive) > idle
-      s.view = s.ended || s.state === 'ended' ? 'ended' : s.state === 'working' ? 'working' : s.waiting ? 'waiting' : 'idle';
+      // Displayed state: ended > working > listening (wait command alive) > idle.
       // Unresponsive: idle, no live wait command, not seen for stale_min minutes.
-      s.unresponsive = s.view === 'idle' && isStale(s);
+      const v = view(s, { waiting: s.waiting, stale: isStale(s) });
+      s.view = v.view;
+      s.unresponsive = v.unresponsive;
       // Place in the team: solo | lead | member | outside (team mode, untagged)
       s.team = teamRole(s, projects[s.project_key]);
       const own = s.team === 'lead' || s.team === 'member' ? teamOfSession(s, projects[s.project_key]) : null;

@@ -12,6 +12,8 @@ const projectsStore = require('./store/projects');
 const cardsStore = require('./store/cards');
 const { alive, parseProcessList, processTable, processTableAsync, isClaudeProcess, findClaudePid, processName, napUntil } = require('./proc/table');
 const { killPid, descendants, killTree, killClaude } = require('./proc/kill');
+const { isEnded, transition } = require('./domain/session');
+const lifecycle = require('./app/lifecycle');
 
 const RECENT_DAYS = config.get('DDASH_RECENT_DAYS');
 
@@ -77,20 +79,19 @@ function registerSession(sid, cwd) {
       branch,
       project,
       project_key: key,
-      state: sessions[sid]?.state === 'working' ? 'working' : 'idle',
-      started: sessions[sid]?.started || new Date().toISOString(),
-      last_seen: new Date().toISOString(),
     };
-    // A lead replaced by a handoff stays ended even if the session is resumed.
-    if (sessions[sid].replaced_by) sessions[sid].state = 'ended';
-    else delete sessions[sid].ended;
+    // working stays working, anything else is idle; an ended session is revived, except a lead replaced by a
+    // handoff, which stays ended even if the session is resumed.
+    lifecycle.applyIn(sessions, sid, 'register');
   });
 }
 
-// Record session state: working | idle | ended. Only touches registered sessions.
+// Old entry for state writes (kept for callers and tests): working -> prompt, idle -> stop, ended -> end (exit).
+// Only touches registered sessions; an ended session keeps its state. Returns true when the record exists.
 function setState(sid, state) {
-  const ts = new Date().toISOString();
-  return sessionsStore.patch(sid, { state, last_seen: ts, ...(state === 'ended' ? { ended: ts } : {}) });
+  const r = state === 'ended' ? lifecycle.apply(sid, 'end', { reason: 'exit' })
+    : lifecycle.apply(sid, state === 'working' ? 'prompt' : 'stop', { busy: false });
+  return r.ok || r.code !== 404;
 }
 
 function isRegistered(sid) {
@@ -306,7 +307,6 @@ function setRunners(key, values = {}) {
 }
 const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
-const isEnded = (s) => Boolean(s && (s.ended || s.state === 'ended'));
 
 // Where a session stands in its project: solo | lead | member | outside (team mode, in no team).
 // A member belongs to the team whose lead spawned it (s.lead); a member of a removed team is outside.
@@ -928,7 +928,7 @@ function handoffSessions(sessions, projects, from, to, doc) {
     if (s.kind === 'member' && s.lead === from) { s.lead = to; members++; }
   }
   delete old.kind;
-  Object.assign(old, { state: 'ended', ended: ts, end_reason: 'handoff', replaced_by: to, last_seen: ts });
+  lifecycle.applyIn(sessions, from, 'end', { reason: 'handoff', replaced_by: to, ts });
   return { ok: true, key, t, old, members, ts };
 }
 
@@ -1263,8 +1263,7 @@ function forgetSessions(ids) {
     for (const id of ids) {
       const s = own(sessions, id);
       if (!s) continue;
-      if (!isEnded(s)) { refused.push(id); continue; }
-      delete sessions[id];
+      if (!lifecycle.applyIn(sessions, id, 'forget').ok) { refused.push(id); continue; }
       forgotten.push(s);
     }
   });
@@ -1275,7 +1274,6 @@ function forgetSessions(ids) {
     removeEmptyInbox(s.session_id);
   }
   return { forgotten: forgotten.map((s) => s.session_id), refused };
-  return { forgotten, refused };
 }
 
 // True when a session (any kind: solo, lead, member, outside) is known to be gone without its SessionEnd hook
@@ -1307,10 +1305,7 @@ function markGone(sids) {
   const done = [];
   sessionsStore.update((sessions) => {
     for (const sid of sids) {
-      const s = own(sessions, sid);
-      if (!s || isEnded(s)) continue;
-      Object.assign(s, { state: 'ended', ended: ts, end_reason: 'gone' });
-      done.push(sid);
+      if (own(sessions, sid) && lifecycle.applyIn(sessions, sid, 'end', { reason: 'gone', ts, seen: false }).ok) done.push(sid);
     }
   });
   return done;
@@ -1326,15 +1321,12 @@ function markEnded(sid) {
   let table = null;
   const wp = waitPid(sid);
   const waiting = wp && !orphanWaiter(wp, (table = processTable()));
-  if (!gone && (s.state === 'working' || waiting || !isStale(s))) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
-  const ts = new Date().toISOString();
-  const fields = { state: 'ended', ended: ts, end_reason: gone ? 'gone' : 'marked' };
-  Object.assign(s, fields);
-  sessionsStore.update((all) => {
-    const cur = own(all, sid);
-    if (cur && !isEnded(cur)) Object.assign(cur, fields);
-  });
-  try { stopSessionProcesses(s, table || undefined); } catch { /* best effort */ }
+  const ctx = { reason: 'marked', gone, waiting: Boolean(waiting), stale: isStale(s), seen: false, ts: new Date().toISOString() };
+  const check = transition(s, 'end', ctx);
+  if (!check.ok) return { ok: false, code: check.code, error: check.error };
+  const r = lifecycle.apply(sid, 'end', ctx);
+  if (!r.ok && !isEnded(sessionsStore.get(sid))) return { ok: false, code: r.code, error: r.error };
+  try { stopSessionProcesses(check.s, table || undefined); } catch { /* best effort */ }
   return { ok: true };
 }
 

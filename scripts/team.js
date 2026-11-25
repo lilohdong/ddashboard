@@ -30,6 +30,8 @@ const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const config = require('./core/config');
 const sessionsStore = require('./store/sessions');
+const lifecycle = require('./app/lifecycle');
+const { view } = require('./domain/session');
 const lib = require('./lib');
 const orca = require('./orca');
 const terminal = require('./terminal');
@@ -250,15 +252,12 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}${group ? ` group=${group}` : ''}] ${task}`;
 
   // Pre-register so the member shows up at once; its first-prompt hook completes the registration.
-  const now = new Date().toISOString();
-  sessionsStore.update((sessions) => {
-    sessions[sid] = {
+  lifecycle.apply(sid, 'spawn', {
+    fields: {
       session_id: sid, name: flags.role, cwd, branch: lead.branch || '', project: lead.project, project_key: lead.project_key,
-      state: 'working', started: now, last_seen: now, pending: true,
       kind: 'member', role: flags.role, lead: leadSid, stay: Boolean(flags.stay), headless: how === 'headless', runner: how,
-      spawn: { ...opts, cwd }, log: paths.log(sid),
-    };
-    if (group) sessions[sid].group = group;
+      spawn: { ...opts, cwd }, log: paths.log(sid), ...(group ? { group } : {}),
+    },
   });
   const log = slash(paths.log(sid));
   let note = picked.note;
@@ -338,7 +337,7 @@ function cmdSend(leadSid, argv) {
   // Headless member that has finished: resume it with the same options.
   const opts = m.spawn || {};
   const pid = runClaude(sid, ['-p', '--resume', sid, ...claudeArgs(opts)], `[Lead instruction]\n${text}`, opts.cwd || m.cwd || process.cwd());
-  sessionsStore.patch(sid, { pid, state: 'working', last_seen: new Date().toISOString(), ended: undefined });
+  lifecycle.apply(sid, 'resume', { fields: { pid } });
   return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}). Log: ${paths.log(sid).replace(/\\/g, '/')}`;
 }
 
@@ -356,7 +355,7 @@ function sendOrca(leadSid, m, text) {
   const now = new Date().toISOString();
   if (open) {
     orca.sendText(m.orca.handle, `[Lead instruction] ${text.replace(/\s*\r?\n\s*/g, ' ').trim()}`);
-    updateSession(sid, { state: 'working', last_seen: now });
+    lifecycle.apply(sid, 'prompt', { ts: now });
     return `Typed into ${m.role}'s Orca terminal (${sid.slice(0, 8)}, ${m.orca.handle}).`;
   }
   const opts = m.spawn || {};
@@ -365,12 +364,12 @@ function sendOrca(leadSid, m, text) {
   if (orca.available()) {
     try {
       const t = runOrca(sid, ['--resume', sid, ...claudeArgs(opts)], prompt, cwd, `${m.role}${m.group ? ` · ${m.group}` : ''}`);
-      updateSession(sid, { orca: t, state: 'working', last_seen: now }, ['ended', 'end_reason']);
+      lifecycle.apply(sid, 'resume', { ts: now, fields: { orca: t } });
       return `Resumed ${m.role} (${sid.slice(0, 8)}) in a new Orca terminal (${t.handle}).`;
     } catch { /* fall back to headless */ }
   }
   const pid = runClaude(sid, ['-p', '--resume', sid, ...claudeArgs(opts)], prompt, cwd);
-  updateSession(sid, { pid, runner: 'headless', headless: true, state: 'working', last_seen: now }, ['ended', 'end_reason']);
+  lifecycle.apply(sid, 'resume', { ts: now, fields: { pid, runner: 'headless', headless: true } });
   return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}) headless: Orca is not available. Log: ${slash(paths.log(sid))}`;
 }
 
@@ -385,12 +384,12 @@ function resumeWindow(m, text) {
   if (!why) {
     try {
       runWindow(sid, ['--resume', sid, ...claudeArgs(opts)], prompt, cwd, `${m.role}${m.group ? ` · ${m.group}` : ''}`);
-      updateSession(sid, { state: 'working', last_seen: now }, ['ended', 'end_reason']);
+      lifecycle.apply(sid, 'resume', { ts: now });
       return `Resumed ${m.role} (${sid.slice(0, 8)}) in a new terminal window.`;
     } catch (err) { why = err.message; }
   }
   const pid = runClaude(sid, ['-p', '--resume', sid, ...claudeArgs(opts)], prompt, cwd);
-  updateSession(sid, { pid, runner: 'headless', headless: true, state: 'working', last_seen: now }, ['ended', 'end_reason']);
+  lifecycle.apply(sid, 'resume', { ts: now, fields: { pid, runner: 'headless', headless: true } });
   return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}) headless: no terminal window (${why}). Log: ${slash(paths.log(sid))}`;
 }
 
@@ -403,7 +402,7 @@ function cmdList(leadSid) {
   for (const s of members) if (gone.has(s.session_id)) Object.assign(s, { state: 'ended', ended: new Date().toISOString(), end_reason: 'gone' });
   return members.map((s) => {
     const waiting = lib.waitPid(s.session_id);
-    const state = lib.isEnded(s) ? 'ended' : s.headless && s.pid && !alive(s.pid) && !waiting ? 'finished' : s.state || 'idle';
+    const { state } = view(s, { waiting: Boolean(waiting), pidAlive: Boolean(s.pid && alive(s.pid)) });
     let pending = 0;
     try { pending = fs.readdirSync(paths.inbox(s.session_id)).filter((f) => f.endsWith('.json')).length; } catch {}
     const last = s.last_title ? ` | last: ${s.last_status} "${s.last_title}"` : '';
@@ -433,8 +432,7 @@ function endMember(leadSid, key) {
   const shells = Number(m.claude_pid) > 0 ? lib.reapToolShells(Number(m.claude_pid)) : [];
   if (shells.length) done.push(`stopped ${shells.length} tool process(es) left by its dead Claude`);
   if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killTree(Number(m.pid))) done.push(`stopped the headless run and its tool processes (pid ${m.pid})`);
-  const now = new Date().toISOString();
-  updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
+  lifecycle.apply(sid, 'end', { reason: 'stopped' });
   return { sid, role: m.role, done };
 }
 
