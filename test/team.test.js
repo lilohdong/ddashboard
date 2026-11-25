@@ -1075,11 +1075,17 @@ test('BUG-003: end closes a window member\'s shell with everything in it; an end
     assert.equal(lib.alive(parent.pid), false);
     assert.equal(lib.alive(child), false);
     assert.equal(readJson(paths.sessions, {}).W7.end_reason, 'stopped');
-    team.main(['L1', 'end', 'old']);
+    orcaEnv();
+    const all = readJson(paths.sessions, {});
+    Object.assign(all.E7, { runner: 'orca', orca: { handle: 'term_old' }, claude_pid: process.pid, headless: true, pid: process.pid });
+    writeJson(paths.sessions, all);
+    assert.equal(team.main(['L1', 'end', 'old']).out, 'old (E7) is already ended (2026-01-01T00:00:00.000Z); nothing was stopped.');
+    assert.ok(!orcaCalls().some((c) => c[1] === 'close')); // no terminal closed
+    assert.equal(lib.alive(process.pid), true); // no pid killed (the recorded pids are this test process)
     const e = readJson(paths.sessions, {}).E7;
     assert.equal(e.ended, '2026-01-01T00:00:00.000Z');
     assert.equal(e.end_reason, 'gone');
-  } finally { parent.kill(); try { process.kill(child); } catch {} }
+  } finally { orcaOff(); parent.kill(); try { process.kill(child); } catch {} }
 });
 
 test('BUG-003: orca-launch records the window shell and its own pid on the session', () => {

@@ -264,7 +264,7 @@ const server = http.createServer((req, res) => {
       if (!m || m.kind !== 'member' || !m.lead) return send(res, 404, { error: 'not a team member' });
       try {
         const r = team.endMember(m.lead, sid);
-        send(res, 200, { ok: true, done: r.done });
+        send(res, 200, { ok: true, done: r.done, already: Boolean(r.already) });
       } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });
   }

@@ -431,6 +431,8 @@ function endMember(leadSid, key) {
   const m = findMember(sessions, leadSid, key);
   if (!m) throw new Error(`no member "${key}" of this lead. See: list`);
   const sid = m.session_id;
+  // Already ended: nothing is closed or killed (its terminal handle or pids may belong to something else by now).
+  if (lib.isEnded(m)) return { sid, role: m.role, done: [], already: true, ended: m.ended || '' };
   const done = [];
   if (m.runner === 'orca' && m.orca?.handle) {
     try { orca.closeTerminal(m.orca.handle); done.push(`closed its Orca terminal (${m.orca.handle})`); } catch (err) { done.push(`could not close its Orca terminal: ${err.message}`); }
@@ -442,8 +444,7 @@ function endMember(leadSid, key) {
   if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude and its tool processes (pid ${m.claude_pid})`);
   if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killTree(Number(m.pid))) done.push(`stopped the headless run and its tool processes (pid ${m.pid})`);
   const now = new Date().toISOString();
-  // An already ended member keeps its end time and reason.
-  if (!lib.isEnded(m)) updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
+  updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
   return { sid, role: m.role, done };
 }
 
@@ -461,6 +462,7 @@ function windowShell(m) {
 function cmdEnd(leadSid, argv) {
   if (!argv[0]) throw new Error('end needs a member (session id or role).');
   const r = endMember(leadSid, argv.join(' '));
+  if (r.already) return `${r.role} (${r.sid.slice(0, 8)}) is already ended${r.ended ? ` (${r.ended})` : ''}; nothing was stopped.`;
   return `Ended ${r.role} (${r.sid.slice(0, 8)})${r.done.length ? `: ${r.done.join('; ')}` : ' (nothing was running)'}. Its cards stay; send resumes it.`;
 }
 
