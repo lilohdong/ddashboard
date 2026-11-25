@@ -604,6 +604,72 @@ test('server: /api/groups and spawn with a group', async () => {
   fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
 });
 
+// --- language (settings.json, card language, dashboard dictionary) ---
+
+const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
+
+test('i18n: every key in every language, and every key the page uses exists', () => {
+  const keys = Object.keys(i18n.DICT.en);
+  for (const lang of Object.keys(i18n.LANGS)) {
+    assert.deepEqual(Object.keys(i18n.DICT[lang]).sort(), keys.slice().sort(), `keys of ${lang}`);
+    for (const k of keys) {
+      const vars = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
+      assert.equal(vars(i18n.DICT[lang][k]), vars(i18n.DICT.en[k]), `placeholders of ${lang} ${k}`);
+    }
+  }
+  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
+  const used = new Set([
+    ...[...html.matchAll(/\bt\('([\w.]+)'/g)].map((m) => m[1]),
+    ...[...html.matchAll(/data-i18n-\w+="([\w.]+)"/g)].map((m) => m[1]),
+    ...['review', 'blocked', 'wip', 'done'].map((k) => `status.${k}`),
+    ...['working', 'waiting', 'idle', 'ended'].map((k) => `view.${k}`),
+  ]);
+  for (const k of used) assert.ok(k in i18n.DICT.en, `missing key ${k}`);
+  assert.equal(i18n.translate('ko', 'ago.m', { n: 3 }), '3분 전');
+  assert.equal(i18n.translate('zh-CN', 'nope.key'), 'nope.key');
+  assert.equal(i18n.translate('ko', 'card.send'), '보내기');
+  assert.equal(i18n.pickLang(null, 'ko-KR'), 'ko');
+  assert.equal(i18n.pickLang(null, 'zh-TW'), 'zh-CN');
+  assert.equal(i18n.pickLang('en', 'ko-KR'), 'en');
+  assert.equal(i18n.pickLang(null, 'fr'), 'en');
+});
+
+test('card language: rules unchanged without a setting, named language with one, re-injected once on change', () => {
+  teamFixture();
+  const sessions = readJson(paths.sessions, {});
+  const p = readJson(paths.projects, {})[KEY];
+  assert.match(lib.rulesText('S'), /written in the user's language/);
+  assert.doesNotMatch(lib.rulesFor(sessions.M1, p), /written in/);
+  assert.equal(lib.pendingRules('O1'), '');
+  assert.equal(lib.saveSettings({ lang: 'fr' }).ok, false);
+  lib.saveSettings({ lang: 'ko' });
+  assert.match(lib.rulesText('S'), /written in Korean\)/);
+  assert.match(lib.rulesFor(sessions.L1, p), /written in Korean\)/);
+  assert.match(lib.rulesFor(sessions.O1, p), /written in Korean\)/);
+  assert.match(lib.rulesFor(sessions.M1, p), /short summary lines, written in Korean\)/);
+  assert.match(lib.pendingRules('O1'), /card language changed \(now Korean\)/);
+  assert.equal(lib.pendingRules('O1'), '');
+  lib.saveSettings({ lang: 'zh-CN' });
+  assert.match(lib.pendingRules('O1'), /Simplified Chinese/);
+  lib.saveSettings({ lang: null });
+  assert.match(lib.rulesText('S'), /written in the user's language/);
+});
+
+test('server: settings API', async () => {
+  teamFixture();
+  await withServer(async (post, base) => {
+    assert.deepEqual(await (await fetch(`${base}/api/settings`)).json(), { lang: null });
+    assert.equal((await post('/api/settings', { lang: 'ko' }, { Origin: 'http://evil.example' })).status, 403);
+    assert.equal((await post('/api/settings', { lang: 'xx' })).status, 400);
+    assert.deepEqual((await post('/api/settings', { lang: 'zh-CN' })).body, { ok: true, lang: 'zh-CN' });
+    assert.equal((await (await fetch(`${base}/api/state`)).json()).settings.lang, 'zh-CN');
+    assert.equal(readJson(paths.settings, {}).lang, 'zh-CN');
+    const js = await fetch(`${base}/i18n.js`);
+    assert.match(js.headers.get('content-type'), /javascript/);
+    assert.match(await js.text(), /DDASH_I18N/);
+  });
+});
+
 // --- run ---
 
 (async () => {
