@@ -1,6 +1,6 @@
 // projects.json: { projectKey: project }. Every write goes through update (lock + re-read).
 // Lock order when both files change: projects, then sessions (never the other way round).
-// lib.readProjects adds the pre-M-1b migration on top of read().
+// app/teams.js readProjects adds the migration of projects without teams (store/migrate.js projects) on top of read().
 const { paths } = require('../core/paths');
 const { mapStore } = require('./record');
 

@@ -2,6 +2,7 @@
 // projects.json[key].teams = { <name>: { lead, worktree, groups, created } }. A repo can have several teams. Each
 // has one lead session; its members report only to that lead. A handoff changes only lead; name, worktree and
 // groups stay. mode is 'team' while any team is left.
+const path = require('path');
 const { clearLeadContext } = require('./lead-context');
 const { isEnded } = require('./session');
 
@@ -128,8 +129,62 @@ function removeTeamsIn(projects, sessions, key, names) {
   return { ok: true, removed: list, mode: p.mode, mode_ver: p.mode_ver };
 }
 
+// Projects written before M-1b (one lead per project: lead, lead_name, groups) become one team named after
+// lead_name; docs/groups/<g>/ moves to docs/teams/<team>/<g>/ inside the worktree that holds docs/groups/ (which
+// becomes the team's worktree, even if the lead has moved since). A group folder in another worktree is not moved:
+// it keeps its path and the lead is told once. Bumps mode_ver so running sessions get the new instructions.
+// A 0.2.x project (no teams) just gets teams: {}. The file and git work is done by io (app/teams.js):
+//   io = { exists(dir), worktreeRoot(dir), teamDir(team, name), moveDir(from, to), ensureGroupDir(dir, g),
+//          rmdir(dir), notify(lead, title) }
+// Returns true if p changed. store/migrate.js decides when it runs.
+const slash = (s) => String(s).replace(/\\/g, '/');
+const needsTeams = (p) => Boolean(p) && typeof p === 'object' && !(p.teams && typeof p.teams === 'object');
+function migrateProject(p, sessions, io) {
+  if (!needsTeams(p)) return false;
+  p.teams = {};
+  if (p.mode === 'team' && p.lead) {
+    const name = teamSlug(p.lead_name) || 'team1';
+    const groups = Object.entries(p.groups && typeof p.groups === 'object' ? p.groups : {}).filter(([g]) => GROUP_NAME.test(g));
+    const existing = groups.map(([, g]) => g?.dir).filter((d) => d && io.exists(d));
+    const base = existing[0] || own(sessions, p.lead)?.cwd || p.cwd;
+    const team = { lead: p.lead, worktree: io.worktreeRoot(base), groups: {} };
+    if (p.handoff) team.handoff = p.handoff;
+    if (p.last_handoff) team.last_handoff = p.last_handoff;
+    const oldRoots = new Set();
+    const skipped = [];
+    for (const [g, conf] of groups) {
+      if (sameName(team.groups, g)) continue;
+      let dir = slash(path.join(io.teamDir(team, name), g));
+      try {
+        if (conf?.dir && io.exists(conf.dir) && !io.exists(dir)) {
+          if (io.worktreeRoot(conf.dir).toLowerCase() !== team.worktree.toLowerCase()) {
+            dir = slash(conf.dir); // another worktree: a move would leave deletions in its index
+            skipped.push(`${g} (${dir})`);
+          } else {
+            io.moveDir(conf.dir, dir);
+            oldRoots.add(path.dirname(conf.dir));
+          }
+        }
+        io.ensureGroupDir(dir, g);
+      } catch (err) {
+        dir = slash(conf?.dir || dir);
+        skipped.push(`${g} (${err.message})`);
+      }
+      team.groups[g] = { ...conf, dir };
+    }
+    // Drop the old docs/groups/ folder if nothing is left in it.
+    for (const d of oldRoots) io.rmdir(d);
+    p.teams[name] = team;
+    p.mode_ver = (Number(p.mode_ver) || 0) + 1;
+    if (skipped.length) io.notify(p.lead, `group folders not moved to docs/teams/${name}/ (move them by hand in their worktree): ${skipped.join(', ')}`);
+  }
+  for (const k of ['lead', 'lead_name', 'groups', 'handoff', 'last_handoff']) delete p[k];
+  syncMode(p);
+  return true;
+}
+
 module.exports = {
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, DEFAULT_TEAM_RULES, TEAM_NAME, GROUP_NAME, GROUP_NAME_ERROR, GROUP_DEFAULTS,
   badGroupName, groupSettings, isEnded, teamsOf, own, sameName, hasTeams, teamOfLead, teamOfSession, teamSlug,
-  nextTeamName, teamMembers, teamRole, routeCard, syncMode, bumpMode, addTeamIn, removeTeamsIn,
+  nextTeamName, teamMembers, teamRole, routeCard, syncMode, bumpMode, addTeamIn, removeTeamsIn, needsTeams, migrateProject,
 };

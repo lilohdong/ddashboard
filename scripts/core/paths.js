@@ -25,6 +25,7 @@ const paths = {
   locksDir: path.join(BOARD_DIR, 'locks'), // core/lock
   replies: path.join(BOARD_DIR, 'replies.jsonl'),
   sessions: path.join(BOARD_DIR, 'sessions.json'),
+  meta: path.join(BOARD_DIR, 'meta.json'), // board schema version (store/meta)
   projects: path.join(BOARD_DIR, 'projects.json'),
   serverPid: path.join(BOARD_DIR, 'server.pid'),
   serverLog: path.join(BOARD_DIR, 'server.log'),

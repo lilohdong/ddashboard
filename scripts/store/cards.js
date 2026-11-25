@@ -6,14 +6,15 @@ const path = require('path');
 const { paths } = require('../core/paths');
 const { appendJsonl } = require('../core/fsx');
 const { mapStore } = require('./record');
+const { legacyCardFiles } = require('./migrate');
 
 const NL = 0x0a;
 
-// Card log files, oldest first: the 0.1.0 file, then the monthly files.
+// Card log files, oldest first: the 0.1.0 file (store/migrate.js), then the monthly files.
 function files() {
   let monthly = [];
   try { monthly = fs.readdirSync(paths.cardsDir).filter((f) => /^\d{4}-\d{2}\.jsonl$/.test(f)).sort(); } catch {}
-  return [paths.legacyCards, ...monthly.map((f) => path.join(paths.cardsDir, f))];
+  return [...legacyCardFiles(), ...monthly.map((f) => path.join(paths.cardsDir, f))];
 }
 
 // New cards go to the monthly file only; the 0.1.0 cards.jsonl is never written again.
