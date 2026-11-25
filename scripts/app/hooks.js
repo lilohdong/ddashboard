@@ -11,7 +11,7 @@ const {
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
   rulesUpdate, pruneGroup, leadContextNotice, checkBriefs, teamRole, teamOfSession, own, newId, waitLockPath, stopWaiter,
 } = require('../lib');
-const control = require('../control');
+const control = require('./server-control');
 const sessionsStore = require('../store/sessions');
 const { clone } = require('../store/record');
 const { log } = require('../core/log');
