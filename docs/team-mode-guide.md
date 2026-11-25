@@ -28,6 +28,18 @@ What a team costs is roughly **how often a session wakes up × how big its conte
    ```
    Use `--model` for a lighter model on simple roles (QA, docs). Use `--stay` only for a member that should keep waiting for instructions; by default a member finishes and exits, and `send` resumes it later.
 
+## Groups
+
+Members are cheapest when they are short-lived (small context) but then each new one starts from zero. A **group** gives them a memory instead:
+
+1. `team.js <lead id> group create front` makes `docs/groups/front/` in the lead's worktree with a `brief.md` template. Fill in the scope, the key files, the rules and the current state. Keep it under about 4000 tokens: it is put into every new member, and the lead is told when it has to be cut.
+2. `team.js <lead id> spawn --group front --role ui "..."` starts a member that gets the brief and the latest handoff before its task. The hook puts them in at session start, ahead of the task, so every member of the group starts with the same text and can share the prompt cache (this only works for members started in the same worktree and commit).
+3. When a member finishes, it writes the next `handoff-NNN.md` (what was done, open items, where things are), updates `brief.md` if the facts changed, and keeps evidence in `notes/`. The next member continues from there.
+4. Old files are cleaned up as new ones are written: the newest 3 handoffs and 30 days of notes stay (`keep_handoffs`, `notes_days`; `group prune` to run it by hand). Git still has the history.
+5. The lead commits `docs/groups/` with its other docs. Members never commit these files.
+
+Groups are optional; members without one are listed as `unassigned`. `role` stays as a sub-role inside a group.
+
 ## Working
 
 - **Reports** arrive at the lead as `[Team report]` through its wait command. A report has the status, title, up to 3 summary lines and what to check. Long details stay on the card; the lead reads them with `team.js <lead id> show <card id>` only when needed.
