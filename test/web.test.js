@@ -304,6 +304,23 @@ test('server: serves the page, i18n.js, every web module and the style sheet wit
   } finally { srv.kill(); }
 });
 
+// verify-009 F2: each status badge has its own colour, distinct from the others, in light and dark.
+test('style: every status badge has its own colour token in light and dark', async () => {
+  const css = fs.readFileSync(path.join(WEB, 'style.css'), 'utf8');
+  const { STATUS_KEYS } = await imp('format.mjs');
+  const dark = css.slice(css.indexOf('prefers-color-scheme: dark'));
+  const light = css.slice(0, css.indexOf('prefers-color-scheme: dark'));
+  for (const [name, part] of [['light', light], ['dark', dark]]) {
+    const colours = STATUS_KEYS.map((k) => {
+      const m = part.match(new RegExp(`--${k}: (#[0-9a-f]{6});`));
+      assert.ok(m, `${name} --${k}`);
+      return m[1];
+    });
+    assert.equal(new Set(colours).size, STATUS_KEYS.length, `${name}: ${colours}`);
+  }
+  for (const k of STATUS_KEYS) assert.ok(css.includes(`.s-${k} { color: var(--${k}); }`), k);
+});
+
 (async () => {
   M = {
     state: await imp('ui-state.mjs'),
