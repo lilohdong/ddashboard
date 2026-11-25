@@ -40,8 +40,15 @@ function available() {
 
 // Open a visible terminal in the Orca worktree that contains dir and run command in it.
 // Returns { handle, pane }. Throws when Orca refuses (e.g. dir is not in an Orca worktree).
+// Orca's path: selector matches a worktree root only, so a subfolder cwd (e.g. <repo>/scripts) is mapped to its git root.
+function worktreeRoot(dir) {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString('utf8').trim() || dir;
+  } catch { return dir; }
+}
+
 function openTerminal({ cwd, title, command }) {
-  const r = run(['terminal', 'create', '--worktree', `path:${slash(cwd)}`, '--title', title, '--command', command, '--json']);
+  const r = run(['terminal', 'create', '--worktree', `path:${slash(worktreeRoot(cwd))}`, '--title', title, '--command', command, '--json']);
   const t = r.ok && r.result?.terminal;
   if (!t?.handle) throw new Error(`orca terminal create failed: ${errText(r)}`);
   return { handle: t.handle, pane: t.paneKey || '' };
