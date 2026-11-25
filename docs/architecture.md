@@ -1,6 +1,7 @@
 # ddashboard architecture
 
-Status: proposal (role `arch`, 2026-11-26, branch `feature/team-mode`). Written against commit 95f4866 plus the
+Status: approved by the master 2026-11-26 (design and all §7 recommendations). Author: role `arch`, branch
+`feature/team-mode`. Written against commit 95f4866 plus the
 BUG-005 design in `docs/qa/bug-005-orphan-processes.md` (F-1..F-9), which is assumed to land first.
 
 Contents: 1 current state · 2 problems · 3 target architecture · 4 state machines · 5 data model · 6 refactor plan ·
@@ -454,9 +455,64 @@ extraction to `test/helpers.js` in step 0). `stop-card.js` is touched by A (card
 first in that file, or A only replaces the `parseCard` call. i18n.js additions: one block per track at the end of
 each language table.
 
+### 6.1 Track briefs (after step 3)
+
+Common to every track: start from the commit that finishes step 3; keep `node test/run.js` green on every commit;
+move code out of `lib.js` in one small commit per section and leave a re-export; add tests only in the track's own
+test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared files and their owner for edits:
+`lib.js` (everyone may only *remove* their own section), `i18n.js` (append your keys at the end of each language),
+`stop-card.js` (B first, then A), `dashboard.html` / `web/*` (D, then A's card UI).
+
+**Track A — cards** (steps 6, 7; on the 0.3.0 path)
+- Owns: `scripts/domain/card.js`, `scripts/cards.js` (→ `store/cards.js` + lifecycle use), `scripts/domain/rules.js`,
+  card parsing in `scripts/hooks/stop-card.js`, `web/render-cards.mjs` (after D) or the card part of
+  `dashboard.html` (if D has not landed).
+- Tests: `test/cards.test.js` (all §4.2 cases: wip→done fold, wip→wip→review chain, ended → stopped, resume after
+  stopped, key beats stopped, archive override, urgency uses outcome, parseCard fixtures), `test/rules.test.js`
+  (text snapshot hash ⇒ `RULES_TEXT_VER` bump).
+- Done when: the §4.2 rules hold in `/api/state` and `/api/search` (`folded_into`, `outcome`, `stopped` computed,
+  never stored); the dashboard shows folded cards under the newer card and stopped wip cards; nothing new written to
+  card files; rules texts live only in `domain/rules.js`, version stamping in one function.
+
+**Track B — lifecycle** (steps 4, 5, 10; on the 0.3.0 path)
+- Owns: `scripts/domain/session.js`, `scripts/proc/supervisor.js`, `scripts/app/server-state.js`, `scripts/app/hooks.js`,
+  the state/gone parts of `scripts/server.js`, `scripts/hooks/*.js` (state writes; card part stays A's).
+- Tests: `test/session.test.js` (table-driven transitions incl. illegal events; `view()` parity with old
+  server/`team list` output), `test/supervisor.test.js` (fake process table: gone within one tick, sweep of any
+  plugin version, identity check before kill), `/api/state` leaves `sessions.json` mtime unchanged, `test/hooks.test.js`
+  (`onStop` with fixture transcripts, hook error → exit 0 + log line).
+- Done when: every write of `state`/`ended`/`end_reason` goes through `transition()`; entering `ended` always calls
+  `supervisor.stop`; `GET /api/state` is read-only; gone detection covers solo/lead/outside/member; hook files are
+  ≤ 15 lines each.
+
+**Track C — team** (steps 8, 9)
+- Owns: `scripts/domain/{team,tags,messages,lead-context}.js`, `scripts/app/{members,handoff,groups}.js`,
+  `scripts/runners/*` (from `orca.js`, `terminal.js`, headless and claude-command code in `team.js`), `scripts/team.js`,
+  `scripts/orca-launch.js`, the team/group routes' calls in `server.js`.
+- Tests: `test/groups.test.js` (group and handoff tests moved out of `team.test.js` unchanged), `test/members.test.js`
+  (spawn/send/end per runner through `app/members.js` with the fake orca/window launchers), layer test: no entry point
+  requires another.
+- Done when: `team.js` is a CLI only (argument parsing + printing); `server.js` and `orca-launch.js` do not require
+  `team.js`; all team/group/handoff code is out of `lib.js`; process kills go through `supervisor.stop` (B's API; if
+  B is not done yet, call the step-3 `proc/kill` and leave a TODO for B).
+
+**Track D — front end** (step 12; may start right after step 0)
+- Owns: `scripts/web/*` (new), `scripts/dashboard.html` (deleted at the end), the static-file route in `server.js`.
+- Tests: `test/web.test.js` (`import()` each pure render module, fixtures: folded card, urgent, ended session,
+  search results), server serves `/`, `/i18n.js`, every `/web/*.mjs` and `/web/style.css` with the right MIME and
+  nothing outside the whitelist; the BUG-004 repro (`docs/teams/skill-ddashboard/qa/notes/verify-007-repro-b.mjs`)
+  still passes.
+- Done when: no inline script left; render modules are pure (`(state, ui, t) -> html`), no global mutable state
+  outside `ui-state.mjs`; the dashboard looks and behaves the same (light and dark screenshots compared by hand).
+
+Steps 11 (router) and 13 (schema/migrations, delete `lib.js`) are assigned after B and C are done.
+
 ---
 
-## 7. Open questions for the master
+## 7. Decisions (were: open questions for the master)
+
+**Decided 2026-11-26: the master accepted every recommendation below.** They are binding for the refactor; the
+question text is kept for the record.
 
 1. **Folding scope.** Should a newer card fold *all* older open `wip` cards of the session, or only those with the
    same `key` when keys are used? — *Recommend all of the session's open wip cards (as approved); keys keep their own
