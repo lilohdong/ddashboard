@@ -18,12 +18,9 @@ const {
 
 const sessionsStore = require('../store/sessions');
 const { clone } = require('../store/record');
+const { parseCard } = require('../domain/card');
 
-const MAX_DETAILS = 4000;
 const MAX_MARK_IDS = 500;
-const KEY_RE = /^[a-z0-9_-]{1,60}$/; // card "key": a task name; anything else is dropped, the card is kept
-// Lowercased, with spaces as '-', before the check ("Login Fix" -> "login-fix").
-const normKey = (k) => k.trim().toLowerCase().replace(/\s+/g, '-');
 
 // Assistant text after the last human input.
 function lastTurnText(rows) {
@@ -59,66 +56,6 @@ function recordUsage(s, sid, rows) {
   s.usage = Object.fromEntries(USAGE_KEYS.map((k) => [k, (Number(total[k]) || 0) + u[k]]));
   s.usage.turns = (Number(total.turns) || 0) + 1;
   s.last_context = u.context;
-}
-
-// Escape raw control characters that appear inside JSON string literals (models often write
-// multi-line "details" with real newlines). Characters outside strings are left as they are.
-function escapeControlsInStrings(raw) {
-  let out = '';
-  let inString = false;
-  let escaped = false;
-  for (const ch of raw) {
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === '"') inString = false;
-      else if (ch === '\n') { out += '\\n'; continue; }
-      else if (ch === '\r') { out += '\\r'; continue; }
-      else if (ch === '\t') { out += '\\t'; continue; }
-    } else if (ch === '"') inString = true;
-    out += ch;
-  }
-  return out;
-}
-
-function parseJsonLenient(raw) {
-  try { return JSON.parse(raw); } catch { return JSON.parse(escapeControlsInStrings(raw)); }
-}
-
-// Body of the last ```card block. A ``` inside the JSON (e.g. a code block in "details") is not the
-// closing fence, so try each following ``` in turn and take the first one that leaves valid JSON.
-function cardBody(text) {
-  const s = String(text);
-  const opens = [...s.matchAll(/```card[ \t]*\r?\n/g)];
-  if (!opens.length) return null;
-  const start = opens[opens.length - 1].index + opens[opens.length - 1][0].length;
-  let first = null;
-  for (let end = s.indexOf('```', start); end !== -1; end = s.indexOf('```', end + 3)) {
-    const raw = s.slice(start, end).trim();
-    if (first == null) first = raw;
-    try { parseJsonLenient(raw); return raw; } catch { /* not the closing fence */ }
-  }
-  return first ?? s.slice(start).trim();
-}
-
-function parseCard(text) {
-  const raw = cardBody(text);
-  if (raw == null) return null;
-  try {
-    const c = parseJsonLenient(raw);
-    const card = {
-      status: String(c.status || 'done'),
-      title: String(c.title || '(untitled)').slice(0, 200),
-      summary: [].concat(c.summary || []).map(String).slice(0, 3),
-      review: [].concat(c.review || []).map(String).slice(0, 5),
-    };
-    if (c.details != null && String(c.details).trim()) card.details = String(c.details).slice(0, MAX_DETAILS);
-    if (c.replaces === 'last') card.replaces = 'last';
-    if (typeof c.key === 'string' && KEY_RE.test(normKey(c.key))) card.key = normKey(c.key);
-    return card;
-  } catch {
-    return { status: 'done', title: raw.split('\n')[0].slice(0, 200), summary: raw.split('\n').slice(1, 4), review: [] };
-  }
 }
 
 (async () => {

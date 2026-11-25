@@ -9,6 +9,7 @@ const { git, gitOrNull: gitIn } = require('./core/git');
 const { newId } = require('./core/ids');
 const sessionsStore = require('./store/sessions');
 const projectsStore = require('./store/projects');
+const cardsStore = require('./store/cards');
 const { alive, parseProcessList, processTable, processTableAsync, isClaudeProcess, findClaudePid, processName, napUntil } = require('./proc/table');
 const { killPid, descendants, killTree, killClaude } = require('./proc/kill');
 
@@ -94,18 +95,6 @@ function setState(sid, state) {
 
 function isRegistered(sid) {
   return Boolean(sessionsStore.get(sid));
-}
-
-// Card log files, oldest first: the 0.1.0 file, then the monthly files.
-function cardFiles() {
-  let monthly = [];
-  try { monthly = fs.readdirSync(paths.cardsDir).filter((f) => /^\d{4}-\d{2}\.jsonl$/.test(f)).sort(); } catch {}
-  return [paths.legacyCards, ...monthly.map((f) => path.join(paths.cardsDir, f))];
-}
-
-// New cards go to the monthly file only; the 0.1.0 cards.jsonl is never written again.
-function appendCard(card) {
-  appendJsonl(paths.cardsFor(card.ts), card);
 }
 
 // Usage log files (usage/YYYY-MM.jsonl), oldest first.
@@ -1478,6 +1467,9 @@ function leadContextNotice(s, p, opts = {}) {
 }
 
 const replacedText = (s) => `[ddashboard] This session was replaced as team lead by ${s.replaced_by} (handoff). Stop working now: no more tool calls or file changes. Start a new session for other work.`;
+
+const cardFiles = cardsStore.files; // moved to store/cards.js
+const appendCard = cardsStore.append;
 
 module.exports = {
   BOARD_DIR, PORT, URL, RECENT_DAYS, paths, cardFiles, appendCard, ensureWaitBin, ensureTeamBin,
