@@ -8,20 +8,10 @@
 
 AI는 사람이 따라가기 어려울 만큼 빠르게 개발하고, 터미널에는 읽기 벅찬 양의 글을 남깁니다. ddashboard는 그중 **사람이 알아야 할 것만** 남깁니다. 카드에는 상태, 핵심 요약 3줄, 확인할 것이 들어갑니다. 사람은 대시보드만 보고, 카드에 답글을 달아 그 세션에 다음 일을 시킵니다.
 
-```
-┌─ DDashboard ───────────┬─ All ─────────── All 6 · Needs review 2 · Blocked 1 · Done 2 ─┐
-│ All                  2 │                                                              │
-│                        │ [Needs review] 로그인 토큰 만료 처리 추가                     │
-│ shop                 1 │ shop · api · feature/auth · 3 files changed, 42 (+)          │
-│  ◉ api  needs you      │  • 만료 시 refresh 토큰으로 재발급                            │
-│    feature/auth·Working│  • 테스트 4개 추가, 전부 통과                                 │
-│  ● web                 │  ┃ Check: 만료 시간 30분이 맞는지                              │
-│    login-ui·Listening  │  ┌─────────────────────────────────────────┐ ┌──────┐         │
-│ blog                 1 │  │ 1시간으로 바꾸고 커밋해줘                  │ │ Send │         │
-│  ● blog  needs you     │  └─────────────────────────────────────────┘ └──────┘         │
-│    feature/rss·Idle    │                                                              │
-└────────────────────────┴──────────────────────────────────────────────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
+  <img alt="ddashboard: 사이드바에 프로젝트별로 묶인 세션, 오른쪽에 답글 창이 달린 결과 카드" src="assets/screenshot-light.png">
+</picture>
 
 화면 문구는 영어이고, 카드 내용은 사용자가 쓰는 언어로 작성됩니다. 한국어로 대화하면 카드도 한국어로 나옵니다.
 
