@@ -24,3 +24,7 @@ Not checked: real windows on macOS/Linux (only the launcher arguments are tested
 9. Linux: `... || { echo ...; read x; }` keeps a failed window open.
 
 Not checked: a real window on any OS (it would open a window on the user's screen). Tests 74/74, QA 7/7.
+
+## Server: Orca checks without blocking (8b8cb52 follow-up)
+
+`/api/state` no longer runs the orca CLI synchronously. `server.js terminalOpen` returns the cached state (null = not known yet, so nobody is marked gone) and refreshes a stale entry (10 s) in the background with `orca.terminalOpenAsync` (execFile callback, one call per handle at a time). A closed terminal is noticed on a later poll. CLI commands (`team.js list`) keep the blocking `orca.terminalOpen`. Test: a fake orca that takes 1.5 s; `/api/state` answers in under 1 s and the member turns `ended` shortly after.

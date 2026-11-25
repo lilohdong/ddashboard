@@ -5,7 +5,7 @@
 //   orca terminal show --terminal <h> --json   -> result.terminal.writable (false once the terminal is closed)
 //   orca terminal send --terminal <h> --text <t> --enter --json -> result.send.accepted
 // DDASH_ORCA=0 turns Orca off. DDASH_ORCA_BIN overrides the orca command (a .js file runs with node; tests).
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 
 const slash = (p) => String(p).replace(/\\/g, '/');
 
@@ -61,12 +61,29 @@ function writable(handle) {
   return Boolean(r.ok && r.result?.terminal?.writable);
 }
 
-// Is the terminal open? true | false (closed, orphaned or unknown to Orca) | null (Orca off or not answering).
+// Like run, without blocking: cb(reply).
+function runAsync(args, timeout, cb) {
+  const { file, pre } = orcaCommand();
+  execFile(file, [...pre, ...args], { windowsHide: true, timeout }, (err, stdout, stderr) => {
+    try { return cb(JSON.parse(String(stdout || ''))); } catch { /* not json */ }
+    if (err) return cb({ ok: false, error: { message: String(stderr || err.message || err).trim().split(/\r?\n/)[0] } });
+    cb({ ok: false, error: { message: 'unexpected orca output' } });
+  });
+}
+
+// Terminal state from an orca reply: true | false (closed, orphaned or unknown to Orca) | null (cannot tell).
+const openFrom = (r) => (r.ok ? Boolean(r.result?.terminal?.writable) : /unknown terminal|not found|no such terminal/i.test(errText(r)) ? false : null);
+
+// Is the terminal open? true | false | null (Orca off or not answering). Blocks: for CLI commands.
 function terminalOpen(handle) {
   if (disabled() || !handle) return null;
-  const r = run(['terminal', 'show', '--terminal', handle, '--json'], 5000);
-  if (r.ok) return Boolean(r.result?.terminal?.writable);
-  return /unknown terminal|not found|no such terminal/i.test(errText(r)) ? false : null;
+  return openFrom(run(['terminal', 'show', '--terminal', handle, '--json'], 5000));
+}
+
+// Same, without blocking (the dashboard server): cb(true | false | null).
+function terminalOpenAsync(handle, cb) {
+  if (disabled() || !handle) return void cb(null);
+  runAsync(['terminal', 'show', '--terminal', handle, '--json'], 5000, (r) => cb(openFrom(r)));
 }
 
 // Close a terminal (stops what runs in it).
@@ -83,4 +100,4 @@ function sendText(handle, text) {
   return true;
 }
 
-module.exports = { run, available, openTerminal, writable, terminalOpen, closeTerminal, sendText, orcaCommand, worktreeRoot };
+module.exports = { run, available, openTerminal, writable, terminalOpen, terminalOpenAsync, closeTerminal, sendText, orcaCommand, worktreeRoot };

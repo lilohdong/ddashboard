@@ -88,14 +88,18 @@ function teams(projects, sessions) {
 
 const projectKeyOf = (projects, sessions, name) => (own(projects, name) ? name : own(teams(projects, sessions), name)?.key);
 
-// Orca terminal state per handle, cached for a few seconds (each check runs the orca CLI).
-const termCache = new Map();
+// Orca terminal state per handle, never blocking a request: the cached answer is returned (null = not known
+// yet, so nobody is marked gone) and a stale or missing entry is refreshed in the background (orca CLI, async).
+const TERM_TTL = 10000;
+const termCache = new Map(); // handle -> { open, ts, busy }
 function terminalOpen(handle) {
-  const hit = termCache.get(handle);
-  if (hit && Date.now() - hit.ts < 10000) return hit.open;
-  const open = orca.terminalOpen(handle);
-  termCache.set(handle, { open, ts: Date.now() });
-  return open;
+  const hit = termCache.get(handle) || { open: null, ts: 0, busy: false };
+  if (!hit.busy && Date.now() - hit.ts >= TERM_TTL) {
+    hit.busy = true;
+    termCache.set(handle, hit);
+    orca.terminalOpenAsync(handle, (open) => termCache.set(handle, { open, ts: Date.now(), busy: false }));
+  }
+  return hit.open;
 }
 
 function waiting(sid) {

@@ -611,6 +611,7 @@ function fakeOrca() {
   fs.writeFileSync(file, `const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_ORCA_LOG, JSON.stringify(a) + '\\n');
+if (process.env.FAKE_ORCA_SLOW_MS) { const end = Date.now() + Number(process.env.FAKE_ORCA_SLOW_MS); while (Date.now() < end); }
 const out = (o) => console.log(JSON.stringify(o));
 const cmd = a.slice(0, 2).join(' ');
 if (a[0] === 'status') out({ ok: true, result: { runtime: { reachable: process.env.FAKE_ORCA_UP === '1' } } });
@@ -1019,6 +1020,30 @@ test('BUG-001: POST /api/team/end stops a member; non-members are refused', asyn
     assert.equal(r.body.ok, true);
   });
   assert.equal(readJson(paths.sessions, {}).M1.end_reason, 'stopped');
+});
+
+test('BUG-001: the server checks Orca terminals in the background (a slow orca never blocks /api/state)', async () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.V9 = session('V9', { kind: 'member', role: 'ui', lead: 'L1', runner: 'orca', headless: false, orca: { handle: 'term_gone' } });
+  writeJson(paths.sessions, s);
+  orcaEnv({ writable: false });
+  process.env.FAKE_ORCA_SLOW_MS = '1500';
+  try {
+    await withServer(async (_post, base) => {
+      const t0 = Date.now();
+      const first = (await (await fetch(`${base}/api/state`)).json()).sessions.V9;
+      assert.ok(Date.now() - t0 < 1000, `/api/state took ${Date.now() - t0} ms`);
+      assert.equal(first.view, 'idle'); // not known yet: never guessed gone
+      let view = first.view;
+      for (let i = 0; i < 40 && view !== 'ended'; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        view = (await (await fetch(`${base}/api/state`)).json()).sessions.V9.view;
+      }
+      assert.equal(view, 'ended');
+    });
+    assert.equal(readJson(paths.sessions, {}).V9.end_reason, 'gone');
+  } finally { delete process.env.FAKE_ORCA_SLOW_MS; orcaOff(); }
 });
 
 test('BUG-001: memberGone never guesses: live wait command, no pid, unknown terminal state', () => {
