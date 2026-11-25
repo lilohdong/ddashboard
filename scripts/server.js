@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Local dashboard server (no model calls)
-//   GET  /            dashboard page
+//   GET  /            dashboard page (GET /i18n.js: its text in en, ko, zh-CN)
+//   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
 //                     token usage (usage_total for connected sessions, usage_today), context_warn,
 //                     teams (mode, lead and groups per project). ?reports=1 also returns member reports (via_lead cards).
@@ -17,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
-  isEnded, forgetSessions, markEnded, deliver, STALE_MIN,
+  isEnded, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -26,6 +27,7 @@ const team = require('./team');
 const CONTEXT_WARN = Number(process.env.DDASH_CONTEXT_WARN) || 150000;
 
 const HTML = path.join(__dirname, 'dashboard.html');
+const I18N = path.join(__dirname, 'i18n.js');
 const MAX_BODY = 64 * 1024;
 
 function send(res, code, body, type = 'application/json; charset=utf-8') {
@@ -85,6 +87,23 @@ const server = http.createServer((req, res) => {
     return send(res, 200, fs.readFileSync(HTML, 'utf8'), 'text/html; charset=utf-8');
   }
 
+  if (req.method === 'GET' && url.pathname === '/i18n.js') {
+    return send(res, 200, fs.readFileSync(I18N, 'utf8'), 'text/javascript; charset=utf-8');
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/settings') {
+    return send(res, 200, { lang: readSettings().lang || null });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/settings') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const r = saveSettings({ lang: msg.lang || null });
+      if (!r.ok) return send(res, 400, { error: r.error });
+      send(res, 200, { ok: true, lang: r.settings.lang || null });
+    });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const sessions = readJson(paths.sessions, {});
     const projects = readJson(paths.projects, {});
@@ -111,6 +130,7 @@ const server = http.createServer((req, res) => {
       usage_today,
       context_warn: CONTEXT_WARN,
       stale_min: STALE_MIN,
+      settings: { lang: readSettings().lang || null },
     });
   }
 

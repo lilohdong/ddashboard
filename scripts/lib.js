@@ -17,6 +17,7 @@ const paths = {
   archived: path.join(BOARD_DIR, 'archived.json'),
   waitBin: path.join(BOARD_DIR, 'bin', 'wait.js'),
   teamBin: path.join(BOARD_DIR, 'bin', 'team.js'),
+  settings: path.join(BOARD_DIR, 'settings.json'),
   logsDir: path.join(BOARD_DIR, 'logs'),
   log: (sid) => path.join(BOARD_DIR, 'logs', `${safeId(sid)}.log`),
   replies: path.join(BOARD_DIR, 'replies.jsonl'),
@@ -293,11 +294,34 @@ const ensureWaitBin = () => ensureBin(paths.waitBin, path.join(__dirname, 'wait-
 const ensureTeamBin = () => ensureBin(paths.teamBin, path.join(__dirname, 'team.js'));
 const slash = (p) => p.replace(/\\/g, '/');
 
+// --- Settings (settings.json): lang = dashboard and card language, ver bumps on each change ---
+
+const LANG_NAMES = { en: 'English', ko: 'Korean', 'zh-CN': 'Simplified Chinese' };
+
+function readSettings() {
+  const s = readJson(paths.settings, {});
+  return s && typeof s === 'object' ? s : {};
+}
+
+// Set (or clear with null/'') the language. Sessions get their instructions again once (see rulesUpdate).
+function saveSettings({ lang } = {}) {
+  if (lang && !LANG_NAMES[lang]) return { ok: false, error: `lang must be one of ${Object.keys(LANG_NAMES).join(', ')}` };
+  const s = readSettings();
+  if ((s.lang || '') === (lang || '')) return { ok: true, settings: s };
+  if (lang) s.lang = lang; else delete s.lang;
+  s.ver = (Number(s.ver) || 0) + 1;
+  writeJson(paths.settings, s);
+  return { ok: true, settings: s };
+}
+
+// "written in ..." for cards: the chosen language, or the user's language when none is set.
+const cardLanguage = () => LANG_NAMES[readSettings().lang] || "the user's language";
+
 // Instructions injected into the session context. They are re-read every turn, so keep them short.
 function rulesText(sid) {
   const wait = `node "${slash(ensureWaitBin())}" ${sid}`;
   return `[ddashboard] The user follows your progress on a dashboard (${URL}). Session ID: ${sid}
-- Only on turns with a result the user should know about, end your reply with this block (JSON, at most 3 summary lines, written in the user's language):
+- Only on turns with a result the user should know about, end your reply with this block (JSON, at most 3 summary lines, written in ${cardLanguage()}):
 \`\`\`card
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the user should check"],"details":"optional, markdown, longer content"}
 \`\`\`
@@ -323,7 +347,7 @@ function memberRulesText(sid, s, g) {
   const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), write the next handoff-NNN.md there (highest number + 1, 3 digits): what was done, open items, where things are. Update brief.md if its facts changed. Keep evidence in notes/. Don't commit; the lead does.
 ` : '';
   return `[ddashboard] You are a team member. Role: ${s.role || 'member'}${s.group ? `, group: ${s.group}` : ''}. Session ID: ${sid}. Your lead assigns the work; messages from the lead arrive as [Lead instruction].
-- End each turn that finishes, blocks or changes your task with this block (JSON, at most 3 short summary lines). It goes to your lead, not the user:
+- End each turn that finishes, blocks or changes your task with this block (JSON, at most 3 short summary lines${readSettings().lang ? `, written in ${cardLanguage()}` : ''}). It goes to your lead, not the user:
 \`\`\`card
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the lead should check"],"details":"optional and short"}
 \`\`\`
@@ -375,18 +399,25 @@ function injectRules(sid) {
   if (!s) return rulesText(sid);
   const p = readJson(paths.projects, {})[s.project_key];
   s.rules_ver = Number(p?.mode_ver) || 0;
+  s.lang_ver = Number(readSettings().ver) || 0;
   writeJson(paths.sessions, sessions);
   return rulesFor(s, p);
 }
 
 // The instructions again, once, if the project's mode changed since they were last given ('' otherwise).
 // Works on the given objects; the caller saves the session.
+// Also after a change of the card language (settings.ver).
 function rulesUpdate(s, p) {
   if (!s || !p) return '';
   const ver = Number(p.mode_ver) || 0;
-  if ((Number(s.rules_ver) || 0) === ver) return '';
+  const langVer = Number(readSettings().ver) || 0;
+  const modeChanged = (Number(s.rules_ver) || 0) !== ver;
+  const langChanged = (Number(s.lang_ver) || 0) !== langVer;
+  if (!modeChanged && !langChanged) return '';
   s.rules_ver = ver;
-  return `[ddashboard] The project's dashboard mode changed (now ${p.mode || 'solo'}). Updated instructions:\n${rulesFor(s, p)}`;
+  s.lang_ver = langVer;
+  const why = modeChanged ? `The project's dashboard mode changed (now ${p.mode || 'solo'})` : `The card language changed (now ${cardLanguage()})`;
+  return `[ddashboard] ${why}. Updated instructions:\n${rulesFor(s, p)}`;
 }
 
 // Same as rulesUpdate, reading and saving the files.
@@ -861,6 +892,7 @@ function memberStart(sid) {
     }
   }
   s.rules_ver = Number(p?.mode_ver) || 0;
+  s.lang_ver = Number(readSettings().ver) || 0;
   s.start_rules = true;
   writeJson(paths.sessions, sessions);
   return head + rulesFor(s, p);
@@ -924,5 +956,5 @@ module.exports = {
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
-  pruneGroup, groupContext, memberStart,
+  pruneGroup, groupContext, memberStart, LANG_NAMES, readSettings, saveSettings,
 };
