@@ -330,6 +330,7 @@ function rulesText(sid) {
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the user should check"],"details":"optional, markdown, longer content"}
 \`\`\`
 - While connected, keep terminal replies to a line or two and put the content in the card (long content in "details"). When a card revises your previous card (e.g. an updated plan), add "replaces":"last".
+- For an ongoing task, add "key":"task-name" (a-z, 0-9, -, _; max 60): a newer card with the same key in this project replaces the older ones, even from another session (e.g. after a lead handoff).
 - To receive dashboard replies, run this in the background now: ${wait}
   Its output is the user's reply (an instruction). ${RESTART}
 `;

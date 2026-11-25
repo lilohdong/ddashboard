@@ -10,7 +10,8 @@ const NL = 0x0a;
 
 const files = new Map(); // file -> { offset, partial: Buffer }
 let cards = []; // all cards, oldest first
-let replaced = new Set(); // ids retired by a later card's "replaces"
+let replaced = new Set(); // ids retired by a later card's "replaces" or by a newer card with the same key
+let byKey = new Map(); // project_key + key -> { latest card, count of cards }
 let lastBySession = {}; // session_id -> latest card of that session
 let unsorted = false;
 
@@ -18,7 +19,21 @@ function reset() {
   files.clear();
   cards = [];
   replaced = new Set();
+  byKey = new Map();
   lastBySession = {};
+}
+
+// Same project and same key: only the newest card stays, every other one counts as replaced.
+// Cards without project_key (written before keys existed) never take part.
+const keyOf = (card) => (card.key && card.project_key && !card.via_lead ? `${card.project_key}\n${card.key}` : '');
+
+function addKeyed(card) {
+  const k = keyOf(card);
+  if (!k) return;
+  const g = byKey.get(k);
+  if (!g) { byKey.set(k, { latest: card, count: 1 }); return; }
+  g.count++;
+  if (card.ts >= g.latest.ts) { replaced.add(g.latest.id); g.latest = card; } else replaced.add(card.id);
 }
 
 function add(card) {
@@ -28,6 +43,7 @@ function add(card) {
   if (cards.length && card.ts < cards[cards.length - 1].ts) unsorted = true;
   cards.push(card);
   if (card.replaces) replaced.add(String(card.replaces));
+  addKeyed(card);
   const sid = card.session_id;
   if (sid && (!lastBySession[sid] || card.ts >= lastBySession[sid].ts)) {
     lastBySession[sid] = card;
@@ -92,6 +108,12 @@ function archiver(now = Date.now()) {
   };
 }
 
+// A keyed card carries key_prev: how many earlier cards of its project share its key.
+function withHistory(card) {
+  const g = keyOf(card) && byKey.get(keyOf(card));
+  return g && g.count > 1 ? { ...card, key_prev: g.count - 1 } : card;
+}
+
 // Recent active cards. Member reports to a lead (via_lead) are left out unless reports is true.
 function state(limit = 300, { reports = false } = {}) {
   refresh();
@@ -100,7 +122,7 @@ function state(limit = 300, { reports = false } = {}) {
   let archivedCount = 0;
   for (let i = cards.length - 1; i >= 0; i--) {
     if (isArchived(cards[i])) archivedCount++;
-    else if (recent.length < limit && (reports || !cards[i].via_lead)) recent.push(cards[i]);
+    else if (recent.length < limit && (reports || !cards[i].via_lead)) recent.push(withHistory(cards[i]));
   }
   const last = {};
   for (const [sid, c] of Object.entries(lastBySession)) {
@@ -110,7 +132,7 @@ function state(limit = 300, { reports = false } = {}) {
   return { cards: recent.reverse(), last_by_session: last, archived_count: archivedCount };
 }
 
-const SEARCH_FIELDS = ['title', 'details', 'project', 'session_name', 'branch'];
+const SEARCH_FIELDS = ['title', 'details', 'project', 'session_name', 'branch', 'key'];
 
 function matches(card, q) {
   if (!q) return true;
@@ -147,4 +169,4 @@ function setArchived(id, archived) {
   writeJson(paths.archived, data);
 }
 
-module.exports = { refresh, state, search, exists, setArchived };
+module.exports = { refresh, reset, state, search, exists, setArchived };

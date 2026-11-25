@@ -1880,6 +1880,100 @@ test('server: settings API', async () => {
   });
 });
 
+// --- card keys ---
+
+const cardsIndex = () => { const c = require(path.join(ROOT, 'scripts', 'cards.js')); c.reset(); return c; };
+const post = (sid, c) => runHook('stop-card.js', { session_id: sid, cwd: CWD, last_assistant_message: cardText(c) });
+
+test('key: valid keys are stored with project_key; invalid keys are dropped, the card is kept', () => {
+  reset({ sessions: { S1: session('S1') } });
+  post('S1', { title: 'a', key: 'login-fix_2' });
+  for (const key of ['Login', 'has space', 'x'.repeat(61), '', 42, 'ünï']) post('S1', { title: `bad ${JSON.stringify(key)}`, key });
+  const all = allCards();
+  assert.equal(all.length, 7);
+  assert.equal(all[0].key, 'login-fix_2');
+  assert.equal(all[0].project_key, KEY);
+  assert.ok(all.slice(1).every((c) => c.key === undefined && c.project_key === KEY));
+  post('S1', { title: 'x'.repeat(5), key: 'k'.repeat(60) });
+  assert.equal(allCards().at(-1).key, 'k'.repeat(60));
+});
+
+test('key: a newer card with the same key replaces earlier ones from any session, only in the same project', () => {
+  reset({ sessions: { S1: session('S1'), S2: session('S2') } });
+  lib.appendCard({ id: 'other-1', ts: new Date(Date.now() - 1000).toISOString(), session_id: 'X', project_key: 'other-project', key: 'login-fix', title: 'other project' });
+  post('S1', { title: 'v1', key: 'login-fix' });
+  post('S1', { title: 'unrelated' });
+  post('S2', { title: 'v2', key: 'login-fix' });
+  post('S1', { title: 'v3', key: 'login-fix' });
+  const cards = cardsIndex();
+  const st = cards.state();
+  const titles = st.cards.map((c) => c.title);
+  assert.deepEqual(titles, ['other project', 'unrelated', 'v3']);
+  assert.equal(st.cards.find((c) => c.title === 'v3').key_prev, 2);
+  assert.equal(st.cards.find((c) => c.title === 'other project').key_prev, undefined);
+  assert.equal(st.archived_count, 2);
+  // The whole history is one search away (the dashboard's key tag runs this search).
+  const hist = cards.search('login-fix', 'include').filter((c) => c.project_key === KEY);
+  assert.deepEqual(hist.map((c) => [c.title, c.archived]), [['v3', false], ['v2', true], ['v1', true]]);
+  // Unarchive of a replaced card still wins, like with "replaces".
+  const v1 = hist.find((c) => c.title === 'v1');
+  cards.setArchived(v1.id, false);
+  assert.ok(cards.state().cards.some((c) => c.id === v1.id));
+});
+
+test('key: "replaces":"last" and key on one card both apply', () => {
+  reset({ sessions: { S1: session('S1'), S2: session('S2') } });
+  post('S2', { title: 'keyed', key: 'task' });
+  post('S1', { title: 'draft plan' });
+  post('S1', { title: 'final', key: 'task', replaces: 'last' });
+  assert.deepEqual(cardsIndex().state().cards.map((c) => c.title), ['final']);
+});
+
+test('key: member cards drop the key (reports, not board cards); a new lead after handoff replaces the old lead\'s card', () => {
+  teamFixture();
+  post('M1', { title: 'member', key: 'login-fix' });
+  assert.equal(allCards()[0].via_lead, 'L1');
+  assert.equal(allCards()[0].key, undefined);
+  post('L1', { title: 'old lead', key: 'login-fix' });
+  post('O1', { title: 'outside', key: 'login-fix' }); // a session outside every team posts to the board too
+  const s0 = readJson(paths.sessions, {});
+  s0.L2 = session('L2');
+  writeJson(paths.sessions, s0);
+  assert.equal(lib.performHandoff('L1', 'L2', 'C:/doc.md', { kill: () => true, killClaude: () => true }).ok, true);
+  post('L2', { title: 'new lead', key: 'login-fix' });
+  const st = cardsIndex().state(300, { reports: true });
+  assert.deepEqual(st.cards.map((c) => c.title), ['member', 'new lead']);
+  assert.equal(st.cards[1].key_prev, 2);
+  // A member whose lead is gone posts to the board, still without a key.
+  const s = readJson(paths.sessions, {});
+  s.L2.state = 'ended';
+  writeJson(paths.sessions, s);
+  post('M1', { title: 'orphan', key: 'login-fix' });
+  const orphan = allCards().at(-1);
+  assert.equal(orphan.lead_missing, true);
+  assert.equal(orphan.key, undefined);
+});
+
+test('key: the card instructions explain keys in every card language, for solo and lead sessions, not members', () => {
+  teamFixture();
+  const sessions = readJson(paths.sessions, {});
+  const p = readJson(paths.projects, {})[KEY];
+  const line = /add "key":"task-name" \(a-z, 0-9, -, _; max 60\): a newer card with the same key in this project replaces the older ones/;
+  for (const lang of ['en', 'ko', 'zh-CN']) {
+    assert.equal(lib.saveSettings({ lang }).ok, true);
+    assert.match(lib.rulesFor(sessions.O1, { mode: 'solo' }), line);
+    assert.match(lib.rulesFor(sessions.O1, p), line);
+    assert.match(lib.rulesFor(sessions.L1, p), line);
+    assert.doesNotMatch(lib.rulesFor(sessions.M1, p), /"key"/);
+  }
+  lib.saveSettings({ lang: '' });
+  const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
+  for (const lang of ['en', 'ko', 'zh-CN']) {
+    assert.ok(i18n.DICT[lang]['card.keyTitle'], lang);
+    assert.match(i18n.DICT[lang]['card.keyPrev'], /\{n\}/, lang);
+  }
+});
+
 // --- run ---
 
 (async () => {

@@ -136,6 +136,8 @@
   .badge.archived { color: var(--muted); }
   .badge.answered { opacity: 0.55; }
   .badge.replied { color: var(--done); }
+  .badge.key { color: var(--muted); font-weight: 500; cursor: pointer; background: none; font-family: inherit; }
+  .badge.key:hover { color: var(--text); }
   details { margin-top: 8px; }
   details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
   .details-body { margin-top: 6px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 420px; overflow-y: auto; }
@@ -538,6 +540,7 @@ function cardHtml(c, byCard) {
         ${c.archived ? `<span class="badge archived">${esc(t('card.archived'))}</span>` : ''}
         ${c.via_lead ? `<span class="badge report">${esc(t('card.reportTo', { name: leadName }))}</span>` : ''}
         ${c.lead_missing ? `<span class="badge warn" title="${esc(t('card.leadMissingTitle'))}">${esc(t('card.leadMissing'))}</span>` : ''}
+        ${c.key ? `<button class="badge key" data-key="${esc(c.key)}" title="${esc(t('card.keyTitle'))}">#${esc(c.key)}${c.key_prev ? ` · ${esc(t('card.keyPrev', { n: c.key_prev }))}` : ''}</button>` : ''}
         <span class="title">${esc(c.title)}</span>
         ${c.archived
           ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="${esc(t('card.unarchiveTitle'))}">${esc(t('card.unarchive'))}</button>`
@@ -762,6 +765,14 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('[data-clear-search]')) { clearSearch(); return; }
+  const keyTag = e.target.closest('[data-key]');
+  if (keyTag) { // a key's whole history: search for it across active and archived cards
+    query = keyTag.dataset.key;
+    qInput.value = query;
+    archivedView = false;
+    refreshSearch();
+    return;
+  }
   if (e.target.closest('#reports')) { showReports = !showReports; store.set('showReports', showReports); load(); return; }
   const nav = e.target.closest('[data-kind]');
   if (nav) {

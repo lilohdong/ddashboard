@@ -2,6 +2,7 @@
 // Stop hook (no model calls, zero tokens). Only acts on dashboard-connected sessions.
 // 1) Find the ```card block in this turn's reply and append it to cards/YYYY-MM.jsonl.
 //    "replaces":"last" retires this session's previous card (the server treats it as archived).
+//    "key":"<task>" retires every earlier board card of the same project with that key, from any session.
 // 2) Add this turn's token usage to usage/YYYY-MM.jsonl and the session's running totals (cards or not).
 //    Team mode: a member's card is stored with via_lead and sent to its lead's inbox as a report
 //    (if the lead has ended, it goes to the dashboard marked lead_missing).
@@ -17,6 +18,7 @@ const {
 
 const MAX_DETAILS = 4000;
 const MAX_MARK_IDS = 500;
+const KEY_RE = /^[a-z0-9_-]{1,60}$/; // card "key": a task name; anything else is dropped, the card is kept
 
 // Assistant text after the last human input.
 function lastTurnText(rows) {
@@ -107,6 +109,7 @@ function parseCard(text) {
     };
     if (c.details != null && String(c.details).trim()) card.details = String(c.details).slice(0, MAX_DETAILS);
     if (c.replaces === 'last') card.replaces = 'last';
+    if (typeof c.key === 'string' && KEY_RE.test(c.key)) card.key = c.key;
     return card;
   } catch {
     return { status: 'done', title: raw.split('\n')[0].slice(0, 200), summary: raw.split('\n').slice(1, 4), review: [] };
@@ -147,12 +150,15 @@ function parseCard(text) {
       else delete card.replaces;
     }
     const route = routeCard(sessions, projects, sid);
+    // Keys only link cards on the board (lead and solo cards); a member's card is a report, so its key is dropped.
+    if (route.role === 'member') delete card.key;
     const stored = {
       id,
       ts: new Date().toISOString(),
       session_id: sid,
       session_name: sessions[sid].name || path.basename(cwd),
       project: sessions[sid].project || '',
+      project_key: sessions[sid].project_key || '',
       branch,
       diffstat: git('diff --shortstat HEAD', cwd),
       ...card,
