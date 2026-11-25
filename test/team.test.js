@@ -936,9 +936,10 @@ test('M-1d review: handoff keeps project settings changed while it ran; /api/tea
   teamFixture();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
-  const orig = lib.recordClaudePid;
-  lib.recordClaudePid = (...a) => { lib.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
-  try { assert.equal(team.main(['L1', 'handoff', doc]).code, 0); } finally { lib.recordClaudePid = orig; }
+  const members = require(path.join(ROOT, 'scripts', 'app', 'members.js')); // the handoff use case (step 9)
+  const orig = members.recordClaudePid;
+  members.recordClaudePid = (...a) => { lib.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
+  try { assert.equal(team.main(['L1', 'handoff', doc]).code, 0); } finally { members.recordClaudePid = orig; }
   assert.equal(project().spawn.runner_member, 'orca');
   assert.equal(teamConf().handoff.from, 'L1');
   await withServer(async (post) => {

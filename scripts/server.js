@@ -38,7 +38,7 @@ const {
 const orca = require('./runners/orca');
 const cards = require('./cards');
 const usage = require('./usage');
-const team = require('./team');
+const members = require('./app/members');
 const config = require('./core/config');
 const { newId } = require('./core/ids');
 const serverState = require('./app/server-state');
@@ -260,7 +260,7 @@ const server = http.createServer((req, res) => {
       const m = readJson(paths.sessions, {})[sid];
       if (!m || m.kind !== 'member' || !m.lead) return send(res, 404, { error: 'not a team member' });
       try {
-        const r = team.endMember(m.lead, sid);
+        const r = members.endMember(m.lead, sid);
         send(res, 200, { ok: true, done: r.done, already: Boolean(r.already) });
       } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });
@@ -279,12 +279,12 @@ const server = http.createServer((req, res) => {
       const role = String(msg.role || '').trim();
       const task = String(msg.task || '').trim();
       if (!role || !task) return send(res, 400, { error: 'role and task required' });
-      if (msg.runner !== undefined && msg.runner !== null && msg.runner !== '' && !team.RUNNERS.includes(msg.runner)) {
-        return send(res, 400, { error: `runner must be one of ${team.RUNNERS.join(', ')}` });
+      if (msg.runner !== undefined && msg.runner !== null && msg.runner !== '' && !members.RUNNERS.includes(msg.runner)) {
+        return send(res, 400, { error: `runner must be one of ${members.RUNNERS.join(', ')}` });
       }
       let r;
       try {
-        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: team.RUNNERS.includes(msg.runner) ? msg.runner : undefined });
+        r = members.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: members.RUNNERS.includes(msg.runner) ? msg.runner : undefined });
       } catch (err) { return send(res, 400, { error: String(err.message || err) }); }
       const first = task.split(/\r?\n/)[0].slice(0, 200);
       deliver(leadSid, {
@@ -312,7 +312,7 @@ const server = http.createServer((req, res) => {
       if (!lead || isEnded(lead)) return send(res, 409, { error: 'groups need team mode with a live lead' });
       if (!['create', 'rename', 'delete'].includes(msg.action)) return send(res, 400, { error: 'action must be create, rename or delete' });
       try {
-        const r = team.groupAction(list[tn].lead, msg.action, { name: String(msg.name || ''), newName: String(msg.new_name || ''), purge: msg.purge === true });
+        const r = members.groupAction(list[tn].lead, msg.action, { name: String(msg.name || ''), newName: String(msg.new_name || ''), purge: msg.purge === true });
         send(res, 200, r);
       } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });
