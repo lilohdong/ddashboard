@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // Stop hook (no model calls, zero tokens). Only acts on dashboard-connected sessions.
-// 1) Find the ```card block in this turn's reply and append it to cards.jsonl.
+// 1) Find the ```card block in this turn's reply and append it to cards/YYYY-MM.jsonl.
+//    "replaces":"last" retires this session's previous card (the server treats it as archived).
 // 2) If replies are waiting in the inbox, keep the session going and hand them over as the next instruction.
 const fs = require('fs');
 const path = require('path');
-const { paths, readJson, writeJson, appendJsonl, readHookInput, safeId, git, takeInbox, formatReplies } = require('../lib');
+const { paths, readJson, writeJson, appendCard, readHookInput, safeId, git, takeInbox, formatReplies } = require('../lib');
 
 const TAIL_BYTES = 4 * 1024 * 1024; // read only the tail of large transcripts
+const MAX_DETAILS = 4000;
 
 // Collect assistant text after the last human input, from the tail of the transcript (jsonl).
 function lastTurnText(transcriptPath) {
@@ -40,12 +42,15 @@ function parseCard(text) {
   const raw = blocks[blocks.length - 1][1].trim();
   try {
     const c = JSON.parse(raw);
-    return {
+    const card = {
       status: String(c.status || 'done'),
       title: String(c.title || '(untitled)').slice(0, 200),
       summary: [].concat(c.summary || []).map(String).slice(0, 3),
       review: [].concat(c.review || []).map(String).slice(0, 5),
     };
+    if (c.details != null && String(c.details).trim()) card.details = String(c.details).slice(0, MAX_DETAILS);
+    if (c.replaces === 'last') card.replaces = 'last';
+    return card;
   } catch {
     return { status: 'done', title: raw.split('\n')[0].slice(0, 200), summary: raw.split('\n').slice(1, 4), review: [] };
   }
@@ -64,8 +69,14 @@ function parseCard(text) {
   const cardKey = card && JSON.stringify(card);
   const branch = git('rev-parse --abbrev-ref HEAD', cwd);
   if (card && sessions[sid].last_card !== cardKey) {
-    appendJsonl(paths.cards, {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    // "replaces":"last" is stored as the id of the card it replaces, so the server can archive that one.
+    if (card.replaces === 'last') {
+      if (sessions[sid].last_card_id) card.replaces = sessions[sid].last_card_id;
+      else delete card.replaces;
+    }
+    appendCard({
+      id,
       ts: new Date().toISOString(),
       session_id: sid,
       session_name: sessions[sid].name || path.basename(cwd),
@@ -75,6 +86,7 @@ function parseCard(text) {
       ...card,
     });
     sessions[sid].last_card = cardKey;
+    sessions[sid].last_card_id = id;
     sessions[sid].last_status = card.status;
     sessions[sid].last_title = card.title;
   }
