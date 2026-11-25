@@ -16,6 +16,7 @@ process.env.DDASH_ORCA = '0';
 delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
 const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
 const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
@@ -345,13 +346,10 @@ setInterval(() => {}, 1000);
 // --- F-9: gone detection for every kind of session ---
 
 async function withServer(fn) {
-  const port = 7800 + Math.floor(Math.random() * 90);
-  const srv = track(spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port) }, stdio: 'ignore' }));
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer({ track });
   try {
-    assert.ok(await until(async () => { try { await fetch(`${base}/api/state`); return true; } catch { return false; } }, 10000), 'server did not start');
-    await fn(base);
-  } finally { srv.kill(); await exited(srv); }
+    await fn(srv.base);
+  } finally { await srv.stop(); }
 }
 async function deadPid() {
   const p = startFakeClaude();
@@ -535,12 +533,17 @@ test('F-6: control.start runs the server outside the session folder', async () =
   reset({});
   fs.rmSync(paths.serverPid, { force: true });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-orph-start-'));
-  const port = 7700 + Math.floor(Math.random() * 90);
+  // control.start waits for the server's pid file (written once it listens); a port taken between freePort and the
+  // server's listen makes it fail, so try another free port.
   const runner = path.join(BOARD, 'start-runner.js');
-  fs.writeFileSync(runner, `process.env.DDASH_PORT = '${port}';
-require(${JSON.stringify(path.join(ROOT, 'scripts', 'control.js'))}).start().then((m) => console.log(m));
+  fs.writeFileSync(runner, `require(${JSON.stringify(path.join(ROOT, 'scripts', 'control.js'))}).start().then((m) => console.log(m));
 `);
-  const r = require('child_process').spawnSync(process.execPath, [runner], { cwd: dir, env: { ...process.env, DDASH_PORT: String(port) }, encoding: 'utf8' });
+  let r;
+  for (let i = 0; i < 3; i++) {
+    const port = await freePort();
+    r = require('child_process').spawnSync(process.execPath, [runner], { cwd: dir, env: { ...process.env, DDASH_PORT: String(port) }, encoding: 'utf8' });
+    if (/started/i.test(r.stdout)) break;
+  }
   assert.match(r.stdout, /started/i, r.stdout + r.stderr);
   const pid = readJson(paths.serverPid, {}).pid;
   started.push({ kill: () => { try { process.kill(pid); } catch {} } });

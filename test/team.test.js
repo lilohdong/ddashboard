@@ -17,6 +17,7 @@ process.env.DDASH_WINDOW = '0'; // never open real terminal windows; the window 
 process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests use a fake orca command
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
 const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
 const coreConfig = require(path.join(ROOT, 'scripts', 'core', 'config.js'));
@@ -1199,19 +1200,15 @@ test('forgetSessions / markEnded', () => {
 });
 
 async function withServer(fn) {
-  const port = 7400 + Math.floor(Math.random() * 500);
-  const srv = spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port) }, stdio: 'ignore' });
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer();
+  const { base } = srv;
   try {
-    for (let i = 0; i < 50; i++) {
-      try { await fetch(`${base}/api/state`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
-    }
     const post = async (url, body, headers = {}) => {
       const res = await fetch(base + url, { method: 'POST', headers, body: JSON.stringify(body) });
       return { status: res.status, body: await res.json() };
     };
     await fn(post, base);
-  } finally { srv.kill(); }
+  } finally { await srv.stop(); }
 }
 
 test('server: forget, mark ended, spawn from the dashboard', async () => {

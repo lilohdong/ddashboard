@@ -16,6 +16,7 @@ process.env.DDASH_BOARD_DIR = BOARD; // must be set before lib is required
 delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
 const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
 const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
@@ -103,15 +104,10 @@ function listState(sid) {
 }
 
 async function withServer(fn) {
-  const port = 7900 + Math.floor(Math.random() * 90);
-  const srv = spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port) }, stdio: 'ignore' });
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer();
   try {
-    for (let i = 0; i < 50; i++) {
-      try { await fetch(`${base}/api/state`); break; } catch { await sleep(100); }
-    }
-    await fn(base);
-  } finally { srv.kill(); }
+    await fn(srv.base);
+  } finally { await srv.stop(); }
 }
 const viewOf = async (base, sid) => {
   const j = await (await fetch(`${base}/api/state`)).json();

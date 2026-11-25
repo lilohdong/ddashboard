@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const WEB = path.join(ROOT, 'scripts', 'web');
 const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
 const imp = (name) => import(require('url').pathToFileURL(path.join(WEB, name)).href);
@@ -271,16 +272,10 @@ test('key tag: title and history count translated in every language', () => {
 
 test('server: serves the page, i18n.js, every web module and the style sheet with the right MIME; nothing else', async () => {
   const os = require('os');
-  const { spawn } = require('child_process');
   const board = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-web-'));
-  const port = 7900 + Math.floor(Math.random() * 300);
-  const env = { ...process.env, DDASH_PORT: String(port), DDASH_BOARD_DIR: board, DDASH_ORCA: '0', DDASH_WINDOW: '0' };
-  const srv = spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env, stdio: 'ignore' });
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer({ env: { DDASH_BOARD_DIR: board, DDASH_ORCA: '0', DDASH_WINDOW: '0' } });
+  const { base } = srv;
   try {
-    for (let i = 0; i < 50; i++) {
-      try { await fetch(`${base}/api/settings`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
-    }
     const get = async (u) => { const r = await fetch(base + u); return { status: r.status, type: r.headers.get('content-type') || '', body: await r.text() }; };
     const page = await get('/');
     assert.equal(page.status, 200);
@@ -301,7 +296,7 @@ test('server: serves the page, i18n.js, every web module and the style sheet wit
       assert.equal(r.status, 404, u);
       assert.doesNotMatch(r.body, /require\(/, u);
     }
-  } finally { srv.kill(); }
+  } finally { await srv.stop(); }
 });
 
 // verify-009 F2: each status badge has its own colour, distinct from the others, in light and dark.

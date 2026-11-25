@@ -7,6 +7,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-sup-'));
 const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
@@ -46,13 +47,10 @@ async function deadPid() {
 }
 
 async function withServer(env, fn) {
-  const port = 7600 + Math.floor(Math.random() * 150);
-  const srv = track(spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port), ...env }, stdio: 'ignore' }));
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer({ env, track });
   try {
-    assert.ok(await until(async () => { try { await fetch(`${base}/api/state`); return true; } catch { return false; } }, 10000), 'server did not start');
-    await fn(base);
-  } finally { srv.kill(); await exited(srv); }
+    await fn(srv.base);
+  } finally { await srv.stop(); }
 }
 const state = async (base) => (await fetch(`${base}/api/state`)).json();
 

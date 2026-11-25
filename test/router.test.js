@@ -19,6 +19,7 @@ process.env.DDASH_WINDOW = '0';
 process.env.DDASH_ORCA = '0';
 
 const ROOT = path.join(__dirname, '..');
+const { startServer, freePort } = require('./helpers');
 const SCRIPTS = path.join(ROOT, 'scripts');
 const { paths } = require(path.join(SCRIPTS, 'core', 'paths.js'));
 const { readJson, writeJson } = require(path.join(SCRIPTS, 'core', 'fsx.js'));
@@ -65,19 +66,15 @@ else { out({ ok: false }); process.exit(1); }
 }
 
 async function withServer(env, fn) {
-  const port = 7900 + Math.floor(Math.random() * 500);
-  const srv = spawn(process.execPath, [path.join(SCRIPTS, 'server.js')], { env: { ...process.env, ...env, DDASH_PORT: String(port) }, stdio: 'ignore' });
-  const base = `http://127.0.0.1:${port}`;
+  const srv = await startServer({ env });
+  const { base } = srv;
   try {
-    for (let i = 0; i < 50; i++) {
-      try { await fetch(`${base}/api/state`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
-    }
     const post = async (url, body, headers = {}) => {
       const res = await fetch(base + url, { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
       return { status: res.status, body: await res.json() };
     };
     await fn(post, base);
-  } finally { srv.kill(); }
+  } finally { await srv.stop(); }
 }
 
 // An in-process server over a given route table.
