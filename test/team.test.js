@@ -561,6 +561,43 @@ test('groups: rename uses git mv when the folder is tracked', () => {
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
+test('groups: the lead is told once when a brief falls behind HEAD', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-repo-'));
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+  const commit = (n) => { for (let i = 0; i < n; i++) git('commit', '-q', '--allow-empty', '-m', `c${i}`); };
+  const env = { DDASH_BRIEF_STALE_COMMITS: '3' };
+  const stop = () => runHook('stop-card.js', { session_id: 'M1', cwd: repo }, env);
+  const notes = () => inbox('L1').filter((m) => /may be stale/.test(m.title || ''));
+  try {
+    git('init', '-q');
+    commit(1);
+    teamFixture();
+    const s = readJson(paths.sessions, {});
+    s.L1.cwd = repo;
+    writeJson(paths.sessions, s);
+    team.main(['L1', 'group', 'create', 'api']);
+    stop(); // records the brief's HEAD
+    const g = readJson(paths.projects, {})[KEY].groups.api;
+    assert.equal(g.brief_head, git('rev-parse', 'HEAD').stdout.trim());
+    commit(2);
+    stop();
+    assert.equal(notes().length, 0);
+    commit(1);
+    stop();
+    stop();
+    assert.equal(notes().length, 1);
+    assert.match(notes()[0].title, /^brief api may be stale: 3 commits since it was last updated \(.*brief\.md\)$/);
+    // Editing the brief resets it.
+    const brief = path.join(repo, 'docs', 'groups', 'api', 'brief.md');
+    fs.appendFileSync(brief, '\nupdated');
+    fs.utimesSync(brief, new Date(), new Date(Date.now() + 5000));
+    stop();
+    const g2 = readJson(paths.projects, {})[KEY].groups.api;
+    assert.equal(g2.brief_stale_warned, undefined);
+    assert.equal(g2.brief_head, git('rev-parse', 'HEAD').stdout.trim());
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
 test('groups: prune keeps the newest handoffs and drops old notes only', () => {
   teamFixture();
   fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });

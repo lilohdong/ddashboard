@@ -12,7 +12,7 @@ const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText, pruneGroup, leadContextNotice,
+  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -170,6 +170,10 @@ function parseCard(text) {
   // Group folder upkeep: keep the newest handoffs, drop old notes (only inside docs/groups/<name>/).
   const group = sessions[sid].group && projects[sessions[sid].project_key]?.groups?.[sessions[sid].group];
   if (group) try { pruneGroup(group); } catch { /* best effort */ }
+  // Brief staleness (lead and members only): the lead is told once when a brief falls behind HEAD.
+  if (['lead', 'member'].includes(teamRole(sessions[sid], projects[sessions[sid].project_key]))) {
+    try { checkBriefs(sessions[sid].project_key); } catch { /* best effort */ }
+  }
 
   // 2) Token usage of this turn (never blocks the rest of the hook).
   try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }

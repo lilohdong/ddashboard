@@ -125,7 +125,10 @@ function spawnMember(leadSid, { role, model, stay, task, group } = {}) {
   const { lead, project } = context(leadSid);
   const g = group ? project.groups?.[group] : null;
   if (group && !g) throw new Error(`no group ${group}. Create it with: group create ${group}`);
-  if (g) lib.pruneGroup(g);
+  if (g) {
+    lib.pruneGroup(g);
+    try { lib.checkBriefs(lead.project_key); } catch { /* best effort */ }
+  }
   const sid = crypto.randomUUID();
   const flags = { role, model: model ? String(model).trim() : undefined, stay: Boolean(stay) };
   const opts = spawnOptions(project, flags);

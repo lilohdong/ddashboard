@@ -858,6 +858,43 @@ function pruneGroup(g, now = Date.now()) {
   return removed;
 }
 
+const BRIEF_STALE_COMMITS = Number(process.env.DDASH_BRIEF_STALE_COMMITS) || 20;
+
+// Brief staleness for a team project's groups. When a brief.md changes (new mtime), remember the git HEAD
+// of its worktree; once HEAD is BRIEF_STALE_COMMITS or more commits past that, tell the lead once (until
+// the brief changes again). Called from the Stop hook and team.js spawn. Returns the groups reported.
+function checkBriefs(key) {
+  const projects = readJson(paths.projects, {});
+  const p = projects[key];
+  if (!p?.groups || p.mode !== 'team' || !p.lead) return [];
+  let changed = false;
+  const told = [];
+  for (const [name, g] of Object.entries(p.groups)) {
+    let mtime;
+    try { mtime = fs.statSync(path.join(g.dir, 'brief.md')).mtimeMs; } catch { continue; }
+    const head = gitIn(['rev-parse', 'HEAD'], g.dir);
+    if (!head) continue;
+    if (g.brief_mtime !== mtime || !g.brief_head) {
+      Object.assign(g, { brief_mtime: mtime, brief_head: head });
+      delete g.brief_stale_warned;
+      changed = true;
+      continue;
+    }
+    if (g.brief_stale_warned || g.brief_head === head) continue;
+    const n = Number(gitIn(['rev-list', '--count', `${g.brief_head}..HEAD`], g.dir));
+    if (!(n >= BRIEF_STALE_COMMITS)) continue;
+    deliver(p.lead, {
+      type: 'report', from: name, role: 'ddashboard', status: 'review',
+      title: `brief ${name} may be stale: ${n} commits since it was last updated (${slash(path.join(g.dir, 'brief.md'))})`,
+    });
+    g.brief_stale_warned = head;
+    changed = true;
+    told.push(name);
+  }
+  if (changed) writeJson(paths.projects, projects);
+  return told;
+}
+
 // Group memory for a new member, put before its task: the brief (capped) and the latest handoff.
 // Returns { text, truncated, chars }.
 function groupContext(name, g) {
@@ -974,5 +1011,5 @@ module.exports = {
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, leadContextNotice,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
-  pruneGroup, groupContext, memberStart, LANG_NAMES, readSettings, saveSettings,
+  pruneGroup, groupContext, memberStart, BRIEF_STALE_COMMITS, checkBriefs, LANG_NAMES, readSettings, saveSettings,
 };
