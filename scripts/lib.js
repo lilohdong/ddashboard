@@ -1016,11 +1016,15 @@ function orphanWaiter(pid, table) {
 
 // Stop every orphan waiter in the process table (any plugin version, see orphanWaiter) with its wrapper shells, and
 // remove lock files whose waiter is dead. Run by the server at start and every minute. Returns { killed, locks }.
+// With DDASH_BOARD_DIR set (tests, a second board), only waiters whose command line lies under that board are
+// touched, so a test never stops the real install's waiters or another run's. The real install never sets it.
+const norm = (p) => String(p).replace(/\\/g, '/').toLowerCase();
+const inScope = (p) => !process.env.DDASH_BOARD_DIR || norm(p.cmd).includes(norm(BOARD_DIR));
 function sweepWaiters(table) {
   const killed = [];
   if (table?.size) {
     for (const p of table.values()) {
-      const sid = isNodeLike(p) ? waitCommandSid(p.cmd) : '';
+      const sid = isNodeLike(p) && inScope(p) ? waitCommandSid(p.cmd) : '';
       if (sid && alive(p.pid) && orphanWaiter(p.pid, table) && killWaiterChain(p.pid, table)) killed.push({ pid: p.pid, sid });
     }
   }

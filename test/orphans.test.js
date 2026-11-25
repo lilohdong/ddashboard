@@ -484,9 +484,8 @@ test('sweepWaiters: stops orphan waiters of any version, keeps live ones, remove
   const killed = r.killed.map((k) => k.pid);
   // Another server running its sweep at the same time (e.g. a parallel test run) may have stopped them first.
   for (const pid of [orphan.pid, wrapped]) assert.ok(killed.includes(pid) || !lib.alive(pid), `not stopped: ${pid} ${JSON.stringify(r.killed)}`);
-  // Leftovers of this or an earlier run of these tests may be stopped too (test session ids are not UUIDs).
-  // Orphans of real sessions are fine to stop as well, but would show up here: report them rather than hide them.
-  for (const k of r.killed) assert.ok(orphansStarted.has(k.pid) || !/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(k.sid), `sweep stopped a real session's orphan waiter: ${JSON.stringify(k)}`);
+  // The sweep is scoped to this test's board (DDASH_BOARD_DIR): it may only stop orphans this file started.
+  for (const k of r.killed) assert.ok(orphansStarted.has(k.pid), `sweep stopped a process this test did not start: ${JSON.stringify(k)}`);
   assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper left running');
   assert.equal(lib.alive(y3), true);
   assert.equal(lib.alive(hosted.pid), true);
@@ -494,6 +493,26 @@ test('sweepWaiters: stops orphan waiters of any version, keeps live ones, remove
   assert.equal(fs.existsSync(lib.waitLockPath('Y4')), false);
   assert.equal(fs.existsSync(lib.waitLockPath('Y3')), true);
   claude.kill();
+});
+
+test('sweepWaiters with DDASH_BOARD_DIR set leaves an orphan waiter outside that board alone', async () => {
+  reset({});
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-orph-other-'));
+  const file = path.join(other, 'bin', 'wait.js');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'setInterval(() => {}, 1000);\n');
+  const pid = await startOrphan(file, ['Z9']); // a real-looking orphan, but not under this board
+  try {
+    await sleep(300);
+    const table = lib.processTable();
+    assert.equal(lib.orphanWaiter(pid, table), true); // it is an orphan...
+    assert.deepEqual(lib.sweepWaiters(table).killed.filter((k) => k.pid === pid), []); // ...but out of scope
+    assert.equal(lib.alive(pid), true);
+  } finally {
+    try { process.kill(pid); } catch {}
+    await until(() => !lib.alive(pid));
+    fs.rmSync(other, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  }
 });
 
 test('server: sweeps orphan waiters at start', async () => {
