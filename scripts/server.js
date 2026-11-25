@@ -131,8 +131,8 @@ const server = http.createServer((req, res) => {
       s.team = teamRole(s, projects[s.project_key]);
       const own = s.team === 'lead' || s.team === 'member' ? teamOfSession(s, projects[s.project_key]) : null;
       if (own) s.team_name = own.name;
-      if (s.team === 'lead' && Number(s.lead_baseline) > 0) {
-        const lim = leadLimit(s.lead_baseline, s.last_context);
+      if (s.team === 'lead' && s.lead_baseline !== undefined) {
+        const lim = leadLimit(s.lead_baseline, s.context_window); // the stored window: never back to 200k after a compact
         Object.assign(s, { lead_handoff_at: lim.at, context_window: lim.window, baseline_big: lim.big });
       }
       if (s.team === 'member' && routeCard(sessions, projects, s.session_id).lead_missing) s.lead_missing = true;

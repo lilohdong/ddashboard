@@ -11,6 +11,8 @@ const BOARD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-test-'));
 const CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-proj-')); // not a git repo: project key = the path
 process.env.DDASH_BOARD_DIR = BOARD;
 delete process.env.DDASH_NAME;
+process.env.CLAUDE_CONFIG_DIR = BOARD; // no real Claude settings (model hints for the context window)
+for (const k of ['ANTHROPIC_MODEL', 'DDASH_CONTEXT_WINDOW', 'DDASH_LEAD_WORK_BUDGET', 'DDASH_LEAD_CONTEXT_LIMIT', 'DDASH_HANDOFF_MAX_TOKENS']) delete process.env[k];
 process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests use a fake orca command
 
 const ROOT = path.join(__dirname, '..');
@@ -228,6 +230,7 @@ test('setMode: team adds a team next to the others (no replacing), solo removes 
 
 test('performHandoff: reassigns lead and members, moves inbox, stops the old lead', async () => {
   teamFixture();
+  fs.rmSync(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'), { force: true });
   const s0 = readJson(paths.sessions, {});
   s0.L2 = session('L2');
   s0.L1.claude_pid = 999999;
@@ -242,8 +245,8 @@ test('performHandoff: reassigns lead and members, moves inbox, stops the old lea
       killClaude: (pid) => { killed.push(`claude:${pid}`); return true; },
     });
     const rules = slash(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'));
-    assert.deepEqual(r, { ok: true, team: 'Alpha', rules, members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
-    assert.ok(fs.existsSync(rules)); // created on handoff when missing
+    assert.deepEqual(r, { ok: true, team: 'Alpha', rules: '', members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
+    assert.ok(!fs.existsSync(rules)); // a handoff never creates it
   } finally { waiter.kill(); }
   assert.deepEqual(killed, [waiter.pid, 'claude:999999']);
   const s = readJson(paths.sessions, {});
@@ -312,10 +315,10 @@ test('Stop hook: a replaced lead is told to stop once', () => {
 });
 
 // A transcript with one turn per context size (each turn: a human prompt, then one assistant message).
-function contextTurns(file, sizes) {
+function contextTurns(file, sizes, model = 'claude-test') {
   const rows = sizes.flatMap((c, i) => [
     { type: 'user', uuid: `u${i}`, message: { content: 'go' } },
-    { type: 'assistant', message: { id: `a${i}`, usage: { input_tokens: 10, cache_read_input_tokens: c - 10, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+    { type: 'assistant', message: { id: `a${i}`, model, usage: { input_tokens: 10, cache_read_input_tokens: c - 10, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
   ]);
   fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
@@ -325,9 +328,10 @@ test('M-1c: Stop hook tells the lead once, after its context grew by the work bu
   const transcript = path.join(BOARD, 't.jsonl');
   const env = { DDASH_LEAD_WORK_BUDGET: '300' };
   const stop = (sid, sizes) => { contextTurns(transcript, sizes); return runHook('stop-card.js', { session_id: sid, cwd: CWD, transcript_path: transcript }, env); };
-  assert.equal(stop('L1', [510]), ''); // first turn: baseline
+  assert.equal(stop('L1', [510]), ''); // baseline: first context in the transcript
   assert.equal(readJson(paths.sessions, {}).L1.lead_baseline, 510);
   assert.equal(readJson(paths.sessions, {}).L1.lead_handoff_at, 810);
+  assert.equal(readJson(paths.sessions, {}).L1.context_window, 200000);
   assert.equal(stop('L1', [510, 800]), ''); // grew 290 < 300
   const out = JSON.parse(stop('L1', [510, 800, 820]));
   assert.equal(out.decision, 'block');
@@ -341,26 +345,97 @@ test('M-1c: Stop hook tells the lead once, after its context grew by the work bu
   assert.equal(readJson(paths.sessions, {}).M1.lead_baseline, undefined);
 });
 
-test('M-1c: no handoff loop: a new lead that starts above the limit is not told at once', () => {
+test('M-1c: a lead already running at upgrade takes its baseline from the transcript head', () => {
   teamFixture();
   const transcript = path.join(BOARD, 't.jsonl');
-  const env = { DDASH_LEAD_CONTEXT_LIMIT: '400', DDASH_LEAD_WORK_BUDGET: '300' };
-  const stop = (sizes) => { contextTurns(transcript, sizes); return runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env); };
-  assert.equal(stop([510]), ''); // the absolute override (400) is below the start: wait for the budget floor (300)
-  assert.equal(stop([510, 700]), '');
-  assert.match(JSON.parse(stop([510, 700, 810])).reason, /start 510, handoff at 810/);
+  contextTurns(transcript, [40000, 90000, 150000]);
+  const out = JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }));
+  assert.match(out.reason, /context \(150000 tokens\) has grown by 110000 .*\(start 40000, handoff at 140000\)/);
 });
 
-test('M-1c: leadLimit: baseline + budget, capped at 80% of the window, never below the budget floor', () => {
-  assert.deepEqual(lib.leadLimit(40000), { baseline: 40000, window: 200000, at: 140000, budget: 100000, big: false });
-  assert.equal(lib.leadLimit(90000).at, 160000); // 80% of 200k
-  const big = lib.leadLimit(150000);
-  assert.equal(big.big, true); // over half the window
-  assert.equal(big.at, 170000); // the cap is below the start: still 20k of work first
-  const wide = lib.leadLimit(40000, 300000); // a context over 200k was seen: 1M window
-  assert.equal(wide.window, 1000000);
-  assert.equal(wide.at, 140000);
-  assert.equal(lib.leadLimit(600000).at, 700000);
+test('M-1c: unknown baseline uses the absolute cap (80% of the window)', () => {
+  teamFixture();
+  const p = project();
+  const s = { session_id: 'L1', kind: 'lead', last_context: 150000, cwd: CWD };
+  assert.equal(lib.leadContextNotice(s, p, { transcript: path.join(BOARD, 'missing.jsonl') }), '');
+  assert.equal(s.lead_baseline, 0);
+  assert.equal(s.lead_baseline_unknown, true);
+  assert.equal(s.lead_handoff_at, 160000);
+  s.last_context = 161000;
+  assert.match(lib.leadContextNotice(s, p, {}), /context \(161000 tokens\) is past the team lead handoff point \(160000, 80% of the 200000-token context window\)/);
+});
+
+test('M-1c: the handoff point is cut to 80% of the window; a lead starting above it is told at once', () => {
+  teamFixture();
+  const transcript = path.join(BOARD, 't.jsonl');
+  contextTurns(transcript, [170000]);
+  assert.match(JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript })).reason, /start 170000, handoff at 160000/);
+  // DDASH_LEAD_CONTEXT_LIMIT is an absolute point, still cut to 80%.
+  teamFixture();
+  contextTurns(transcript, [510, 700]);
+  assert.match(JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, { DDASH_LEAD_CONTEXT_LIMIT: '600' })).reason, /handoff at 600/);
+  // A work budget of 0 is a value (not the default): told on the first turn.
+  teamFixture();
+  contextTurns(transcript, [510]);
+  assert.match(JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, { DDASH_LEAD_WORK_BUDGET: '0' })).reason, /handoff at 510/);
+});
+
+test('M-1c: context window from the model ([1m]), kept after a compact', () => {
+  teamFixture();
+  const transcript = path.join(BOARD, 't.jsonl');
+  // SessionStart records the model; [1m] means a 1M window (start 150k is not a large start there).
+  lib.rememberModel('L1', 'claude-opus-5-5[1m]');
+  contextTurns(transcript, [150000, 240000]);
+  assert.equal(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }), '');
+  let L1 = readJson(paths.sessions, {}).L1;
+  assert.equal(L1.context_window, 1000000);
+  assert.equal(L1.lead_handoff_at, 250000);
+  // Without any model hint the stored window is kept (never back to 200k).
+  writeJson(paths.models, {});
+  contextTurns(transcript, [150000, 60000]); // compacted
+  runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript });
+  L1 = readJson(paths.sessions, {}).L1;
+  assert.equal(L1.context_window, 1000000);
+  // Pure rules.
+  assert.equal(lib.contextWindow({}), 200000);
+  assert.equal(lib.contextWindow({ models: ['opus[1m]'] }), 1000000);
+  assert.equal(lib.contextWindow({ stored: 1000000 }), 1000000);
+  assert.equal(lib.contextWindow({ seen: 250000 }), 1000000);
+});
+
+test('M-1c: leadLimit and large start use the given window', () => {
+  assert.deepEqual(lib.leadLimit(40000, 200000), { baseline: 40000, window: 200000, at: 140000, budget: 100000, big: false });
+  assert.equal(lib.leadLimit(90000, 200000).at, 160000); // 80% of 200k
+  assert.equal(lib.leadLimit(150000, 200000).big, true); // over half of 200k
+  assert.equal(lib.leadLimit(150000, 1000000).big, false); // not of 1M
+  assert.equal(lib.leadLimit(150000, 1000000).at, 250000);
+  assert.equal(lib.leadLimit(0, 200000).at, 160000); // unknown start: absolute cap
+});
+
+test('M-1c: envNum keeps 0, ignores empty and invalid values', () => {
+  process.env.DDASH_TEST_NUM = '0';
+  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 0);
+  process.env.DDASH_TEST_NUM = '';
+  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+  process.env.DDASH_TEST_NUM = 'abc';
+  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+  delete process.env.DDASH_TEST_NUM;
+  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+});
+
+test('M-1c: adding or removing a team clears the lead context state', () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  Object.assign(s.O1, { lead_baseline: 90000, lead_handoff_at: 160000, context_handoff_told: true, lead_baseline_unknown: true });
+  writeJson(paths.sessions, s);
+  assert.equal(lib.addTeam(KEY, 'Beta', 'O1').ok, true);
+  const fields = (sid) => ['lead_baseline', 'lead_handoff_at', 'context_handoff_told', 'lead_baseline_unknown'].map((k) => readJson(paths.sessions, {})[sid][k]);
+  assert.deepEqual(fields('O1'), [undefined, undefined, undefined, undefined]);
+  const s2 = readJson(paths.sessions, {});
+  Object.assign(s2.O1, { lead_baseline: 1, lead_handoff_at: 2, context_handoff_told: true });
+  writeJson(paths.sessions, s2);
+  assert.equal(lib.removeTeams(KEY, ['Beta']).ok, true);
+  assert.deepEqual(fields('O1'), [undefined, undefined, undefined, undefined]);
 });
 
 test('M-1c: estimateTokens counts Korean and other non-ASCII text high', () => {
@@ -479,6 +554,8 @@ test('team.js show and handoff', () => {
   assert.match(team.main(['L1', 'show', card.id]).out, /D{500}/);
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
+  fs.mkdirSync(path.join(CWD, 'docs', 'teams', 'Alpha'), { recursive: true });
+  fs.writeFileSync(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'), '# rules');
   const r = team.main(['L1', 'handoff', doc]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /\[ddash lead-handoff from=L1 doc=.*handoff\.md\]/);
@@ -487,7 +564,7 @@ test('team.js show and handoff', () => {
   assert.equal(team.main(['M1', 'handoff', doc]).code, 1); // not the lead
 });
 
-test('M-1c: team.js handoff refuses a doc over 6000 tokens and points the new lead at lead-rules.md', () => {
+test('M-1c: team.js handoff refuses a doc over 6000 tokens; names lead-rules.md only when it exists', () => {
   teamFixture();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# 인수인계\n' + '상태 '.repeat(2000)); // ~6000 chars, 4000 of them Korean: over the limit
@@ -496,11 +573,23 @@ test('M-1c: team.js handoff refuses a doc over 6000 tokens and points the new le
   assert.match(r.out, /handoff doc is too long: about \d+ tokens \(limit 6000\)\. Shorten it/);
   assert.equal(teamConf().handoff, undefined);
   fs.writeFileSync(doc, '# handoff\n' + 'state '.repeat(2000)); // 12000 ASCII chars: fine
-  const ok = team.main(['L1', 'handoff', doc]);
-  assert.equal(ok.code, 0, ok.out);
   const rules = slash(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'));
-  assert.ok(ok.out.includes(`Read only this handoff doc and the team rules ${rules} (not older handoff docs)`), ok.out);
-  assert.match(fs.readFileSync(rules, 'utf8'), /# Team Alpha: lead rules/);
+  fs.rmSync(rules, { force: true });
+  // No lead-rules.md: not created by the handoff, left out of the prompt, a warning on stderr.
+  const warned = [];
+  const write = process.stderr.write;
+  process.stderr.write = (t) => { warned.push(String(t)); return true; };
+  let ok;
+  try { ok = team.main(['L1', 'handoff', doc]); } finally { process.stderr.write = write; }
+  assert.equal(ok.code, 0, ok.out);
+  assert.ok(ok.out.includes('Read only this handoff doc (not older handoff docs)'), ok.out);
+  assert.match(warned.join(''), /lead-rules\.md does not exist/);
+  assert.ok(!fs.existsSync(rules));
+  // With the file: the new lead is told to read it.
+  fs.mkdirSync(path.dirname(rules), { recursive: true });
+  fs.writeFileSync(rules, '# rules');
+  const ok2 = team.main(['L1', 'handoff', doc]);
+  assert.ok(ok2.out.includes(`Read only this handoff doc and the team rules ${rules} (not older handoff docs)`), ok2.out);
 });
 
 test('M-1c: a new team gets a lead-rules.md template; an existing one is kept', () => {
@@ -609,6 +698,8 @@ test('M-1c: team.js handoff --spawn: visible Orca terminal when Orca runs, --hea
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
+  fs.mkdirSync(path.join(CWD, 'docs', 'teams', 'Alpha'), { recursive: true });
+  fs.writeFileSync(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'), '# rules');
   try {
     // Orca up: interactive claude (no -p) with --session-id in a terminal titled 'lead <team>'.
     orcaEnv();
@@ -788,6 +879,7 @@ test('server: unresponsive marker and lead handoff point in /api/state', async (
   s.Q3 = session('Q3', { last_seen: old, state: 'working' });
   s.Q4 = session('Q4', { last_seen: old, state: 'ended', ended: old });
   s.L1.lead_baseline = 120000;
+  s.L1.context_window = 200000;
   writeJson(paths.sessions, s);
   fs.mkdirSync(paths.inbox('Q2'), { recursive: true });
   fs.writeFileSync(path.join(paths.inbox('Q2'), 'wait.lock'), String(process.pid)); // live waiter

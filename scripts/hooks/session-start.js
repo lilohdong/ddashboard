@@ -7,7 +7,7 @@
 // before the first prompt, UserPromptSubmit output after it. Known team sessions also record their Claude pid.
 const {
   paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, registerSession, injectRules,
-  recordClaudePid, replacedText, memberStart, readProjects,
+  recordClaudePid, replacedText, memberStart, readProjects, rememberModel,
 } = require('../lib');
 
 (async () => {
@@ -15,6 +15,7 @@ const {
   const cwd = input.cwd || process.cwd();
   if (!serverPid() || !projectActive(cwd)) return;
   const sid = safeId(input.session_id);
+  if (input.model) try { rememberModel(sid, typeof input.model === 'string' ? input.model : input.model.id || input.model.display_name); } catch { /* best effort */ }
   const project = readProjects()[projectKey(cwd)];
   const known = readJson(paths.sessions, {})[sid];
   if (known?.replaced_by) return void process.stdout.write(replacedText(known));

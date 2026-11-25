@@ -54,7 +54,7 @@ Groups are optional; members without one are listed as `unassigned`. `role` stay
 
 ## Lead handoff
 
-A lead's context grows with every report. The handoff point is the lead's start (its context at its first turn as lead: system prompt, tools, skills, the handoff doc) plus a work budget (`DDASH_LEAD_WORK_BUDGET`, 100k tokens). It never goes above 80% of the model context window (`DDASH_CONTEXT_WINDOW`, 200k; 1M once a larger context is seen), and never below start + 20k, so a new lead is never told to hand off right away. Past that point the Stop hook tells the lead once to hand over and the sidebar marks it `handoff due`.
+A lead's context grows with every report. The handoff point is the lead's start (the first context in its transcript: system prompt, tools, skills, first prompt) plus a work budget (`DDASH_LEAD_WORK_BUDGET`, 100k tokens), cut to 80% of the model context window (`DDASH_CONTEXT_WINDOW`; detected: 1M for `[1m]` models, else 200k, and a session keeps the largest window seen so a compact does not shrink it). A lead that starts near the cap is told soon. A lead already running before this version gets its start from its transcript; with no transcript the cap is the handoff point. Past that point the Stop hook tells the lead once to hand over and the sidebar marks it `handoff due`.
 
 A lead whose start is over half the window is marked `large start`. Handoffs do not shrink the start: turn off the MCP servers and skills that lead does not need.
 
@@ -62,7 +62,7 @@ Handoff docs stay the same size however many handoffs there were:
 
 - **Current state only:** open items, members and their tasks, decisions changed since the last handoff, next steps. Write a new doc each time; do not copy or point to older ones. Finished work belongs in the plan, commits and CHANGELOG.
 - **Size cap:** `T handoff` refuses a doc over 6000 tokens (`DDASH_HANDOFF_MAX_TOKENS`; estimated from the text, Korean and other non-ASCII text counted high) and asks you to shorten it.
-- **Fixed rules apart:** `docs/teams/<team>/lead-rules.md` holds what does not change between leads (how to work with the user, Git rules). A template is created with the team (or on the first handoff). The new lead reads only the latest handoff doc and this file.
+- **Fixed rules apart:** `docs/teams/<team>/lead-rules.md` holds what does not change between leads (how to work with the user, Git rules). A template is created with the team; a handoff never creates it (when it is missing, `T handoff` warns and leaves it out of the new lead's prompt). The new lead reads only the latest handoff doc and this file.
 
 Steps:
 

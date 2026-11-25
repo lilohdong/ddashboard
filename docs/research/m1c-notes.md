@@ -1,11 +1,11 @@
 # M-1c notes: fixed-size lead handoffs, relative lead context limit
 
-Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node test/team.test.js` (57/57 pass; seven `M-1c:` tests, plus updated performHandoff and `/api/state` tests).
+Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node test/team.test.js` (62/62 pass after the review fixes; `M-1c:` tests, plus updated performHandoff and `/api/state` tests).
 
 ## Handoff point (rows 5–7)
 
-- `lib.leadLimit(baseline, seen)` → `{ baseline, window, at, budget, big }`:
-  `at = max(min(baseline + budget, 80% of window), baseline + MIN_GROWTH)`, `big = baseline > 50% of window`.
+- (Superseded by the review fixes below: no MIN_GROWTH floor, window from the model.)
+- `lib.leadLimit(baseline, window)` → `{ baseline, window, at, budget, big }`.
 - Baseline: the Stop hook records `s.lead_baseline` = the lead's context at its first stop as lead (first turn of a new lead after handoff; for a session made lead later, its context at that moment). Old leads without a baseline get one on their next turn after install.
 - Budget: `DDASH_LEAD_WORK_BUDGET` (100000). `MIN_GROWTH = min(budget, 20000)`.
 - **Conflict resolved:** "never above 80%" and "never before the context grew by the budget" cannot both hold when baseline + budget > 80%. I applied the 80% cap to the budget, but the notice always waits for at least `MIN_GROWTH` (20k) of growth. A new lead is therefore never told at once (no loop), and a lead with a huge start gets the `large start` warning instead. If the lead wants the full budget always, change `at` to `baseline + budget`.
@@ -34,3 +34,16 @@ Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node t
 - `T handoff <doc> --spawn` picks the runner like `spawn` (`pickRunner`): Orca up → interactive `claude --session-id <sid> ...` (no `-p`) in a new Orca terminal titled `lead <team>` at the worktree root; Orca down → headless `claude -p` as before. `--orca` / `--headless` force one and imply `--spawn`; both together are refused; `--orca` with Orca down is refused before the handoff is recorded. A failed Orca terminal (no flag) falls back to headless with a note.
 - The new lead is not pre-registered (unlike members): its first-prompt hook does the takeover as before.
 - Test: `M-1c: team.js handoff --spawn: ...` (57/57 pass).
+
+## Review fixes (9ccd685 review)
+
+1. Window: `contextWindow({ models, stored, seen })`: `DDASH_CONTEXT_WINDOW` if set; 1M when a model name has `[1m]` (SessionStart `input.model`, kept in `BOARD/models.json` because team sessions are not registered yet at SessionStart; the transcript's `message.model`; Claude settings `model` from `CLAUDE_CONFIG_DIR`/`~/.claude` and the project's `.claude/settings(.local).json`; `ANTHROPIC_MODEL`); else the stored `s.context_window` (at least 200k). A context above the window still means 1M.
+2. `large start` uses the same window (`leadLimit(baseline, window)`).
+3. `addTeam`, `removeTeams` and `performHandoff` (new lead) clear `lead_baseline`, `lead_baseline_unknown`, `lead_handoff_at`, `context_handoff_told`.
+4. Baseline = first main-thread assistant context in the transcript (first 4 MB), for new and already-running leads alike. None → `lead_baseline: 0`, `lead_baseline_unknown: true`, handoff point = 80% of the window (dashboard tooltip shows start `?`).
+5. `/api/state` uses the stored `context_window`.
+6. `at = min(baseline + budget, 80% of window)`; the 20k floor is gone. A lead whose start is above the cap is told on its first turn. Note: with an unchanged setup the next lead also starts above the cap, so it is told at once too; the `large start` badge is the way out (turn off MCP servers/skills).
+7. `envNum`: empty/invalid → default, `0` kept. Budget 0 = told on the first turn; `DDASH_HANDOFF_MAX_TOKENS=0` = no cap.
+8. Handoffs never create lead-rules.md (`existingLeadRules`); `T handoff` warns on stderr and leaves it out of the prompt.
+
+Tests isolate Claude settings (`CLAUDE_CONFIG_DIR` = test board, `ANTHROPIC_MODEL` and `DDASH_*` limits unset). 62/62 pass.

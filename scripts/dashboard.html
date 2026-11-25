@@ -438,7 +438,7 @@ function sessTags(s, tm) {
   if (tm?.mode !== 'team') return '';
   if (s.team === 'lead') {
     const limit = num(s.lead_handoff_at);
-    let over = limit && num(s.last_context) >= limit ? ` <span class="tag warn" title="${esc(t('tag.handoffTitle', { n: fullTok(limit), base: fullTok(num(s.lead_baseline)) }))}">${esc(t('tag.handoff'))}</span>` : '';
+    let over = limit && num(s.last_context) >= limit ? ` <span class="tag warn" title="${esc(t('tag.handoffTitle', { n: fullTok(limit), base: s.lead_baseline_unknown ? '?' : fullTok(num(s.lead_baseline)) }))}">${esc(t('tag.handoff'))}</span>` : '';
     if (s.baseline_big) over += ` <span class="tag warn" title="${esc(t('tag.bigStartTitle', { n: fullTok(num(s.lead_baseline)), w: fullTok(num(s.context_window)) }))}">${esc(t('tag.bigStart'))}</span>`;
     return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${s.team_name ? ` · ${esc(s.team_name)}` : ''}</span>${over}`;
   }

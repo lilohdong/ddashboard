@@ -179,7 +179,8 @@ function parseCard(text) {
   try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }
 
   // 4) Lead context limit (once per lead session).
-  const notice = leadContextNotice(sessions[sid], projects[sessions[sid].project_key]);
+  const lastModel = [...rows].reverse().find((r) => r?.type === 'assistant' && r.message?.model)?.message.model;
+  const notice = leadContextNotice(sessions[sid], projects[sessions[sid].project_key], { transcript: input.transcript_path, models: [lastModel], cwd });
 
   // 3) Hand over waiting messages (the session then stays "working").
   //    After a mode switch, the new instructions ride along once.
