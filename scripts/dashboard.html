@@ -60,6 +60,19 @@
   .today .row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
   .today .row span:last-child { color: var(--text); }
 
+  /* Team mode */
+  .group-head { display: flex; align-items: center; gap: 4px; }
+  .group-head .nav { flex: 1; min-width: 0; }
+  .mode-sel { flex: none; max-width: 120px; font: inherit; font-size: 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 2px; cursor: pointer; }
+  .sess.member { padding-left: 30px; }
+  .tag { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: 2px; white-space: nowrap; }
+  .tag.lead { color: var(--accent); border-color: currentColor; }
+  .tag.warn, .badge.warn { color: var(--blocked); border-color: currentColor; }
+  .card.report { opacity: 0.6; }
+  .badge.report { color: var(--muted); }
+  .pill { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .pill.on { border-color: var(--accent); color: var(--accent); }
+
   /* Main */
   .main { min-width: 0; }
   header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; z-index: 1; }
@@ -134,6 +147,7 @@
         <kbd>/</kbd>
       </div>
       <div class="filters" id="filters"></div>
+      <button class="pill" id="reports" hidden title="Member cards sent to their lead (team mode)">Member reports</button>
     </header>
     <div class="mode-bar" id="mode"></div>
     <div id="cards"></div>
@@ -155,6 +169,7 @@ const sideKey = () => (narrow.matches ? 'sideOpenNarrow' : 'sideOpen');
 let scope = store.get('scope', { kind: 'all' }); // { kind: 'all' | 'project' | 'session', id }
 let filter = store.get('filter', 'all');
 let showEnded = store.get('showEnded', false);
+let showReports = store.get('showReports', false); // team mode: also show member reports (dimmed)
 let drafts = {};
 let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archived_count: 0 };
 
@@ -202,7 +217,8 @@ function urgentBySession() {
   for (const [sid, c] of Object.entries(last)) {
     // Archived cards and ended sessions no longer need you.
     const archived = c.id in overrides ? overrides[c.id] : c.archived;
-    if (archived || state.sessions[sid]?.view === 'ended') continue;
+    // Member reports go to their lead, so they don't need you either.
+    if (archived || c.via_lead || state.sessions[sid]?.view === 'ended') continue;
     if (URGENT.has(c.status) && !answered(c, replied)) out[sid] = 1;
   }
   return out;
@@ -257,11 +273,52 @@ function todayHtml() {
   </div>`;
 }
 
+const teams = () => state.teams || {};
+// A member of a live lead stays listed under it even when its own run has ended.
+const underLead = (s) => s.team === 'member' && !s.lead_missing;
+
+// Sidebar order in team mode: each lead followed by its members (indented), then everyone else.
+function teamOrder(list, cmp) {
+  const byLead = {};
+  for (const s of list) if (underLead(s)) (byLead[s.lead] ||= []).push(s);
+  const out = [];
+  for (const l of list.filter((s) => s.team === 'lead').sort(cmp)) {
+    out.push([l, false]);
+    for (const m of (byLead[l.session_id] || []).sort(cmp)) out.push([m, true]);
+    delete byLead[l.session_id];
+  }
+  for (const ms of Object.values(byLead)) for (const m of ms.sort(cmp)) out.push([m, true]);
+  for (const s of list.filter((x) => x.team !== 'lead' && !underLead(x)).sort(cmp)) out.push([s, false]);
+  return out;
+}
+
+// solo / team switch next to the project name; choosing team picks the lead session.
+function modeSelect(p) {
+  const t = teams()[p];
+  if (!t) return '';
+  const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended');
+  const opts = [['solo', 'solo']];
+  for (const s of live) opts.push([`team:${s.session_id}`, `team · ${s.name}`]);
+  const value = t.mode === 'team' ? `team:${t.lead}` : 'solo';
+  if (t.mode === 'team' && !live.some((s) => s.session_id === t.lead)) opts.push([value, `team · ${t.lead_name || 'lead'} (ended)`]);
+  return `<select class="mode-sel" data-mode-key="${esc(t.key)}" data-project="${esc(p)}" title="Solo: every session posts its own cards. Team: only the lead posts; members report to the lead.">
+    ${opts.map(([v, label]) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+  </select>`;
+}
+
+function sessTags(s, t) {
+  if (t?.mode !== 'team') return '';
+  if (s.team === 'lead') return ` <span class="tag lead" title="Team lead">lead${t.lead_name ? ` · ${esc(t.lead_name)}` : ''}</span>`;
+  if (s.team === 'member') return ` <span class="tag" title="Team member role">${esc(s.role || 'member')}</span>${s.lead_missing ? ' <span class="tag warn" title="Its lead has ended, so its cards go straight to the dashboard">lead missing</span>' : ''}`;
+  return ' <span class="tag" title="Untagged session: posts straight to the dashboard">outside team</span>';
+}
+
 function renderSide() {
   const sessions = Object.values(state.sessions);
   const urgent = urgentBySession();
-  const ended = sessions.filter((s) => s.view === 'ended');
-  const visible = showEnded ? sessions : sessions.filter((s) => s.view !== 'ended');
+  const shown = (s) => showEnded || s.view !== 'ended' || underLead(s);
+  const ended = sessions.filter((s) => s.view === 'ended' && !underLead(s));
+  const visible = sessions.filter(shown);
 
   const groups = {};
   for (const s of visible) (groups[s.project] ||= []).push(s);
@@ -275,15 +332,20 @@ function renderSide() {
   const names = Object.keys(groups).sort();
   if (!names.length) html += `<div class="side-empty">No connected sessions.<br>Type <code>/ddashboard:dashboard</code> in a project.</div>`;
   for (const p of names) {
-    const list = groups[p].sort((a, b) => order[a.view] - order[b.view] || a.name.localeCompare(b.name));
-    const pu = list.filter((s) => urgent[s.session_id]).length;
+    const cmp = (a, b) => order[a.view] - order[b.view] || String(a.name).localeCompare(String(b.name));
+    const t = teams()[p];
+    const list = t?.mode === 'team' ? teamOrder(groups[p], cmp) : groups[p].sort(cmp).map((s) => [s, false]);
+    const pu = list.filter(([s]) => urgent[s.session_id]).length;
     html += `<div class="group">
-      <button class="nav group-title ${sel('project', p)}" data-kind="project" data-id="${esc(p)}"><span class="grow">${esc(p)}</span>${pu ? `<span class="count">${pu}</span>` : ''}</button>
-      ${list.map((s) => `
-        <button class="nav sess ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}">
+      <div class="group-head">
+        <button class="nav group-title ${sel('project', p)}" data-kind="project" data-id="${esc(p)}"><span class="grow">${esc(p)}</span>${pu ? `<span class="count">${pu}</span>` : ''}</button>
+        ${modeSelect(p)}
+      </div>
+      ${list.map(([s, member]) => `
+        <button class="nav sess${member ? ' member' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}">
           <span class="dot ${s.view}"></span>
           <span class="grow">
-            <span class="sname">${esc(s.name)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
+            <span class="sname">${esc(s.name)}${sessTags(s, t)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
             <span class="sub">${esc(s.branch || '')} · ${VIEW[s.view]}${s.pending ? ` · ${s.pending} queued` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
             ${usageLine(s)}
           </span>
@@ -312,11 +374,20 @@ function cardHtml(c, byCard) {
   const sess = state.sessions[c.session_id];
   const open = sess && sess.view !== 'ended';
   const details = typeof c.details === 'string' && c.details.trim() ? c.details : '';
+  const leadName = c.via_lead ? state.sessions[c.via_lead]?.name || 'lead' : '';
+  const replyBox = c.via_lead
+    ? `<div class="closed">Member report to ${esc(leadName)}. Reply on the lead's card.</div>`
+    : open ? `<form data-sid="${esc(c.session_id)}" data-id="${esc(c.id)}" data-title="${esc(c.title)}">
+        <textarea data-card="${esc(c.id)}" placeholder="Reply to this session…" title="Ctrl+Enter to send">${esc(drafts[c.id] || '')}</textarea>
+        <button>Send</button>
+      </form>` : `<div class="closed">This session has ended, so it can't receive replies.</div>`;
   return `
-    <article class="card">
+    <article class="card${c.via_lead ? ' report' : ''}">
       <div class="card-head">
         <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(STATUS[c.status] || c.status)}</span>${c.answered ? '<span class="badge replied">Replied</span>' : ''}
         ${c.archived ? '<span class="badge archived">Archived</span>' : ''}
+        ${c.via_lead ? `<span class="badge report">Report to ${esc(leadName)}</span>` : ''}
+        ${c.lead_missing ? '<span class="badge warn" title="Sent while this member had no live lead">Lead missing</span>' : ''}
         <span class="title">${esc(c.title)}</span>
         ${c.archived
           ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="Move back to the recent list">Unarchive</button>`
@@ -327,10 +398,7 @@ function cardHtml(c, byCard) {
       ${c.review?.length ? `<div class="review"><b>Check</b><ul>${c.review.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${details ? `<details data-details="${esc(c.id)}"${openDetails.has(c.id) ? ' open' : ''}><summary>Details</summary><div class="details-body">${esc(details)}</div></details>` : ''}
       <div class="replies">${(byCard[c.id] || []).map((r) => `<div class="reply"><b>You</b> ${esc(r.text)} · ${time(r.ts)}</div>`).join('')}</div>
-      ${open ? `<form data-sid="${esc(c.session_id)}" data-id="${esc(c.id)}" data-title="${esc(c.title)}">
-        <textarea data-card="${esc(c.id)}" placeholder="Reply to this session…" title="Ctrl+Enter to send">${esc(drafts[c.id] || '')}</textarea>
-        <button>Send</button>
-      </form>` : `<div class="closed">This session has ended, so it can't receive replies.</div>`}
+      ${replyBox}
     </article>`;
 }
 
@@ -359,6 +427,11 @@ function renderMain() {
       ${archivedView ? '<button data-archived>Back to recent</button>' : ''}`;
   }
   document.getElementById('mode').innerHTML = mode;
+
+  const rep = document.getElementById('reports');
+  rep.hidden = !Object.values(teams()).some((t) => t.mode === 'team');
+  rep.classList.toggle('on', showReports);
+  rep.textContent = showReports ? 'Member reports: shown' : 'Member reports: hidden';
 
   const byCard = {};
   for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
@@ -391,7 +464,7 @@ async function runSearch() {
 async function load() {
   saveDrafts();
   try {
-    state = await (await fetch('/api/state')).json();
+    state = await (await fetch(showReports ? '/api/state?reports=1' : '/api/state')).json();
   } catch { return; }
   if (scope.kind === 'session' && !state.sessions[scope.id]) scope = { kind: 'all' };
   await runSearch();
@@ -462,6 +535,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (e.target.closest('[data-clear-search]')) { clearSearch(); return; }
+  if (e.target.closest('#reports')) { showReports = !showReports; store.set('showReports', showReports); load(); return; }
   const nav = e.target.closest('[data-kind]');
   if (nav) {
     scope = nav.dataset.kind === 'all' ? { kind: 'all' } : { kind: nav.dataset.kind, id: nav.dataset.id };
@@ -496,6 +570,26 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '[' && !typing && plain) toggleSide();
 });
 
+// solo / team switch (team: the chosen session becomes the lead)
+document.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-mode-key]');
+  if (!sel) return;
+  const [mode, lead] = sel.value.split(':');
+  const who = mode === 'team' ? state.sessions[lead]?.name || lead : '';
+  const ask = mode === 'team'
+    ? `Team mode for ${sel.dataset.project}: "${who}" becomes the lead. Only the lead posts to the dashboard; members report to it. Continue?`
+    : `Solo mode for ${sel.dataset.project}: every session posts its own cards. Continue?`;
+  if (!confirm(ask)) { sel.blur(); renderSide(); return; }
+  const res = await fetch('/api/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: sel.dataset.modeKey, mode, lead }),
+  });
+  if (!res.ok) alert('Could not switch: ' + (await res.text()));
+  sel.blur();
+  load();
+});
+
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
@@ -514,7 +608,7 @@ document.addEventListener('submit', async (e) => {
 applySide();
 load();
 // Don't re-render while a reply is being typed.
-setInterval(() => { if (!document.activeElement?.matches('textarea')) load(); }, 3000);
+setInterval(() => { if (!document.activeElement?.matches('textarea, select')) load(); }, 3000);
 </script>
 </body>
 </html>
