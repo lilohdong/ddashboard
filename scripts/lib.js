@@ -2,7 +2,6 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
 const config = require('./core/config');
 const { BOARD_DIR, PORT, URL, paths, safeId } = require('./core/paths');
 const { ensureDir, readJson, writeJson, atomicWrite, appendJsonl, readJsonl, readTail } = require('./core/fsx');
@@ -10,6 +9,8 @@ const { git, gitOrNull: gitIn } = require('./core/git');
 const { newId } = require('./core/ids');
 const sessionsStore = require('./store/sessions');
 const projectsStore = require('./store/projects');
+const { alive, parseProcessList, processTable, processTableAsync, isClaudeProcess, findClaudePid, processName, napUntil } = require('./proc/table');
+const { killPid, descendants, killTree, killClaude } = require('./proc/kill');
 
 const RECENT_DAYS = config.get('DDASH_RECENT_DAYS');
 
@@ -24,11 +25,6 @@ function readStdin() {
 
 async function readHookInput() {
   try { return JSON.parse((await readStdin()) || '{}'); } catch { return {}; }
-}
-
-function alive(pid) {
-  if (!pid) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 function serverPid() {
@@ -759,144 +755,13 @@ function waitPid(sid) {
   return pid;
 }
 
-// The image name of a live process ('' when it is gone or cannot be read). Cheap (one tasklist/ps call), for
-// checking that a remembered pid still is the same program (pids are reused).
-function processName(pid) {
-  pid = Number(pid);
-  if (!(pid > 0) || !alive(pid)) return '';
-  try {
-    if (process.platform === 'win32') {
-      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 }).toString('utf8');
-      const m = out.match(/^"([^"]+)","(\d+)"/m);
-      return m && Number(m[2]) === pid ? m[1] : '';
-    }
-    return path.basename(execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).toString('utf8').trim());
-  } catch { return ''; }
-}
-
 // --- Processes (for stopping a replaced lead) ---
-
-const PS_LIST = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 })`t$(($_.CommandLine -replace "[`r`n`t]", " "))" }';
-
-// How to list every process: [file, args] (Windows: one CIM query, ~0.4 s).
-const PROC_CMD = () => (process.platform === 'win32'
-  ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_LIST]]
-  : ['ps', ['-A', '-o', 'pid=,ppid=,comm=,args=']]);
-
-// pid -> { pid, ppid, name, cmd, start? } from the list command's output. table.taken = when the read started (ms).
-// start (Windows only): creation time (FILETIME), to tell a parent from a later process that reused its pid.
-function parseProcessList(out, taken = Date.now()) {
-  const table = new Map();
-  table.taken = taken;
-  if (process.platform === 'win32') {
-    for (const line of String(out).split(/\r?\n/)) {
-      const [pid, ppid, name, start, ...cmd] = line.split('\t');
-      if (Number(pid)) table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), name: name || '', start: Number(start) || 0, cmd: cmd.join(' ') });
-    }
-  } else {
-    for (const line of String(out).split('\n')) {
-      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
-      if (m) table.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), name: path.basename(m[3]), cmd: m[4] });
-    }
-  }
-  return table;
-}
-
-// pid -> { pid, ppid, name, cmd } for every process. Empty on failure (table.taken is then 0).
-function processTable() {
-  const taken = Date.now();
-  const [file, args] = PROC_CMD();
-  try {
-    const out = execFileSync(file, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 10000 }).toString('utf8');
-    return parseProcessList(out, taken);
-  } catch {
-    const empty = new Map();
-    empty.taken = 0;
-    return empty;
-  }
-}
-
-// Same without blocking (the dashboard server): cb(table).
-function processTableAsync(cb) {
-  const taken = Date.now();
-  const [file, args] = PROC_CMD();
-  require('child_process').execFile(file, args, { windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
-    if (err) { const empty = new Map(); empty.taken = 0; return cb(empty); }
-    cb(parseProcessList(stdout, taken));
-  });
-}
-
-// The Claude Code process: native claude(.exe), or node/bun running the claude-code package.
-function isClaudeProcess(p) {
-  if (!p) return false;
-  const name = String(p.name).toLowerCase().replace(/\.exe$/, '');
-  if (name === 'claude') return true;
-  return /^(node|bun)$/.test(name) && /claude-code/i.test(p.cmd);
-}
-
-// Nearest Claude Code ancestor of a process (hooks and tool commands run under it through a shell). 0 if none.
-function findClaudePid(startPid = process.ppid, table = processTable()) {
-  let pid = Number(startPid);
-  for (let i = 0; i < 30 && pid; i++) {
-    const p = table.get(pid);
-    if (!p) return 0;
-    if (isClaudeProcess(p)) return pid;
-    if (p.ppid === pid) return 0;
-    pid = p.ppid;
-  }
-  return 0;
-}
 
 // Save the session's Claude Code pid (best effort). Returns the pid or 0.
 function recordClaudePid(sid, startPid = process.ppid) {
   const pid = findClaudePid(startPid);
   if (!pid) return 0;
   return sessionsStore.patch(sid, { claude_pid: pid }) ? pid : 0;
-}
-
-function killPid(pid) {
-  try { process.kill(pid); return true; } catch { return false; }
-}
-
-// Pids below pid in a process table (children, grandchildren, ...).
-function descendants(pid, table = processTable()) {
-  const out = [];
-  const queue = [Number(pid)];
-  while (queue.length) {
-    const p = queue.shift();
-    for (const q of table.values()) if (q.ppid === p && q.pid !== p && !out.includes(q.pid)) { out.push(q.pid); queue.push(q.pid); }
-  }
-  return out;
-}
-
-// Kill pid and everything it started (tool commands of a Claude process, the program in a terminal window).
-// Windows: taskkill /T /F. Elsewhere: its process group when it leads one, then each descendant, then pid.
-// Returns true if pid was alive and is gone.
-function killTree(pid, table) {
-  pid = Number(pid);
-  if (!(pid > 0) || !alive(pid)) return false;
-  if (process.platform === 'win32') {
-    try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15000 }); } catch { /* checked below */ }
-    if (alive(pid)) killPid(pid);
-  } else {
-    const kids = descendants(pid, table || processTable());
-    try { process.kill(-pid, 'SIGTERM'); } catch { /* not a group leader */ }
-    for (const k of kids.reverse()) { try { process.kill(k, 'SIGTERM'); } catch { /* gone */ } }
-    killPid(pid);
-    if (!napUntil(() => !alive(pid), 1000)) {
-      // SIGTERM ignored: force it (bug-005, nothing may stay behind).
-      for (const k of [...kids, pid]) { try { process.kill(k, 'SIGKILL'); } catch { /* gone */ } }
-    }
-  }
-  napUntil(() => !alive(pid), 1000); // up to 1 s for the exit to show
-  return !alive(pid);
-}
-
-// Sleep in small steps (sync) until done() or ms passed. Returns done().
-function napUntil(done, ms) {
-  const nap = new Int32Array(new SharedArrayBuffer(4));
-  for (let i = 0; i < ms / 50 && !done(); i++) Atomics.wait(nap, 0, 0, 50);
-  return done();
 }
 
 // --- Orphans (bug-005) ---
@@ -1012,13 +877,6 @@ function stopSessionProcesses(s, table) {
   if (!needsProcesses(s)) return { waiter: false, shells: [] };
   table = table || processTable();
   return { waiter: stopWaiter(s.session_id, table), shells: reapToolShells(s.claude_pid, table) };
-}
-
-// Kill pid and its tool processes, only if it is still a Claude Code process (the pid may have been reused).
-function killClaude(pid) {
-  const table = alive(pid) ? processTable() : null;
-  if (!table || !isClaudeProcess(table.get(pid))) return false;
-  return killTree(pid, table);
 }
 
 // Read projects.json, let fn change it, write it at once (keeps changes made since an earlier read). Returns fn's result.
