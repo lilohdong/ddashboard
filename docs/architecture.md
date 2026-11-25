@@ -412,6 +412,15 @@ Inbox message: `id, ts, type (reply|report|order), session_id, from, role, text 
 Retention (server, daily): `inbox/*/done` > 7 days, `logs/` > 30 days or 50 MB, `replies.jsonl` rotated monthly like
 cards (`replies/YYYY-MM.jsonl`, schema 2 migration), `archived.json` entries for cards older than the oldest card file.
 
+**As built (step 13).** Schema 2 copies `replies.jsonl` into `replies/YYYY-MM.jsonl` and leaves `replies.jsonl` in
+place, read-only (like the 0.1.0 `cards.jsonl`), so a 0.2.x server still sees the old replies; lines an old server
+appends later are merged by id on read and copied over by the retention job. The projects migration (0.2.x and
+pre-M-1b projects without `teams`) stays shape-driven on every read (`store/migrate.projects`; transform in
+`domain/team.migrateProject`, file/git work in `app/teams`), because an old plugin can write that shape again.
+Retention drops `archived.json` entries whose card is in no card file (card files are never deleted, so this only
+removes entries of cards that are gone). `store/retention.js`, config `DDASH_RETAIN_DONE_DAYS`, `DDASH_RETAIN_LOG_DAYS`,
+`DDASH_RETAIN_LOG_MB`; runs 5 s after server start and every 24 h.
+
 ---
 
 ## 6. Refactor plan
