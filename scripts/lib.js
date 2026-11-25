@@ -338,6 +338,7 @@ function leadRulesText(sid, name) {
   const t = `node "${slash(ensureTeamBin())}" ${sid}`;
   return `${rulesText(sid)}- Team mode: you are the lead of team "${name || 'lead'}" (other teams in this repo have their own leads and members). The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
 - Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless] "<task>" (visible in Orca when it runs) | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
+- Handoff: when told, write a new doc with only the current state (under ${HANDOFF_MAX_TOKENS} tokens; never copy older handoff docs). Fixed rules for every lead of this team go in docs/teams/${name || 'lead'}/lead-rules.md.
 - Groups (shared memory in docs/teams/${name || 'lead'}/<g>/ of your worktree: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
 `;
 }
@@ -473,6 +474,35 @@ const worktreeRoot = (dir) => slash(gitIn(['rev-parse', '--show-toplevel'], dir)
 // docs/teams/<name>/ in the team's worktree: the parent of its group folders.
 const teamDir = (team, name) => slash(path.join(team.worktree, 'docs', 'teams', name));
 
+// docs/teams/<name>/lead-rules.md: the lead's fixed rules (how to work with the user, Git rules, ...).
+// Every new lead reads it together with the latest handoff doc, so handoff docs carry only the current state.
+const leadRulesPath = (team, name) => slash(path.join(teamDir(team, name), 'lead-rules.md'));
+const leadRulesTemplate = (name) => `# Team ${name}: lead rules
+
+<!-- Read by every lead of this team, together with the latest handoff doc. Put here what does not change
+     between leads: how to work with the user, Git and review rules, who decides what. Keep it short.
+     The current state (open items, members, recent decisions) goes in the handoff doc, not here. -->
+
+## Working with the user
+
+## Git and review
+
+## Members
+`;
+
+// Create the team's lead-rules.md from the template when it is missing; returns its path ('' on failure).
+function ensureLeadRules(team, name) {
+  if (!team?.worktree) return '';
+  const file = leadRulesPath(team, name);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, leadRulesTemplate(name), { flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'EEXIST') return '';
+  }
+  return file;
+}
+
 function syncMode(p) {
   if (hasTeams(p)) p.mode = 'team';
   else if (p.mode) p.mode = 'solo';
@@ -572,6 +602,7 @@ function addTeam(key, name, lead) {
   const led = teamOfLead(p, lead);
   if (led) return { ok: false, code: 409, error: `this session already leads team ${led.name}` };
   p.teams[team] = { lead, worktree: worktreeRoot(sessions[lead].cwd || p.cwd || process.cwd()), groups: {}, created: new Date().toISOString() };
+  ensureLeadRules(p.teams[team], team);
   bumpMode(p);
   sessions[lead].kind = 'lead';
   writeJson(paths.sessions, sessions);
@@ -859,7 +890,8 @@ function performHandoff(from, to, doc, opts = {}) {
   const wp = waitPid(from);
   const waitKilled = wp ? kill(wp) : false;
   const claudeKilled = old.claude_pid ? stopClaude(Number(old.claude_pid)) : false;
-  return { ok: true, team: t.name, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
+  const rules = ensureLeadRules(t.team, t.name);
+  return { ok: true, team: t.name, rules, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
 }
 
 // --- Groups (team mode): docs/teams/<team>/<group>/ in the team lead's worktree holds a group's memory ---
@@ -1189,17 +1221,63 @@ function markEnded(sid) {
   return { ok: true };
 }
 
-// Lead context limit: over it, the lead is told once (Stop hook) to hand off.
-const LEAD_CONTEXT_LIMIT = Number(process.env.DDASH_LEAD_CONTEXT_LIMIT) || 150000;
-const leadContextText = (sid, ctx) => `[ddashboard] Your context (${ctx} tokens) is over the team lead limit (${LEAD_CONTEXT_LIMIT}). Finish the current step, write a handoff doc (state, open items, members and their tasks, decisions, next steps), then run: node "${slash(ensureTeamBin())}" ${sid} handoff <doc-path>`;
+// Lead context limit, relative to where the lead started (plan M-1c):
+//   baseline   = the lead's context at its first turn as lead (system prompt, tools, skills, handoff doc)
+//   handoff at = baseline + work budget, never above 80% of the model context window,
+//                and never less than MIN_GROWTH above the baseline (a new lead is never told at once: no handoff loops).
+// DDASH_LEAD_CONTEXT_LIMIT, when set, is an absolute limit that replaces baseline + budget (same guards).
+const LEAD_WORK_BUDGET = Number(process.env.DDASH_LEAD_WORK_BUDGET) || 100000;
+const LEAD_CONTEXT_LIMIT = Number(process.env.DDASH_LEAD_CONTEXT_LIMIT) || 0; // 0: relative limit
+const CONTEXT_WINDOW = Number(process.env.DDASH_CONTEXT_WINDOW) || 200000;
+const LARGE_WINDOW = 1000000;
+const WINDOW_CAP = 0.8;
+const BASELINE_WARN = 0.5;
+const MIN_GROWTH = Math.min(LEAD_WORK_BUDGET, 20000);
+const HANDOFF_MAX_TOKENS = Number(process.env.DDASH_HANDOFF_MAX_TOKENS) || 6000;
 
-// Once per lead session: the handoff notice when its last turn's context is over the limit ('' otherwise).
-// Works on the given objects; the caller saves the session.
+// Model context window: DDASH_CONTEXT_WINDOW (200k), or 1M once a context above that was seen.
+function contextWindow(...seen) {
+  const top = Math.max(0, ...seen.map((v) => Number(v) || 0));
+  return top > CONTEXT_WINDOW ? Math.max(LARGE_WINDOW, CONTEXT_WINDOW) : CONTEXT_WINDOW;
+}
+
+// The handoff point of a lead with this baseline: { baseline, window, at, budget, big }.
+function leadLimit(baseline, seen = 0) {
+  const b = Number(baseline) || 0;
+  const window = contextWindow(b, seen);
+  const cap = Math.floor(window * WINDOW_CAP);
+  const wanted = LEAD_CONTEXT_LIMIT || b + LEAD_WORK_BUDGET;
+  const at = Math.max(Math.min(wanted, cap), b + MIN_GROWTH);
+  return { baseline: b, window, at, budget: at - b, big: b > window * BASELINE_WARN };
+}
+
+// Token estimate for a text, on the high side: ASCII ~3.5 chars per token; other characters
+// (Korean, CJK, symbols) count 1.5 tokens each.
+function estimateTokens(text) {
+  let ascii = 0;
+  let other = 0;
+  for (const ch of String(text || '')) {
+    if (ch.codePointAt(0) < 128) ascii++;
+    else other++;
+  }
+  return Math.ceil(ascii / 3.5 + other * 1.5);
+}
+
+const leadContextText = (sid, ctx, lim) => `[ddashboard] Your context (${ctx} tokens) has grown by ${ctx - lim.baseline} since you started as team lead (start ${lim.baseline}, handoff at ${lim.at}). Finish the current step, then write a NEW handoff doc (under ${HANDOFF_MAX_TOKENS} tokens) with only the current state: open items, members and their tasks, decisions changed since the last handoff, next steps. Do not copy or point to older handoff docs; finished work belongs in the plan, commits and CHANGELOG, and fixed rules in the team's lead-rules.md. Then run: node "${slash(ensureTeamBin())}" ${sid} handoff <doc-path>`;
+
+// Once per lead session: the handoff notice when its last turn's context is past its handoff point ('' otherwise).
+// The first turn as lead records the baseline. Works on the given objects; the caller saves the session.
 function leadContextNotice(s, p) {
-  if (!s || teamRole(s, p) !== 'lead' || s.context_handoff_told) return '';
-  if (!(Number(s.last_context) > LEAD_CONTEXT_LIMIT)) return '';
+  if (!s || teamRole(s, p) !== 'lead') return '';
+  const ctx = Number(s.last_context) || 0;
+  if (!ctx) return '';
+  if (!(Number(s.lead_baseline) > 0)) s.lead_baseline = ctx;
+  const lim = leadLimit(s.lead_baseline, ctx);
+  s.lead_handoff_at = lim.at;
+  s.context_window = lim.window;
+  if (s.context_handoff_told || ctx < lim.at) return '';
   s.context_handoff_told = true;
-  return leadContextText(s.session_id, Number(s.last_context));
+  return leadContextText(s.session_id, ctx, lim);
 }
 
 const replacedText = (s) => `[ddashboard] This session was replaced as team lead by ${s.replaced_by} (handoff). Stop working now: no more tool calls or file changes. Start a new session for other work.`;
@@ -1213,7 +1291,8 @@ module.exports = {
   DEFAULT_SPAWN, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
-  STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, leadContextNotice,
+  STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
+  leadRulesPath, ensureLeadRules,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
   pruneGroup, groupContext, memberStart, BRIEF_STALE_COMMITS, checkBriefs, LANG_NAMES, readSettings, saveSettings,
   TEAM_NAME, teamsOf, hasTeams, teamOfLead, teamOfSession, teamSlug, worktreeRoot, migrateProject, readProjects,

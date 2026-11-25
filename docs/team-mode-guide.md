@@ -54,13 +54,23 @@ Groups are optional; members without one are listed as `unassigned`. `role` stay
 
 ## Lead handoff
 
-A lead's context grows with every report. When its context passes `DDASH_LEAD_CONTEXT_LIMIT` (150k tokens by default), the Stop hook tells it once to hand over and the sidebar marks it `handoff due`:
+A lead's context grows with every report. The handoff point is the lead's start (its context at its first turn as lead: system prompt, tools, skills, the handoff doc) plus a work budget (`DDASH_LEAD_WORK_BUDGET`, 100k tokens). It never goes above 80% of the model context window (`DDASH_CONTEXT_WINDOW`, 200k; 1M once a larger context is seen), and never below start + 20k, so a new lead is never told to hand off right away. Past that point the Stop hook tells the lead once to hand over and the sidebar marks it `handoff due`.
 
-1. The lead writes a handoff doc: goals, decisions so far, open tasks, member ids and roles, where things are. Short; the new lead reads only this.
+A lead whose start is over half the window is marked `large start`. Handoffs do not shrink the start: turn off the MCP servers and skills that lead does not need.
+
+Handoff docs stay the same size however many handoffs there were:
+
+- **Current state only:** open items, members and their tasks, decisions changed since the last handoff, next steps. Write a new doc each time; do not copy or point to older ones. Finished work belongs in the plan, commits and CHANGELOG.
+- **Size cap:** `T handoff` refuses a doc over 6000 tokens (`DDASH_HANDOFF_MAX_TOKENS`; estimated from the text, Korean and other non-ASCII text counted high) and asks you to shorten it.
+- **Fixed rules apart:** `docs/teams/<team>/lead-rules.md` holds what does not change between leads (how to work with the user, Git rules). A template is created with the team (or on the first handoff). The new lead reads only the latest handoff doc and this file.
+
+Steps:
+
+1. The lead writes a new handoff doc with the current state (see above).
 2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead headless instead.
 3. Start the new lead with that prompt, e.g. in a new terminal:
    ```
-   claude "[ddash lead-handoff from=<old id> doc=<path>] Read the handoff doc and take over as team lead. Start the wait command from your instructions."
+   claude "[ddash lead-handoff from=<old id> doc=<path>] Read only this handoff doc and the team rules <team dir>/lead-rules.md (not older handoff docs), then take over as team lead. Start the wait command from your instructions."
    ```
 4. When the new lead's first prompt is submitted, the hook makes it the lead of the old lead's team (name, worktree and groups stay), moves that team's members and any pending messages to it, marks the old lead ended, and stops the old lead's wait command and Claude process. If the old process cannot be stopped, the old session is told to stop on its next turn and its prompts are refused.
 

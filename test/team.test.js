@@ -241,7 +241,9 @@ test('performHandoff: reassigns lead and members, moves inbox, stops the old lea
       kill: (pid) => { killed.push(pid); return true; },
       killClaude: (pid) => { killed.push(`claude:${pid}`); return true; },
     });
-    assert.deepEqual(r, { ok: true, team: 'Alpha', members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
+    const rules = slash(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'));
+    assert.deepEqual(r, { ok: true, team: 'Alpha', rules, members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
+    assert.ok(fs.existsSync(rules)); // created on handoff when missing
   } finally { waiter.kill(); }
   assert.deepEqual(killed, [waiter.pid, 'claude:999999']);
   const s = readJson(paths.sessions, {});
@@ -309,23 +311,63 @@ test('Stop hook: a replaced lead is told to stop once', () => {
   assert.equal(allCards().length, 0);
 });
 
-test('Stop hook: a lead over the context limit is told once to hand off', () => {
+// A transcript with one turn per context size (each turn: a human prompt, then one assistant message).
+function contextTurns(file, sizes) {
+  const rows = sizes.flatMap((c, i) => [
+    { type: 'user', uuid: `u${i}`, message: { content: 'go' } },
+    { type: 'assistant', message: { id: `a${i}`, usage: { input_tokens: 10, cache_read_input_tokens: c - 10, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+  ]);
+  fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+
+test('M-1c: Stop hook tells the lead once, after its context grew by the work budget', () => {
   teamFixture();
   const transcript = path.join(BOARD, 't.jsonl');
-  const rows = [
-    { type: 'user', uuid: 'u1', message: { content: 'go' } },
-    { type: 'assistant', message: { id: 'a1', usage: { input_tokens: 10, cache_read_input_tokens: 500, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
-  ];
-  fs.writeFileSync(transcript, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  const env = { DDASH_LEAD_CONTEXT_LIMIT: '400' };
-  const out = JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env));
+  const env = { DDASH_LEAD_WORK_BUDGET: '300' };
+  const stop = (sid, sizes) => { contextTurns(transcript, sizes); return runHook('stop-card.js', { session_id: sid, cwd: CWD, transcript_path: transcript }, env); };
+  assert.equal(stop('L1', [510]), ''); // first turn: baseline
+  assert.equal(readJson(paths.sessions, {}).L1.lead_baseline, 510);
+  assert.equal(readJson(paths.sessions, {}).L1.lead_handoff_at, 810);
+  assert.equal(stop('L1', [510, 800]), ''); // grew 290 < 300
+  const out = JSON.parse(stop('L1', [510, 800, 820]));
   assert.equal(out.decision, 'block');
-  assert.match(out.reason, /context \(510 tokens\) is over the team lead limit \(400\).*bin\/team\.js" L1 handoff <doc-path>/);
+  assert.match(out.reason, /context \(820 tokens\) has grown by 310 since you started as team lead \(start 510, handoff at 810\)/);
+  assert.match(out.reason, /NEW handoff doc \(under 6000 tokens\).*Do not copy or point to older handoff docs.*bin\/team\.js" L1 handoff <doc-path>/);
   assert.equal(readJson(paths.sessions, {}).L1.context_handoff_told, true);
-  fs.appendFileSync(transcript, JSON.stringify({ type: 'assistant', message: { id: 'a2', usage: { input_tokens: 20, cache_read_input_tokens: 600 } } }) + '\n');
-  assert.equal(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env), ''); // once
-  // Members and solo sessions are never told.
-  assert.equal(runHook('stop-card.js', { session_id: 'O1', cwd: CWD, transcript_path: transcript }, env), '');
+  assert.equal(stop('L1', [510, 800, 820, 900]), ''); // once
+  // Members and solo sessions are never told and get no baseline.
+  assert.equal(stop('O1', [5000]), '');
+  assert.equal(stop('M1', [5000]), '');
+  assert.equal(readJson(paths.sessions, {}).M1.lead_baseline, undefined);
+});
+
+test('M-1c: no handoff loop: a new lead that starts above the limit is not told at once', () => {
+  teamFixture();
+  const transcript = path.join(BOARD, 't.jsonl');
+  const env = { DDASH_LEAD_CONTEXT_LIMIT: '400', DDASH_LEAD_WORK_BUDGET: '300' };
+  const stop = (sizes) => { contextTurns(transcript, sizes); return runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env); };
+  assert.equal(stop([510]), ''); // the absolute override (400) is below the start: wait for the budget floor (300)
+  assert.equal(stop([510, 700]), '');
+  assert.match(JSON.parse(stop([510, 700, 810])).reason, /start 510, handoff at 810/);
+});
+
+test('M-1c: leadLimit: baseline + budget, capped at 80% of the window, never below the budget floor', () => {
+  assert.deepEqual(lib.leadLimit(40000), { baseline: 40000, window: 200000, at: 140000, budget: 100000, big: false });
+  assert.equal(lib.leadLimit(90000).at, 160000); // 80% of 200k
+  const big = lib.leadLimit(150000);
+  assert.equal(big.big, true); // over half the window
+  assert.equal(big.at, 170000); // the cap is below the start: still 20k of work first
+  const wide = lib.leadLimit(40000, 300000); // a context over 200k was seen: 1M window
+  assert.equal(wide.window, 1000000);
+  assert.equal(wide.at, 140000);
+  assert.equal(lib.leadLimit(600000).at, 700000);
+});
+
+test('M-1c: estimateTokens counts Korean and other non-ASCII text high', () => {
+  assert.equal(lib.estimateTokens('abcdefg'), 2);
+  assert.equal(lib.estimateTokens('가나다라'), 6);
+  assert.equal(lib.estimateTokens(''), 0);
+  assert.ok(lib.estimateTokens('한'.repeat(4001)) > 6000);
 });
 
 test('UserPromptSubmit: member tag registers the member; replaced lead prompts are blocked', () => {
@@ -443,6 +485,33 @@ test('team.js show and handoff', () => {
   assert.equal(teamConf().handoff.from, 'L1');
   assert.match(r.out, /members of team Alpha move to it/);
   assert.equal(team.main(['M1', 'handoff', doc]).code, 1); // not the lead
+});
+
+test('M-1c: team.js handoff refuses a doc over 6000 tokens and points the new lead at lead-rules.md', () => {
+  teamFixture();
+  const doc = path.join(BOARD, 'handoff.md');
+  fs.writeFileSync(doc, '# 인수인계\n' + '상태 '.repeat(2000)); // ~6000 chars, 4000 of them Korean: over the limit
+  const r = team.main(['L1', 'handoff', doc]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /handoff doc is too long: about \d+ tokens \(limit 6000\)\. Shorten it/);
+  assert.equal(teamConf().handoff, undefined);
+  fs.writeFileSync(doc, '# handoff\n' + 'state '.repeat(2000)); // 12000 ASCII chars: fine
+  const ok = team.main(['L1', 'handoff', doc]);
+  assert.equal(ok.code, 0, ok.out);
+  const rules = slash(path.join(CWD, 'docs', 'teams', 'Alpha', 'lead-rules.md'));
+  assert.ok(ok.out.includes(`Read only this handoff doc and the team rules ${rules} (not older handoff docs)`), ok.out);
+  assert.match(fs.readFileSync(rules, 'utf8'), /# Team Alpha: lead rules/);
+});
+
+test('M-1c: a new team gets a lead-rules.md template; an existing one is kept', () => {
+  teamFixture();
+  const file = path.join(CWD, 'docs', 'teams', 'Beta', 'lead-rules.md');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'mine');
+  assert.equal(lib.addTeam(KEY, 'Beta', 'O1').ok, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'mine');
+  assert.equal(lib.addTeam(KEY, 'Gamma', 'M1').ok, true);
+  assert.match(fs.readFileSync(path.join(CWD, 'docs', 'teams', 'Gamma', 'lead-rules.md'), 'utf8'), /lead rules/);
 });
 
 // --- Orca (visible members). A fake orca logs its calls; FAKE_ORCA_UP / _WRITABLE / _FAIL steer its replies. ---
@@ -658,7 +727,7 @@ test('server: forget, mark ended, spawn from the dashboard', async () => {
   });
 });
 
-test('server: unresponsive marker and lead context limit in /api/state', async () => {
+test('server: unresponsive marker and lead handoff point in /api/state', async () => {
   teamFixture();
   const old = new Date(Date.now() - 2 * 3600e3).toISOString();
   const s = readJson(paths.sessions, {});
@@ -666,12 +735,16 @@ test('server: unresponsive marker and lead context limit in /api/state', async (
   s.Q2 = session('Q2', { last_seen: old });
   s.Q3 = session('Q3', { last_seen: old, state: 'working' });
   s.Q4 = session('Q4', { last_seen: old, state: 'ended', ended: old });
+  s.L1.lead_baseline = 120000;
   writeJson(paths.sessions, s);
   fs.mkdirSync(paths.inbox('Q2'), { recursive: true });
   fs.writeFileSync(path.join(paths.inbox('Q2'), 'wait.lock'), String(process.pid)); // live waiter
   await withServer(async (_post, base) => {
     const st = await (await fetch(`${base}/api/state`)).json();
-    assert.equal(st.lead_context_limit, 150000);
+    assert.equal(st.lead_context_limit, undefined);
+    assert.equal(st.sessions.L1.lead_handoff_at, 160000); // 80% of 200k
+    assert.equal(st.sessions.L1.baseline_big, true); // started over half the window
+    assert.equal(st.sessions.L1.context_window, 200000);
     const un = Object.values(st.sessions).filter((x) => x.unresponsive).map((x) => x.session_id);
     assert.deepEqual(un, ['Q1']);
   });

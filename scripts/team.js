@@ -346,13 +346,16 @@ function cmdHandoff(leadSid, argv) {
   if (!words[0]) throw new Error('handoff needs the path of your handoff doc.');
   const doc = path.resolve(words.join(' ')).replace(/\\/g, '/');
   if (!fs.existsSync(doc)) throw new Error(`handoff doc not found: ${doc}`);
+  const tokens = lib.estimateTokens(fs.readFileSync(doc, 'utf8'));
+  if (tokens > lib.HANDOFF_MAX_TOKENS) throw new Error(`handoff doc is too long: about ${tokens} tokens (limit ${lib.HANDOFF_MAX_TOKENS}). Shorten it to the current state only (open items, members and tasks, changed decisions, next steps); move finished work to the plan/commits and fixed rules to the team's lead-rules.md. Then run handoff again.`);
   const { lead, project, projects } = context(leadSid);
   const own = ownTeam(project, leadSid);
   // This command runs under the lead's own Claude process: remember its pid so the takeover can stop it.
   const claudePid = lib.recordClaudePid(leadSid, process.ppid);
   own.team.handoff = { from: leadSid, doc, ts: new Date().toISOString() };
+  const rules = lib.ensureLeadRules(own.team, own.name);
   writeJson(paths.projects, projects);
-  const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read the handoff doc and take over as team lead. Start the wait command from your instructions.`;
+  const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read only this handoff doc${rules ? ` and the team rules ${rules}` : ''} (not older handoff docs), then take over as team lead. Start the wait command from your instructions.`;
   const stop = claudePid ? `this session (Claude pid ${claudePid}) is stopped` : 'this session is told to stop (its Claude process was not found)';
   if (flags.spawn) {
     const sid = crypto.randomUUID();

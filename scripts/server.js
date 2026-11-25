@@ -3,7 +3,8 @@
 //   GET  /            dashboard page (GET /i18n.js: its text in en, ko, zh-CN)
 //   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
-//                     token usage (usage_total for connected sessions, usage_today), context_warn, lead_context_limit,
+//                     token usage (usage_total for connected sessions, usage_today), context_warn, lead sessions' lead_baseline, lead_handoff_at,
+//                     context_window and baseline_big (start over half the window),
 //                     teams (mode and teams per project: lead, worktree, groups). ?reports=1 also returns member
 //                     reports (via_lead cards).
 //   POST /api/mode    {project, mode: team, lead, team?} -> add a team led by that session (a name in use is refused)
@@ -22,7 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
-  isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
+  isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
   readProjects, teamOfSession, teamsOf, own,
 } = require('./lib');
 const cards = require('./cards');
@@ -130,6 +131,10 @@ const server = http.createServer((req, res) => {
       s.team = teamRole(s, projects[s.project_key]);
       const own = s.team === 'lead' || s.team === 'member' ? teamOfSession(s, projects[s.project_key]) : null;
       if (own) s.team_name = own.name;
+      if (s.team === 'lead' && Number(s.lead_baseline) > 0) {
+        const lim = leadLimit(s.lead_baseline, s.last_context);
+        Object.assign(s, { lead_handoff_at: lim.at, context_window: lim.window, baseline_big: lim.big });
+      }
       if (s.team === 'member' && routeCard(sessions, projects, s.session_id).lead_missing) s.lead_missing = true;
     }
     const { cards: recent, last_by_session, archived_count } = cards.state(300, { reports: url.searchParams.get('reports') === '1' });
@@ -144,7 +149,6 @@ const server = http.createServer((req, res) => {
       usage_total,
       usage_today,
       context_warn: CONTEXT_WARN,
-      lead_context_limit: LEAD_CONTEXT_LIMIT,
       stale_min: STALE_MIN,
       settings: { lang: readSettings().lang || null },
     });

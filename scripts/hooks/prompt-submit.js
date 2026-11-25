@@ -22,7 +22,7 @@ function handoffNote(tag, res) {
   if (!res.ok) return `[ddashboard] Lead handoff failed: ${res.error}. You are registered as an ordinary session.\n`;
   const stopped = res.claude_killed ? 'its Claude process was stopped'
     : 'its Claude process could not be stopped, so it gets a stop notice on its next turn';
-  return `[ddashboard] You took over as lead of team "${res.team}" from ${tag.from}${tag.doc ? `. Read the handoff doc first: ${tag.doc}` : ''}.
+  return `[ddashboard] You took over as lead of team "${res.team}" from ${tag.from}${tag.doc ? `. Read the handoff doc first: ${tag.doc}` : ''}${res.rules ? `${tag.doc ? ' and' : '. Read'} the team's fixed rules: ${res.rules}` : ''}. Read only these (not older handoff docs).
 The members (${res.members}) now report to you; ${res.moved} pending message(s) moved to your inbox; the old lead is ended and ${stopped}.
 `;
 }
