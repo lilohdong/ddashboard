@@ -147,8 +147,8 @@ test('every state write in scripts/ goes through domain/session (no direct state
     }
   };
   walk(SCRIPTS);
-  // Display copies (team.js cmdList / cmdSend, server /api/state) are not writes; they go away in step 5.
-  const allowed = [/^team\.js:.*Object\.assign\(s, \{ state: 'ended'/, /^team\.js:.*m\.state = 'ended'/, /^server\.js:.*Object\.assign\(sessions\[sid\], \{ state: 'ended'/];
+  // Display copies in team.js (cmdList / cmdSend after markGone) are not writes.
+  const allowed = [/^team\.js:.*Object\.assign\(s, \{ state: 'ended'/, /^team\.js:.*m\.state = 'ended'/];
   assert.deepEqual(bad.filter((b) => !allowed.some((a) => a.test(b.replace(/\\/g, '/')))), []);
 });
 

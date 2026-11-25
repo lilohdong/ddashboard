@@ -31,9 +31,9 @@ try { process.chdir(os.homedir()); } catch { /* stay */ }
 const fs = require('fs');
 const path = require('path');
 const {
-  BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
-  isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
-  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, sessionGone, markGone, waitPid, processTableAsync, sweepWaiters,
+  BOARD_DIR, PORT, paths, readJson, writeJson, appendJsonl, ensureDir, safeId, teamRole, setMode,
+  isEnded, forgetSessions, markEnded, deliver, readSettings, saveSettings,
+  readProjects, teamsOf, own, setRunners, processTableAsync, sweepWaiters,
 } = require('./lib');
 const orca = require('./orca');
 const cards = require('./cards');
@@ -41,9 +41,10 @@ const usage = require('./usage');
 const team = require('./team');
 const config = require('./core/config');
 const { newId } = require('./core/ids');
-const { view } = require('./domain/session');
+const serverState = require('./app/server-state');
+const lifecycle = require('./app/lifecycle');
 
-const CONTEXT_WARN = config.get('DDASH_CONTEXT_WARN');
+const { teams } = serverState;
 
 // Static files: the page, its text table, and the web/ modules and style sheet. Names are matched, never joined
 // from the URL as given, so nothing outside this list is served.
@@ -83,27 +84,6 @@ function readBody(req, res, handle) {
   });
 }
 
-function pendingCount(sid) {
-  try { return fs.readdirSync(paths.inbox(sid)).filter((f) => f.endsWith('.json')).length; } catch { return 0; }
-}
-
-// Mode and teams per connected project, keyed by the project name the dashboard groups sessions by.
-function teams(projects, sessions) {
-  const nameOf = {};
-  for (const s of Object.values(sessions)) if (s.project_key && s.project) nameOf[s.project_key] ||= s.project;
-  const out = {};
-  for (const [key, p] of Object.entries(projects)) {
-    const name = p.name || nameOf[key] || path.basename(p.cwd || key);
-    const list = {};
-    for (const [tn, t] of Object.entries(teamsOf(p))) {
-      const groups = Object.fromEntries(Object.entries(t.groups || {}).map(([n, g]) => [n, { dir: g.dir, created: g.created }]));
-      list[tn] = { lead: t.lead || null, worktree: t.worktree || null, groups };
-    }
-    out[name] = { key, mode: Object.keys(list).length ? 'team' : 'solo', mode_ver: Number(p.mode_ver) || 0, teams: list, ...runnersOf(p) };
-  }
-  return out;
-}
-
 const projectKeyOf = (projects, sessions, name) => (own(projects, name) ? name : own(teams(projects, sessions), name)?.key);
 
 // Orca terminal state per handle, never blocking a request: the cached answer is returned (null = not known
@@ -115,16 +95,36 @@ function terminalOpen(handle) {
   if (!hit.busy && Date.now() - hit.ts >= TERM_TTL) {
     hit.busy = true;
     termCache.set(handle, hit);
-    orca.terminalOpenAsync(handle, (open) => termCache.set(handle, { open, ts: Date.now(), busy: false }));
+    orca.terminalOpenAsync(handle, (open) => {
+      termCache.set(handle, { open, ts: Date.now(), busy: false });
+      if (open === false) setImmediate(liveness); // a closed terminal: its session is ended now, not at the next tick
+    });
   }
   return hit.open;
 }
 
-// A live wait command whose owner (when known) is alive: see lib.waitPid.
-const waiting = (sid) => Boolean(waitPid(sid));
-
-// The last process table (read in the background by sweep); null until the first read.
+// The last process table (read in the background by sweep and tick); null until the first read.
 let procTable = null;
+
+// Liveness (docs/architecture.md §3.4): sessions of any kind that died without their SessionEnd hook (bug-001,
+// bug-005) are ended (reason gone) and their leftovers stopped, at start, every DDASH_TICK_MS and when Orca reports
+// a terminal closed. GET /api/state never writes.
+const TICK_MS = config.get('DDASH_TICK_MS');
+function liveness(table = procTable) {
+  try {
+    for (const sid of lifecycle.reapGone(terminalOpen, table)) console.log(`ddashboard: session ${sid} is gone (ended)`);
+  } catch (err) { console.log(`ddashboard: liveness check failed: ${err.message}`); }
+}
+let ticking = false;
+function tick() {
+  if (ticking) return;
+  ticking = true;
+  processTableAsync((table) => {
+    ticking = false;
+    if (table.size) procTable = table;
+    liveness(table.size ? table : null);
+  });
+}
 
 // bug-005: at start and every minute, stop wait commands whose session is gone (any plugin version) and drop stale
 // lock files. The process table is read without blocking requests.
@@ -173,46 +173,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/state') {
-    const sessions = readJson(paths.sessions, {});
-    const projects = readProjects();
-    // Sessions of any kind that died without their SessionEnd hook (bug-001, bug-005) are marked ended.
-    const gone = markGone(Object.values(sessions).filter((s) => sessionGone(s, terminalOpen, procTable)).map((s) => s.session_id));
-    const ts = new Date().toISOString();
-    for (const sid of gone) Object.assign(sessions[sid], { state: 'ended', ended: ts, end_reason: 'gone' });
-    for (const s of Object.values(sessions)) {
-      s.pending = pendingCount(s.session_id);
-      s.waiting = waiting(s.session_id);
-      s.project = s.project || s.name;
-      // Displayed state: ended > working > listening (wait command alive) > idle.
-      // Unresponsive: idle, no live wait command, not seen for stale_min minutes.
-      const v = view(s, { waiting: s.waiting, stale: isStale(s) });
-      s.view = v.view;
-      s.unresponsive = v.unresponsive;
-      // Place in the team: solo | lead | member | outside (team mode, untagged)
-      s.team = teamRole(s, projects[s.project_key]);
-      const own = s.team === 'lead' || s.team === 'member' ? teamOfSession(s, projects[s.project_key]) : null;
-      if (own) s.team_name = own.name;
-      if (s.team === 'lead' && s.lead_baseline !== undefined) {
-        const lim = leadLimit(s.lead_baseline, s.context_window); // the stored window: never back to 200k after a compact
-        Object.assign(s, { lead_handoff_at: lim.at, context_window: lim.window, baseline_big: lim.big });
-      }
-      if (s.team === 'member' && routeCard(sessions, projects, s.session_id).lead_missing) s.lead_missing = true;
-    }
-    const { cards: recent, last_by_session, archived_count } = cards.state(300, { reports: url.searchParams.get('reports') === '1' });
-    const { usage_total, usage_today } = usage.state(Object.keys(sessions));
-    return send(res, 200, {
-      teams: teams(projects, sessions),
-      sessions,
-      replies: readJsonl(paths.replies, 1000),
-      cards: recent,
-      last_by_session,
-      archived_count,
-      usage_total,
-      usage_today,
-      context_warn: CONTEXT_WARN,
-      stale_min: STALE_MIN,
-      settings: { lang: readSettings().lang || null },
-    });
+    // Read-only: sessions found gone are ended by the liveness tick, not here.
+    return send(res, 200, serverState.build({ reports: url.searchParams.get('reports') === '1' }));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/search') {
@@ -397,9 +359,11 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
+liveness(null); // before the first request: a session that died while no server ran shows ended at once
 server.listen(PORT, '127.0.0.1', () => {
   writeJson(paths.serverPid, { pid: process.pid, port: PORT, started: new Date().toISOString() });
   console.log(`ddashboard: http://127.0.0.1:${PORT}  (board: ${BOARD_DIR})`);
   sweep();
   setInterval(sweep, SWEEP_MS).unref();
+  setInterval(tick, TICK_MS).unref();
 });

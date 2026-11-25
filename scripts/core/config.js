@@ -30,6 +30,7 @@ const TABLE = [
   { name: 'DDASH_BOARD_DIR', type: 'path', def: path.join(os.homedir(), '.ddashboard'), doc: 'Board folder (sessions, cards, inbox, logs). Tests point it at a temp folder.' },
   { name: 'DDASH_PORT', type: 'pos', def: 7357, doc: 'Dashboard server port (127.0.0.1 only).' },
   { name: 'DDASH_RECENT_DAYS', type: 'num', def: 14, doc: 'Cards older than this many days count as archived.' },
+  { name: 'DDASH_TICK_MS', type: 'pos', def: 10000, doc: 'Server liveness tick: sessions that died without SessionEnd are ended (ms).' },
   { name: 'DDASH_SWEEP_MS', type: 'pos', def: 60000, doc: 'Server sweep interval for orphan wait commands (ms).' },
   { name: 'DDASH_CONTEXT_WARN', type: 'pos', def: 150000, doc: 'Context size (tokens) at which the dashboard marks a session.' },
   { name: 'DDASH_STALE_MIN', type: 'pos', def: 60, doc: 'Minutes without activity after which an idle session without a waiter is unresponsive.' },

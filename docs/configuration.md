@@ -10,6 +10,7 @@ Environment variables, read by `scripts/core/config.js` only. Dashboard choices 
 | `DDASH_BOARD_DIR` | path | `~/.ddashboard` | Board folder (sessions, cards, inbox, logs). Tests point it at a temp folder. |
 | `DDASH_PORT` | pos | `7357` | Dashboard server port (127.0.0.1 only). |
 | `DDASH_RECENT_DAYS` | num | `14` | Cards older than this many days count as archived. |
+| `DDASH_TICK_MS` | pos | `10000` | Server liveness tick: sessions that died without SessionEnd are ended (ms). |
 | `DDASH_SWEEP_MS` | pos | `60000` | Server sweep interval for orphan wait commands (ms). |
 | `DDASH_CONTEXT_WARN` | pos | `150000` | Context size (tokens) at which the dashboard marks a session. |
 | `DDASH_STALE_MIN` | pos | `60` | Minutes without activity after which an idle session without a waiter is unresponsive. |

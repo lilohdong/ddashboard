@@ -420,20 +420,11 @@ function endMember(leadSid, key) {
   const sid = m.session_id;
   // Already ended: nothing is closed or killed (its terminal handle or pids may belong to something else by now).
   if (lib.isEnded(m)) return { sid, role: m.role, done: [], already: true, ended: m.ended || '' };
-  const done = [];
-  if (m.runner === 'orca' && m.orca?.handle) {
-    try { orca.closeTerminal(m.orca.handle); done.push(`closed its Orca terminal (${m.orca.handle})`); } catch (err) { done.push(`could not close its Orca terminal: ${err.message}`); }
-  }
-  // A terminal window: its shell (recorded by orca-launch.js) and everything under it, so no empty window stays.
-  if (m.runner === 'window' && windowShell(m) && lib.killTree(windowShell(m))) done.push(`closed its terminal window (pid ${m.window_shell_pid})`);
-  if (lib.stopWaiter(sid)) done.push('stopped its wait command');
-  if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude and its tool processes (pid ${m.claude_pid})`);
-  // Claude already dead (bug-005): the tool shells it left behind.
-  const shells = Number(m.claude_pid) > 0 ? lib.reapToolShells(Number(m.claude_pid)) : [];
-  if (shells.length) done.push(`stopped ${shells.length} tool process(es) left by its dead Claude`);
-  if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killTree(Number(m.pid))) done.push(`stopped the headless run and its tool processes (pid ${m.pid})`);
-  lifecycle.apply(sid, 'end', { reason: 'stopped' });
-  return { sid, role: m.role, done };
+  // Entering ended(stopped) runs supervisor.stop: Orca terminal, window shell, wait command, Claude tree, tool
+  // shells of a dead Claude, headless run.
+  const r = lifecycle.apply(sid, 'end', { reason: 'stopped', stop: { closeTerminal: orca.closeTerminal, windowShell } });
+  if (!r.ok) return { sid, role: m.role, done: [], already: true, ended: sessionsStore.get(sid)?.ended || '' };
+  return { sid, role: m.role, done: r.stopped?.done || [] };
 }
 
 // The pid of a window member's shell when it is still that shell: the launcher it started is alive under it, or
