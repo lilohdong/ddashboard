@@ -83,6 +83,7 @@
   .badge.report { color: var(--muted); }
   .pill { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   .pill.on { border-color: var(--accent); color: var(--accent); }
+  .lang-sel { height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 13px; padding: 0 4px; cursor: pointer; }
   .sess-row { display: flex; align-items: flex-start; gap: 2px; }
   .sess-row > .nav { flex: 1; min-width: 0; }
   .sess-act { flex: none; margin-top: 6px; border: 1px solid transparent; background: none; color: var(--muted); border-radius: 6px; padding: 0 6px; font-size: 12px; cursor: pointer; }
@@ -163,24 +164,42 @@
   <aside id="side"></aside>
   <div class="main">
     <header>
-      <button class="toggle" id="toggle" title="Toggle sidebar ( [ )" aria-label="Toggle sidebar">
+      <button class="toggle" id="toggle" data-i18n-title="side.toggle" data-i18n-aria="side.toggle" title="Toggle sidebar ( [ )" aria-label="Toggle sidebar">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6 3v10"/></svg>
       </button>
-      <h1><span class="brand-inline">DDashboard / </span><span id="scope">All</span></h1>
+      <h1><span class="brand-inline">DDashboard / </span><span id="scope"></span></h1>
       <div class="search">
-        <input id="q" type="search" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
+        <input id="q" type="search" data-i18n-placeholder="search.placeholder" data-i18n-aria="search.placeholder" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
         <kbd>/</kbd>
       </div>
       <div class="filters" id="filters"></div>
-      <button class="pill" id="reports" hidden title="Member cards sent to their lead (team mode)">Member reports</button>
+      <button class="pill" id="reports" hidden data-i18n-title="reports.title"></button>
+      <select class="lang-sel" id="lang" data-i18n-title="lang.title" aria-label="Language"></select>
     </header>
     <div class="mode-bar" id="mode"></div>
     <div id="cards"></div>
   </div>
 </div>
+<script src="/i18n.js"></script>
 <script>
-const STATUS = { review: 'Needs review', blocked: 'Blocked', wip: 'In progress', done: 'Done' };
-const VIEW = { working: 'Working', waiting: 'Listening', idle: 'Idle', ended: 'Ended' };
+// --- Language: saved choice (settings.json) > browser language > English ---
+const I18N = window.DDASH_I18N;
+let lang = I18N.pickLang(null, navigator.language);
+const t = (key, vars) => I18N.translate(lang, key, vars);
+const STATUS_KEYS = ['review', 'blocked', 'wip', 'done'];
+const VIEW_KEYS = ['working', 'waiting', 'idle', 'ended'];
+const statusName = (k) => (STATUS_KEYS.includes(k) ? t(`status.${k}`) : k);
+const viewName = (k) => t(`view.${k}`);
+
+// Text in the static markup (data-i18n-title / -placeholder / -aria) and the language picker.
+function applyStatic() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nAria)));
+  const sel = document.getElementById('lang');
+  sel.innerHTML = Object.entries(I18N.LANGS).map(([k, v]) => `<option value="${k}"${k === lang ? ' selected' : ''}>${v}</option>`).join('');
+}
 const URGENT = new Set(['review', 'blocked']);
 
 // Per-viewer UI state (best effort: storage may be unavailable)
@@ -213,10 +232,10 @@ const openDetails = new Set(); // card ids whose Details section is expanded
 const searching = () => Boolean(query) || archivedView;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const time = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const time = (iso) => new Date(iso).toLocaleString(lang, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const ago = (iso) => {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
-  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+  return m < 1 ? t('ago.now') : m < 60 ? t('ago.m', { n: m }) : m < 1440 ? t('ago.h', { n: Math.round(m / 60) }) : t('ago.d', { n: Math.round(m / 1440) });
 };
 
 function applySide() {
@@ -266,16 +285,16 @@ const fmtTok = (v) => {
   if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
   return String(n);
 };
-const fullTok = (v) => num(v).toLocaleString();
+const fullTok = (v) => num(v).toLocaleString(lang);
 const sumTok = (u) => num(u?.input) + num(u?.cache_read) + num(u?.cache_write) + num(u?.output);
 
 function usageTitle(u, extra = []) {
   return [...extra,
-    `Input: ${fullTok(u.input)}`,
-    `Cache read: ${fullTok(u.cache_read)}`,
-    `Cache write: ${fullTok(u.cache_write)}`,
-    `Output: ${fullTok(u.output)}`,
-    `Turns: ${fullTok(u.turns)}`,
+    `${t('usage.input')}: ${fullTok(u.input)}`,
+    `${t('usage.cacheRead')}: ${fullTok(u.cache_read)}`,
+    `${t('usage.cacheWrite')}: ${fullTok(u.cache_write)}`,
+    `${t('usage.output')}: ${fullTok(u.output)}`,
+    `${t('usage.turns')}: ${fullTok(u.turns)}`,
   ].join('\n');
 }
 
@@ -285,19 +304,19 @@ function usageLine(s) {
   const ctx = num(s.last_context);
   const warn = ctx > warnAt;
   const u = s.usage || {};
-  const title = usageTitle(u, [`Context (last turn): ${fullTok(ctx)}${warn ? ` — over ${fullTok(warnAt)}` : ''}`, `Total tokens: ${fullTok(sumTok(u))}`, '']);
+  const title = usageTitle(u, [`${t('usage.context', { n: fullTok(ctx) })}${warn ? t('usage.over', { n: fullTok(warnAt) }) : ''}`, t('usage.total', { n: fullTok(sumTok(u)) }), '']);
   return `<span class="usage" title="${esc(title)}"><span class="${warn ? 'warn' : ''}">ctx ${fmtTok(ctx)}</span> · ${fmtTok(sumTok(u))} tok</span>`;
 }
 
 function todayHtml() {
-  const t = state.usage_today;
-  if (!t) return '';
+  const day = state.usage_today;
+  if (!day) return '';
   const all = state.usage_total || {};
-  const title = usageTitle(t, ['Today, all sessions', '']) + `\n\nConnected sessions, all time: ${fullTok(sumTok(all))} tokens in ${fullTok(all.turns)} turns`;
-  return `<div class="today" title="${esc(title)}"><b>Today</b>
-    <div class="row"><span>Input</span><span>${fmtTok(t.input)}</span></div>
-    <div class="row"><span>Cache read</span><span>${fmtTok(t.cache_read)}</span></div>
-    <div class="row"><span>Output</span><span>${fmtTok(t.output)}</span></div>
+  const title = usageTitle(day, [t('usage.todayAll'), '']) + `\n\n${t('usage.allTime', { tokens: fullTok(sumTok(all)), turns: fullTok(all.turns) })}`;
+  return `<div class="today" title="${esc(title)}"><b>${esc(t('usage.today'))}</b>
+    <div class="row"><span>${esc(t('usage.input'))}</span><span>${fmtTok(day.input)}</span></div>
+    <div class="row"><span>${esc(t('usage.cacheRead'))}</span><span>${fmtTok(day.cache_read)}</span></div>
+    <div class="row"><span>${esc(t('usage.output'))}</span><span>${fmtTok(day.output)}</span></div>
   </div>`;
 }
 
@@ -341,14 +360,14 @@ function teamOrder(list, cmp, groupNames) {
 }
 
 function groupHeadHtml(r, p) {
-  if (!r.ghead) return `<div class="ghead"><span class="gname unassigned">unassigned</span><span>${r.count}</span></div>`;
-  const acts = r.live ? `<button class="sess-act" data-group-rename="${esc(r.ghead)}" data-project="${esc(p)}" title="Rename the group (its folder moves too)">rename</button><button class="sess-act" data-group-del="${esc(r.ghead)}" data-project="${esc(p)}" title="Remove the group">delete</button>` : '';
+  if (!r.ghead) return `<div class="ghead"><span class="gname unassigned">${esc(t('group.unassigned'))}</span><span>${r.count}</span></div>`;
+  const acts = r.live ? `<button class="sess-act" data-group-rename="${esc(r.ghead)}" data-project="${esc(p)}" title="${esc(t('group.renameTitle'))}">${esc(t('group.rename'))}</button><button class="sess-act" data-group-del="${esc(r.ghead)}" data-project="${esc(p)}" title="${esc(t('group.deleteTitle'))}">${esc(t('group.delete'))}</button>` : '';
   const dir = teams()[p]?.groups?.[r.ghead]?.dir || '';
   let html = `<div class="ghead" title="${esc(dir)}"><span class="gname">${esc(r.ghead)}</span><span>${r.count}</span>${acts}</div>`;
   if (groupDel && groupDel.project === p && groupDel.name === r.ghead) {
-    html += `<div class="group-del">Delete group ${esc(r.ghead)}? Its members become unassigned. The folder moves to docs/groups/_archived/.
-      <label><input type="checkbox" data-group-purge> Also delete the folder</label>
-      <div class="row"><button class="danger" data-group-del-ok>Delete</button><button data-group-del-cancel>Cancel</button></div>
+    html += `<div class="group-del">${esc(t('group.deleteAsk', { name: r.ghead }))}
+      <label><input type="checkbox" data-group-purge> ${esc(t('group.purge'))}</label>
+      <div class="row"><button class="danger" data-group-del-ok>${esc(t('btn.delete'))}</button><button data-group-del-cancel>${esc(t('btn.cancel'))}</button></div>
     </div>`;
   }
   return html;
@@ -363,47 +382,47 @@ const stale = (s) => !s.last_seen || Date.now() - new Date(s.last_seen) > staleM
 function spawnHtml(lead, group = '', depth = 1) {
   const id = `${lead}|${group}`;
   const cls = depth > 1 ? ' depth2' : '';
-  if (spawnFor !== id) return `<button class="nav side-act${cls}" data-spawn-for="${esc(id)}" title="Start a headless member${group ? ` in ${esc(group)}` : ''}">+ member</button>`;
+  if (spawnFor !== id) return `<button class="nav side-act${cls}" data-spawn-for="${esc(id)}" title="${esc(group ? t('spawn.titleIn', { group }) : t('spawn.title'))}">${esc(t('spawn.button'))}</button>`;
   const d = spawnDraft;
   return `<form class="spawn-form${cls}" data-spawn="${esc(lead)}" data-group="${esc(group)}">
-    <input type="text" name="role" placeholder="Role (e.g. frontend)" value="${esc(d.role)}" required>
-    <input type="text" name="model" placeholder="Model (optional, e.g. sonnet)" value="${esc(d.model)}">
-    <label><input type="checkbox" name="stay"${d.stay ? ' checked' : ''}> Stay (keep waiting for instructions)</label>
-    <textarea name="task" placeholder="Task" required>${esc(d.task)}</textarea>
-    <div class="row"><button>Spawn</button><button type="button" data-spawn-cancel>Cancel</button></div>
+    <input type="text" name="role" placeholder="${esc(t('spawn.role'))}" value="${esc(d.role)}" required>
+    <input type="text" name="model" placeholder="${esc(t('spawn.model'))}" value="${esc(d.model)}">
+    <label><input type="checkbox" name="stay"${d.stay ? ' checked' : ''}> ${esc(t('spawn.stay'))}</label>
+    <textarea name="task" placeholder="${esc(t('spawn.task'))}" required>${esc(d.task)}</textarea>
+    <div class="row"><button>${esc(t('spawn.submit'))}</button><button type="button" data-spawn-cancel>${esc(t('btn.cancel'))}</button></div>
   </form>`;
 }
 
 // Session row actions: remove an ended session, or mark an idle, stale one as ended.
 function sessAct(s) {
-  if (s.view === 'ended') return `<button class="sess-act" data-forget="${esc(s.session_id)}" title="Remove from the sidebar (cards stay)">×</button>`;
-  if (s.view === 'idle' && stale(s)) return `<button class="sess-act" data-mark-ended="${esc(s.session_id)}" title="Not seen for ${staleMin()}+ min. Mark it as ended if it is gone">Mark ended</button>`;
+  if (s.view === 'ended') return `<button class="sess-act" data-forget="${esc(s.session_id)}" title="${esc(t('sess.forget'))}">×</button>`;
+  if (s.view === 'idle' && stale(s)) return `<button class="sess-act" data-mark-ended="${esc(s.session_id)}" title="${esc(t('sess.markEndedTitle', { n: staleMin() }))}">${esc(t('sess.markEnded'))}</button>`;
   return '';
 }
 
 function modeSelect(p) {
-  const t = teams()[p];
-  if (!t) return '';
+  const tm = teams()[p];
+  if (!tm) return '';
   // Lead candidates: live sessions, newest first, labelled so same-named sessions can be told apart.
   // Sessions not seen for stale_min minutes go into a "stale" group. Only the current lead is ever preselected.
   const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended')
     .sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen)));
-  const value = t.mode === 'team' ? `team:${t.lead}` : 'solo';
+  const value = tm.mode === 'team' ? `team:${tm.lead}` : 'solo';
   const opt = (v, label) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`;
-  const label = (s) => `team · ${s.name} · ${shortId(s.session_id)} · ${ago(s.last_seen)}`;
+  const label = (s) => `${t('mode.team')} · ${s.name} · ${shortId(s.session_id)} · ${ago(s.last_seen)}`;
   const fresh = live.filter((s) => !stale(s));
   const old = live.filter(stale);
-  let html = opt('solo', 'solo') + fresh.map((s) => opt(`team:${s.session_id}`, label(s))).join('');
-  if (old.length) html += `<optgroup label="stale (not seen for ${staleMin()}+ min)">${old.map((s) => opt(`team:${s.session_id}`, label(s))).join('')}</optgroup>`;
-  if (t.mode === 'team' && !live.some((s) => s.session_id === t.lead)) html += opt(value, `team · ${t.lead_name || 'lead'} · ${shortId(t.lead || '')} (ended)`);
-  return `<select class="mode-sel" data-mode-key="${esc(t.key)}" data-project="${esc(p)}" title="Solo: every session posts its own cards. Team: only the lead posts; members report to the lead.">${html}</select>`;
+  let html = opt('solo', t('mode.solo')) + fresh.map((s) => opt(`team:${s.session_id}`, label(s))).join('');
+  if (old.length) html += `<optgroup label="${esc(t('mode.stale', { n: staleMin() }))}">${old.map((s) => opt(`team:${s.session_id}`, label(s))).join('')}</optgroup>`;
+  if (tm.mode === 'team' && !live.some((s) => s.session_id === tm.lead)) html += opt(value, `${t('mode.team')} · ${tm.lead_name || t('tag.lead')} · ${shortId(tm.lead || '')} ${t('mode.ended')}`);
+  return `<select class="mode-sel" data-mode-key="${esc(tm.key)}" data-project="${esc(p)}" title="${esc(t('mode.title'))}">${html}</select>`;
 }
 
-function sessTags(s, t) {
-  if (t?.mode !== 'team') return '';
-  if (s.team === 'lead') return ` <span class="tag lead" title="Team lead">lead${t.lead_name ? ` · ${esc(t.lead_name)}` : ''}</span>`;
-  if (s.team === 'member') return ` <span class="tag" title="Team member role">${esc(s.role || 'member')}</span>${s.lead_missing ? ' <span class="tag warn" title="Its lead has ended, so its cards go straight to the dashboard">lead missing</span>' : ''}`;
-  return ' <span class="tag" title="Untagged session: posts straight to the dashboard">outside team</span>';
+function sessTags(s, tm) {
+  if (tm?.mode !== 'team') return '';
+  if (s.team === 'lead') return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${tm.lead_name ? ` · ${esc(tm.lead_name)}` : ''}</span>`;
+  if (s.team === 'member') return ` <span class="tag" title="${esc(t('tag.roleTitle'))}">${esc(s.role || t('tag.member'))}</span>${s.lead_missing ? ` <span class="tag warn" title="${esc(t('tag.leadMissingTitle'))}">${esc(t('tag.leadMissing'))}</span>` : ''}`;
+  return ` <span class="tag" title="${esc(t('tag.outsideTitle'))}">${esc(t('tag.outside'))}</span>`;
 }
 
 function renderSide() {
@@ -420,15 +439,15 @@ function renderSide() {
 
   const sel = (kind, id) => (scope.kind === kind && (kind === 'all' || scope.id === id) ? 'sel' : '');
   let html = `<div class="brand">DDashboard</div>
-    <button class="nav ${sel('all')}" data-kind="all"><span class="grow">All</span>${totalUrgent ? `<span class="count">${totalUrgent}</span>` : ''}</button>`;
+    <button class="nav ${sel('all')}" data-kind="all"><span class="grow">${esc(t('all'))}</span>${totalUrgent ? `<span class="count">${totalUrgent}</span>` : ''}</button>`;
 
   const names = Object.keys(groups).sort();
-  if (!names.length) html += `<div class="side-empty">No connected sessions.<br>Type <code>/ddashboard:dashboard</code> in a project.</div>`;
+  if (!names.length) html += `<div class="side-empty">${t('side.empty')}</div>`;
   for (const p of names) {
     const cmp = (a, b) => order[a.view] - order[b.view] || String(a.name).localeCompare(String(b.name));
-    const t = teams()[p];
-    const groupNames = Object.keys(t?.groups || {}).sort();
-    const list = t?.mode === 'team' ? teamOrder(groups[p], cmp, groupNames) : groups[p].sort(cmp).map((s) => ({ s, depth: 0 }));
+    const tm = teams()[p];
+    const groupNames = Object.keys(tm?.groups || {}).sort();
+    const list = tm?.mode === 'team' ? teamOrder(groups[p], cmp, groupNames) : groups[p].sort(cmp).map((s) => ({ s, depth: 0 }));
     const sessRows = list.filter((r) => r.s);
     const pu = sessRows.filter((r) => urgent[r.s.session_id]).length;
     const nameCount = {};
@@ -442,27 +461,27 @@ function renderSide() {
       ${list.map((r) => {
         if (r.ghead != null) return groupHeadHtml(r, p);
         if (r.spawn) return spawnHtml(r.spawn, r.group, r.depth);
-        if (r.gtools) return `<button class="nav side-act" data-group-add="${esc(p)}" title="A group keeps shared memory for its members in docs/groups/<name>/">+ group</button>`;
+        if (r.gtools) return `<button class="nav side-act" data-group-add="${esc(p)}" title="${esc(t('group.addTitle'))}">${esc(t('group.add'))}</button>`;
         const s = r.s;
         return `
         <div class="sess-row">
         <button class="nav sess${r.depth ? ' member' : ''}${r.depth > 1 ? ' depth2' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}\n${esc(s.session_id)}">
           <span class="dot ${s.view}"></span>
           <span class="grow">
-            <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, t)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
-            <span class="sub">${esc(s.branch || '')} · ${VIEW[s.view]}${s.pending ? ` · ${s.pending} queued` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
+            <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, tm)}${urgent[s.session_id] ? ` <span class="count">${esc(t('side.needsYou'))}</span>` : ''}</span>
+            <span class="sub">${esc(s.branch || '')} · ${esc(viewName(s.view))}${s.pending ? ` · ${esc(t('side.queued', { n: s.pending }))}` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
             ${usageLine(s)}
           </span>
         </button>${sessAct(s)}
         </div>`;
       }).join('')}
-      ${endedHere ? `<button class="nav side-act flat" data-clear-ended="${esc(p)}" title="Remove this project's ended sessions from the sidebar (cards stay)">Clear ${endedHere} ended</button>` : ''}
+      ${endedHere ? `<button class="nav side-act flat" data-clear-ended="${esc(p)}" title="${esc(t('side.clearEndedTitle'))}">${esc(t('side.clearEnded', { n: endedHere }))}</button>` : ''}
     </div>`;
   }
-  if (ended.length) html += `<button class="nav ended-toggle" data-toggle-ended>${showEnded ? 'Hide ended sessions' : `Show ${ended.length} ended session${ended.length > 1 ? 's' : ''}`}</button>`;
-  html += `<button class="nav archive-link ${archivedView ? 'sel' : ''}" data-archived><span class="grow">Archived (${state.archived_count || 0})</span></button>`;
+  if (ended.length) html += `<button class="nav ended-toggle" data-toggle-ended>${esc(showEnded ? t('side.hideEnded') : t('side.showEnded', { n: ended.length }))}</button>`;
+  html += `<button class="nav archive-link ${archivedView ? 'sel' : ''}" data-archived><span class="grow">${esc(t('side.archived', { n: state.archived_count || 0 }))}</span></button>`;
   html += todayHtml();
-  html += `<div class="legend">${Object.entries(VIEW).map(([k, v]) => `<span><span class="dot ${k}"></span>${v}</span>`).join('')}</div>`;
+  html += `<div class="legend">${VIEW_KEYS.map((k) => `<span><span class="dot ${k}"></span>${esc(viewName(k))}</span>`).join('')}</div>`;
   document.getElementById('side').innerHTML = html;
 }
 
@@ -481,30 +500,30 @@ function cardHtml(c, byCard) {
   const sess = state.sessions[c.session_id];
   const open = sess && sess.view !== 'ended';
   const details = typeof c.details === 'string' && c.details.trim() ? c.details : '';
-  const leadName = c.via_lead ? state.sessions[c.via_lead]?.name || 'lead' : '';
+  const leadName = c.via_lead ? state.sessions[c.via_lead]?.name || t('tag.lead') : '';
   const replyBox = c.via_lead
-    ? `<div class="closed">Member report to ${esc(leadName)}. Reply on the lead's card.</div>`
+    ? `<div class="closed">${esc(t('card.reportClosed', { name: leadName }))}</div>`
     : open ? `<form data-sid="${esc(c.session_id)}" data-id="${esc(c.id)}" data-title="${esc(c.title)}">
-        <textarea data-card="${esc(c.id)}" placeholder="Reply to this session…" title="Ctrl+Enter to send">${esc(drafts[c.id] || '')}</textarea>
-        <button>Send</button>
-      </form>` : `<div class="closed">This session has ended, so it can't receive replies.</div>`;
+        <textarea data-card="${esc(c.id)}" placeholder="${esc(t('card.replyPlaceholder'))}" title="${esc(t('card.sendTitle'))}">${esc(drafts[c.id] || '')}</textarea>
+        <button>${esc(t('card.send'))}</button>
+      </form>` : `<div class="closed">${esc(t('card.closed'))}</div>`;
   return `
     <article class="card${c.via_lead ? ' report' : ''}">
       <div class="card-head">
-        <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(STATUS[c.status] || c.status)}</span>${c.answered ? '<span class="badge replied">Replied</span>' : ''}
-        ${c.archived ? '<span class="badge archived">Archived</span>' : ''}
-        ${c.via_lead ? `<span class="badge report">Report to ${esc(leadName)}</span>` : ''}
-        ${c.lead_missing ? '<span class="badge warn" title="Sent while this member had no live lead">Lead missing</span>' : ''}
+        <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(statusName(c.status))}</span>${c.answered ? `<span class="badge replied">${esc(t('card.replied'))}</span>` : ''}
+        ${c.archived ? `<span class="badge archived">${esc(t('card.archived'))}</span>` : ''}
+        ${c.via_lead ? `<span class="badge report">${esc(t('card.reportTo', { name: leadName }))}</span>` : ''}
+        ${c.lead_missing ? `<span class="badge warn" title="${esc(t('card.leadMissingTitle'))}">${esc(t('card.leadMissing'))}</span>` : ''}
         <span class="title">${esc(c.title)}</span>
         ${c.archived
-          ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="Move back to the recent list">Unarchive</button>`
-          : `<button class="card-act" data-archive="${esc(c.id)}" title="Hide from the recent list">Archive</button>`}
+          ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="${esc(t('card.unarchiveTitle'))}">${esc(t('card.unarchive'))}</button>`
+          : `<button class="card-act" data-archive="${esc(c.id)}" title="${esc(t('card.archiveTitle'))}">${esc(t('card.archive'))}</button>`}
       </div>
       <div class="meta">${esc(sess?.project || c.project || '')} · ${esc(c.session_name)} · ${esc(c.branch)} · ${time(c.ts)}${c.diffstat ? ' · ' + esc(c.diffstat) : ''}</div>
       ${c.summary?.length ? `<ul>${c.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-      ${c.review?.length ? `<div class="review"><b>Check</b><ul>${c.review.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
-      ${details ? `<details data-details="${esc(c.id)}"${openDetails.has(c.id) ? ' open' : ''}><summary>Details</summary><div class="details-body">${esc(details)}</div></details>` : ''}
-      <div class="replies">${(byCard[c.id] || []).map((r) => `<div class="reply"><b>You</b> ${esc(r.text)} · ${time(r.ts)}</div>`).join('')}</div>
+      ${c.review?.length ? `<div class="review"><b>${esc(t('card.check'))}</b><ul>${c.review.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${details ? `<details data-details="${esc(c.id)}"${openDetails.has(c.id) ? ' open' : ''}><summary>${esc(t('card.details'))}</summary><div class="details-body">${esc(details)}</div></details>` : ''}
+      <div class="replies">${(byCard[c.id] || []).map((r) => `<div class="reply"><b>${esc(t('card.you'))}</b> ${esc(r.text)} · ${time(r.ts)}</div>`).join('')}</div>
       ${replyBox}
     </article>`;
 }
@@ -517,33 +536,34 @@ function renderMain() {
   const replied = repliedIds();
   for (const c of scoped) c.answered = answered(c, replied);
   for (const c of scoped) if (!c.answered) counts[c.status] = (counts[c.status] || 0) + 1;
-  document.getElementById('filters').innerHTML = [['all', 'All', scoped.length], ...Object.entries(STATUS).map(([k, v]) => [k, v, counts[k] || 0])]
-    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${v} ${n}</button>`).join('');
+  document.getElementById('filters').innerHTML = [['all', t('all'), scoped.length], ...STATUS_KEYS.map((k) => [k, statusName(k), counts[k] || 0])]
+    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${esc(v)} ${n}</button>`).join('');
 
   const s = scope.kind === 'session' ? state.sessions[scope.id] : null;
-  const scopeName = scope.kind === 'all' ? 'All' : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : 'Session';
-  document.getElementById('scope').textContent = archivedView ? `${scopeName} · Archived` : scopeName;
+  const scopeName = scope.kind === 'all' ? t('all') : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : t('scope.session');
+  document.getElementById('scope').textContent = archivedView ? t('scope.archived', { scope: scopeName }) : scopeName;
 
   const list = scoped.filter((c) => filter === 'all' || (c.status === filter && !c.answered));
   let mode = '';
   if (searching()) {
-    const what = archivedView ? 'archived cards' : 'all cards';
-    const status = searchError ? esc(searchError) : !all ? 'Searching…' : `${list.length} ${query ? 'result' : 'card'}${list.length === 1 ? '' : 's'}${query ? ` for “${esc(query)}”` : ''} in ${what}`;
-    mode = `<span>${status}</span>
-      ${query ? '<button data-clear-search>Clear search</button>' : ''}
-      ${archivedView ? '<button data-archived>Back to recent</button>' : ''}`;
+    const where = archivedView ? t('search.inArchived') : t('search.inAll');
+    const status = searchError ? t('search.unavailable') : !all ? t('search.searching')
+      : query ? t('search.results', { q: query, where, n: list.length }) : t('search.count', { where, n: list.length });
+    mode = `<span>${esc(status)}</span>
+      ${query ? `<button data-clear-search>${esc(t('search.clear'))}</button>` : ''}
+      ${archivedView ? `<button data-archived>${esc(t('search.back'))}</button>` : ''}`;
   }
   document.getElementById('mode').innerHTML = mode;
 
   const rep = document.getElementById('reports');
   rep.hidden = !Object.values(teams()).some((t) => t.mode === 'team');
   rep.classList.toggle('on', showReports);
-  rep.textContent = showReports ? 'Member reports: shown' : 'Member reports: hidden';
+  rep.textContent = showReports ? t('reports.shown') : t('reports.hidden');
 
   const byCard = {};
   for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
-  const empty = searching() ? (all ? (query ? 'No matching cards.' : 'No archived cards.') : '') : 'No cards to show.';
-  document.getElementById('cards').innerHTML = list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${empty}</div>` : '';
+  const empty = searching() ? (all ? (query ? t('empty.noMatch') : t('empty.noArchived')) : '') : t('empty.none');
+  document.getElementById('cards').innerHTML = list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${esc(empty)}</div>` : '';
 }
 
 function saveDrafts() {
@@ -564,7 +584,7 @@ async function runSearch() {
   } catch {
     if (seq !== searchSeq) return;
     results = results || [];
-    searchError = 'Search is not available. Is the dashboard server up to date?';
+    searchError = 'unavailable';
   }
 }
 
@@ -573,6 +593,8 @@ async function load() {
   try {
     state = await (await fetch(showReports ? '/api/state?reports=1' : '/api/state')).json();
   } catch { return; }
+  const next = I18N.pickLang(state.settings?.lang, navigator.language);
+  if (next !== lang) { lang = next; applyStatic(); }
   if (scope.kind === 'session' && !state.sessions[scope.id]) scope = { kind: 'all' };
   await runSearch();
   renderSide();
@@ -606,7 +628,7 @@ async function setArchived(id, archived) {
     if (had) overrides[id] = prev; else delete overrides[id];
     state.archived_count = Math.max(0, state.archived_count - delta);
     renderSide(); renderMain();
-    alert(`Could not ${archived ? 'archive' : 'unarchive'}: ${err.message}`);
+    alert(t(archived ? 'err.archive' : 'err.unarchive', { e: err.message }));
     return;
   }
   load();
@@ -635,54 +657,54 @@ async function post(url, body) {
 }
 
 async function sideAction(e) {
-  const t = e.target;
-  const forget = t.closest('[data-forget]')?.dataset.forget;
+  const el = e.target;
+  const forget = el.closest('[data-forget]')?.dataset.forget;
   if (forget) { await post('/api/sessions/forget', { session_id: forget }); return true; }
-  const mark = t.closest('[data-mark-ended]')?.dataset.markEnded;
+  const mark = el.closest('[data-mark-ended]')?.dataset.markEnded;
   if (mark) {
-    if (!confirm(`Mark "${state.sessions[mark]?.name || mark}" (${shortId(mark)}) as ended? Do this only if the session is really gone.`)) return true;
+    if (!confirm(t('sess.confirmMarkEnded', { name: state.sessions[mark]?.name || mark, id: shortId(mark) }))) return true;
     await post('/api/sessions/end', { session_id: mark });
     return true;
   }
-  const clear = t.closest('[data-clear-ended]')?.dataset.clearEnded;
+  const clear = el.closest('[data-clear-ended]')?.dataset.clearEnded;
   if (clear) {
-    if (!confirm(`Remove the ended sessions of ${clear} from the sidebar? Their cards stay.`)) return true;
+    if (!confirm(t('sess.confirmClearEnded', { project: clear }))) return true;
     await post('/api/sessions/forget', { project: clear, ended: true });
     return true;
   }
-  const add = t.closest('[data-group-add]')?.dataset.groupAdd;
+  const add = el.closest('[data-group-add]')?.dataset.groupAdd;
   if (add) {
-    const name = prompt('New group name (letters, digits, - and _). Its folder is docs/groups/<name>/ in the lead\'s worktree.');
+    const name = prompt(t('group.newPrompt'));
     if (!name) return false;
     await post('/api/groups', { project: add, action: 'create', name: name.trim() });
     return true;
   }
-  const ren = t.closest('[data-group-rename]');
+  const ren = el.closest('[data-group-rename]');
   if (ren) {
-    const next = prompt(`Rename group ${ren.dataset.groupRename} to:`, ren.dataset.groupRename);
+    const next = prompt(t('group.renamePrompt', { name: ren.dataset.groupRename }), ren.dataset.groupRename);
     if (!next || next.trim() === ren.dataset.groupRename) return false;
     await post('/api/groups', { project: ren.dataset.project, action: 'rename', name: ren.dataset.groupRename, new_name: next.trim() });
     return true;
   }
-  const del = t.closest('[data-group-del]');
+  const del = el.closest('[data-group-del]');
   if (del) { groupDel = { project: del.dataset.project, name: del.dataset.groupDel }; renderSide(); return false; }
-  if (t.closest('[data-group-del-cancel]')) { groupDel = null; renderSide(); return false; }
-  if (t.closest('[data-group-del-ok]') && groupDel) {
-    const purge = Boolean(t.closest('.group-del')?.querySelector('[data-group-purge]')?.checked);
+  if (el.closest('[data-group-del-cancel]')) { groupDel = null; renderSide(); return false; }
+  if (el.closest('[data-group-del-ok]') && groupDel) {
+    const purge = Boolean(el.closest('.group-del')?.querySelector('[data-group-purge]')?.checked);
     const g = groupDel;
     groupDel = null;
     await post('/api/groups', { project: g.project, action: 'delete', name: g.name, purge });
     return true;
   }
-  const spawn = t.closest('[data-spawn-for]')?.dataset.spawnFor;
+  const spawn = el.closest('[data-spawn-for]')?.dataset.spawnFor;
   if (spawn) { spawnFor = spawn; renderSide(); document.querySelector('.spawn-form input[name=role]')?.focus(); return false; }
-  if (t.closest('[data-spawn-cancel]')) { spawnFor = null; spawnDraft = { role: '', model: '', stay: false, task: '' }; renderSide(); return false; }
+  if (el.closest('[data-spawn-cancel]')) { spawnFor = null; spawnDraft = { role: '', model: '', stay: false, task: '' }; renderSide(); return false; }
   return null;
 }
 
 document.addEventListener('click', async (e) => {
   if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
-    try { if (await sideAction(e)) load(); } catch (err) { alert('Could not do that: ' + err.message); }
+    try { if (await sideAction(e)) load(); } catch (err) { alert(t('err.generic', { e: err.message })); }
     return;
   }
   const arch = e.target.closest('[data-archive], [data-unarchive]');
@@ -734,21 +756,35 @@ document.addEventListener('keydown', (e) => {
 });
 
 // solo / team switch (team: the chosen session becomes the lead)
+// Language picker: saved for the dashboard and for new cards (settings.json), applied at once.
+document.getElementById('lang').addEventListener('change', async (e) => {
+  const prev = lang;
+  lang = e.target.value;
+  applyStatic(); renderSide(); renderMain();
+  try {
+    await post('/api/settings', { lang });
+  } catch (err) {
+    lang = prev;
+    applyStatic(); renderSide(); renderMain();
+    alert(t('err.lang', { e: err.message }));
+  }
+});
+
 document.addEventListener('change', async (e) => {
   const sel = e.target.closest('select[data-mode-key]');
   if (!sel) return;
   const [mode, lead] = sel.value.split(':');
   const who = mode === 'team' ? state.sessions[lead]?.name || lead : '';
   const ask = mode === 'team'
-    ? `Team mode for ${sel.dataset.project}: "${who}" becomes the lead. Only the lead posts to the dashboard; members report to it. Continue?`
-    : `Solo mode for ${sel.dataset.project}: every session posts its own cards. Continue?`;
+    ? t('mode.confirmTeam', { project: sel.dataset.project, who })
+    : t('mode.confirmSolo', { project: sel.dataset.project });
   if (!confirm(ask)) { sel.blur(); renderSide(); return; }
   const res = await fetch('/api/mode', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project: sel.dataset.modeKey, mode, lead }),
   });
-  if (!res.ok) alert('Could not switch: ' + (await res.text()));
+  if (!res.ok) alert(t('err.switch', { e: await res.text() }));
   sel.blur();
   load();
 });
@@ -765,7 +801,7 @@ async function submitSpawn(form) {
   if (!body.role || !body.task) return;
   try {
     await post('/api/team/spawn', body);
-  } catch (err) { alert('Could not spawn: ' + err.message); return; }
+  } catch (err) { alert(t('err.spawn', { e: err.message })); return; }
   spawnFor = null;
   spawnDraft = { role: '', model: '', stay: false, task: '' };
   load();
@@ -784,10 +820,11 @@ document.addEventListener('submit', async (e) => {
     body: JSON.stringify({ session_id: form.dataset.sid, card_id: form.dataset.id, card_title: form.dataset.title, text }),
   });
   if (res.ok) { ta.value = ''; delete drafts[form.dataset.id]; load(); }
-  else alert('Could not send: ' + (await res.text()));
+  else alert(t('err.send', { e: await res.text() }));
 });
 
 applySide();
+applyStatic();
 load();
 // Don't re-render while a reply is being typed.
 setInterval(() => { if (!spawnFor && !groupDel && !document.activeElement?.matches('textarea, select, input')) load(); }, 3000);
