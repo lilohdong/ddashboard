@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Local dashboard server (no model calls)
 //   GET  /            dashboard page
-//   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count
+//   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
+//                     token usage (usage_total for connected sessions, usage_today), context_warn
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
@@ -10,6 +11,9 @@ const fs = require('fs');
 const path = require('path');
 const { BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId } = require('./lib');
 const cards = require('./cards');
+const usage = require('./usage');
+
+const CONTEXT_WARN = Number(process.env.DDASH_CONTEXT_WARN) || 150000;
 
 const HTML = path.join(__dirname, 'dashboard.html');
 const MAX_BODY = 64 * 1024;
@@ -68,12 +72,16 @@ const server = http.createServer((req, res) => {
       s.view = s.ended || s.state === 'ended' ? 'ended' : s.state === 'working' ? 'working' : s.waiting ? 'waiting' : 'idle';
     }
     const { cards: recent, last_by_session, archived_count } = cards.state(300);
+    const { usage_total, usage_today } = usage.state(Object.keys(sessions));
     return send(res, 200, {
       sessions,
       replies: readJsonl(paths.replies, 1000),
       cards: recent,
       last_by_session,
       archived_count,
+      usage_total,
+      usage_today,
+      context_warn: CONTEXT_WARN,
     });
   }
 

@@ -21,6 +21,8 @@ const paths = {
   projects: path.join(BOARD_DIR, 'projects.json'),
   serverPid: path.join(BOARD_DIR, 'server.pid'),
   serverLog: path.join(BOARD_DIR, 'server.log'),
+  usageDir: path.join(BOARD_DIR, 'usage'),
+  usageFor: (iso) => path.join(BOARD_DIR, 'usage', `${String(iso).slice(0, 7)}.jsonl`), // usage/YYYY-MM.jsonl
   inbox: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid)),
   done: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid), 'done'),
 };
@@ -159,6 +161,98 @@ function appendCard(card) {
   appendJsonl(paths.cardsFor(card.ts), card);
 }
 
+// Usage log files (usage/YYYY-MM.jsonl), oldest first.
+function usageFiles() {
+  let monthly = [];
+  try { monthly = fs.readdirSync(paths.usageDir).filter((f) => /^\d{4}-\d{2}\.jsonl$/.test(f)).sort(); } catch {}
+  return monthly.map((f) => path.join(paths.usageDir, f));
+}
+
+// --- Transcript parsing (Stop hook) ---
+
+const TAIL_BYTES = 4 * 1024 * 1024; // read only the tail of large transcripts
+
+// Parsed transcript lines (jsonl) from the tail of the file. The first line may be cut off; it is skipped.
+function readTranscriptTail(transcriptPath, tailBytes = TAIL_BYTES) {
+  let buf;
+  try {
+    const fd = fs.openSync(transcriptPath, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const start = Math.max(0, size - tailBytes);
+      buf = Buffer.alloc(size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+    } finally { fs.closeSync(fd); }
+  } catch { return []; }
+  const rows = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    try { rows.push(JSON.parse(line)); } catch { /* partial or malformed line */ }
+  }
+  return rows;
+}
+
+// Text of a user line typed by a person (or injected as a prompt), or null for tool results and other lines.
+function humanText(o) {
+  if (o?.type !== 'user' || o.isSidechain) return null;
+  const content = o.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content) && content.some((c) => c?.type === 'text')) {
+    return content.filter((c) => c?.type === 'text').map((c) => c.text || '').join('\n');
+  }
+  return null;
+}
+
+// Index of the last human input line, or -1.
+function lastHumanIndex(rows) {
+  for (let i = rows.length - 1; i >= 0; i--) if (humanText(rows[i]) != null) return i;
+  return -1;
+}
+
+// What woke the session for this turn: reply | background | human.
+function wakeReason(text) {
+  const t = String(text || '');
+  if (t.includes('[Dashboard reply]')) return 'reply';
+  if (t.trimStart().startsWith('<task-notification>')) return 'background';
+  return 'human';
+}
+
+const USAGE_KEYS = ['input', 'cache_read', 'cache_write', 'output'];
+
+// Token usage of the assistant messages after the last human input.
+// One API response is split into several transcript lines that share message.id and usage,
+// so each id is counted once (its last line wins). Ids in `skip` were already counted.
+// Returns { input, cache_read, cache_write, output, context, ids, boundary, reason } (ids: newly counted).
+function turnUsage(rows, skip = new Set()) {
+  const start = lastHumanIndex(rows);
+  const boundaryRow = start >= 0 ? rows[start] : null;
+  const byId = new Map();
+  let last = null;
+  for (let i = start + 1; i < rows.length; i++) {
+    const o = rows[i];
+    if (o?.type !== 'assistant' || o.isSidechain) continue;
+    const u = o.message?.usage;
+    if (!u || typeof u !== 'object') continue;
+    const id = String(o.message.id || o.uuid || `line-${i}`);
+    last = u; // context comes from the turn's last assistant message, counted before or not
+    if (skip.has(id)) continue;
+    byId.delete(id); // keep the order of the last line per id
+    byId.set(id, u);
+  }
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const out = { input: 0, cache_read: 0, cache_write: 0, output: 0 };
+  for (const u of byId.values()) {
+    out.input += n(u.input_tokens);
+    out.cache_read += n(u.cache_read_input_tokens);
+    out.cache_write += n(u.cache_creation_input_tokens);
+    out.output += n(u.output_tokens);
+  }
+  out.context = last ? n(last.input_tokens) + n(last.cache_read_input_tokens) + n(last.cache_creation_input_tokens) : 0;
+  out.ids = [...byId.keys()];
+  out.boundary = boundaryRow ? String(boundaryRow.uuid || boundaryRow.timestamp || start) : '';
+  out.reason = boundaryRow ? wakeReason(humanText(boundaryRow)) : 'human';
+  return out;
+}
+
 // A fixed wait command path (BOARD_DIR/bin/wait.js) that loads the current plugin's wait-inbox.js.
 // The path stays the same across plugin updates, so an "always allow" permission keeps working.
 // It is rewritten whenever the instructions are injected, so it always points at the running plugin.
@@ -226,6 +320,7 @@ function formatReplies(msgs) {
 
 module.exports = {
   BOARD_DIR, PORT, URL, RECENT_DAYS, paths, cardFiles, appendCard, ensureWaitBin,
+  usageFiles, readTranscriptTail, humanText, lastHumanIndex, wakeReason, turnUsage, USAGE_KEYS,
   safeId, ensureDir, readJson, writeJson, appendJsonl, readJsonl,
   readHookInput, alive, serverPid, git, projectKey, projectName, projectActive, setProject,
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,

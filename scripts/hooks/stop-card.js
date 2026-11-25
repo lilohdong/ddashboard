@@ -2,38 +2,51 @@
 // Stop hook (no model calls, zero tokens). Only acts on dashboard-connected sessions.
 // 1) Find the ```card block in this turn's reply and append it to cards/YYYY-MM.jsonl.
 //    "replaces":"last" retires this session's previous card (the server treats it as archived).
-// 2) If replies are waiting in the inbox, keep the session going and hand them over as the next instruction.
-const fs = require('fs');
+// 2) Add this turn's token usage to usage/YYYY-MM.jsonl and the session's running totals (cards or not).
+// 3) If replies are waiting in the inbox, keep the session going and hand them over as the next instruction.
 const path = require('path');
-const { paths, readJson, writeJson, appendCard, readHookInput, safeId, git, takeInbox, formatReplies } = require('../lib');
+const {
+  paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatReplies,
+  readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS,
+} = require('../lib');
 
-const TAIL_BYTES = 4 * 1024 * 1024; // read only the tail of large transcripts
 const MAX_DETAILS = 4000;
+const MAX_MARK_IDS = 500;
 
-// Collect assistant text after the last human input, from the tail of the transcript (jsonl).
-function lastTurnText(transcriptPath) {
-  let buf;
-  try {
-    const fd = fs.openSync(transcriptPath, 'r');
-    const size = fs.fstatSync(fd).size;
-    const start = Math.max(0, size - TAIL_BYTES);
-    buf = Buffer.alloc(size - start);
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
-  } catch { return ''; }
-  let texts = [];
-  for (const line of buf.toString('utf8').split('\n')) {
-    let o;
-    try { o = JSON.parse(line); } catch { continue; }
-    const content = o.message?.content;
-    if (o.type === 'user') {
-      const isHuman = typeof content === 'string' || (Array.isArray(content) && content.some((c) => c.type === 'text'));
-      if (isHuman) texts = [];
-    } else if (o.type === 'assistant' && Array.isArray(content)) {
-      for (const c of content) if (c.type === 'text') texts.push(c.text);
-    }
+// Assistant text after the last human input.
+function lastTurnText(rows) {
+  const texts = [];
+  for (let i = lastHumanIndex(rows) + 1; i < rows.length; i++) {
+    const o = rows[i];
+    if (o?.type !== 'assistant' || o.isSidechain || !Array.isArray(o.message?.content)) continue;
+    for (const c of o.message.content) if (c?.type === 'text') texts.push(c.text);
   }
   return texts.join('\n');
+}
+
+// Record this turn's usage. A turn continued by this hook (dashboard reply handed over) has no new
+// human input in the transcript, so message ids already counted since the same input are skipped.
+function recordUsage(s, sid, rows) {
+  const mark = s.usage_mark || {};
+  const probe = turnUsage(rows);
+  const sameTurn = probe.boundary && probe.boundary === mark.boundary;
+  const u = sameTurn ? turnUsage(rows, new Set(mark.ids || [])) : probe;
+  let reason = u.reason;
+  if (sameTurn && s.reply_handed) reason = 'reply';
+  delete s.reply_handed;
+  s.usage_mark = { boundary: u.boundary, ids: [...(sameTurn ? mark.ids || [] : []), ...u.ids].slice(-MAX_MARK_IDS) };
+  if (!u.ids.length) return; // nothing new (e.g. no transcript)
+
+  const ts = new Date().toISOString();
+  appendJsonl(paths.usageFor(ts), {
+    ts, session_id: sid, project: s.project || '',
+    input: u.input, cache_read: u.cache_read, cache_write: u.cache_write, output: u.output,
+    context: u.context, reason,
+  });
+  const total = s.usage || {};
+  s.usage = Object.fromEntries(USAGE_KEYS.map((k) => [k, (Number(total[k]) || 0) + u[k]]));
+  s.usage.turns = (Number(total.turns) || 0) + 1;
+  s.last_context = u.context;
 }
 
 // Escape raw control characters that appear inside JSON string literals (models often write
@@ -88,7 +101,8 @@ function parseCard(text) {
   const cwd = input.cwd || process.cwd();
 
   // 1) Record the card. Skip it if it is the same card again (e.g. a reply-driven turn without a new card).
-  const text = input.last_assistant_message || lastTurnText(input.transcript_path);
+  const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
+  const text = input.last_assistant_message || lastTurnText(rows);
   const card = parseCard(text);
   const cardKey = card && JSON.stringify(card);
   const branch = git('rev-parse --abbrev-ref HEAD', cwd);
@@ -115,8 +129,12 @@ function parseCard(text) {
     sessions[sid].last_title = card.title;
   }
 
-  // 2) Hand over waiting replies (the session then stays "working").
+  // 2) Token usage of this turn (never blocks the rest of the hook).
+  try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }
+
+  // 3) Hand over waiting replies (the session then stays "working").
   const msgs = takeInbox(sid);
+  if (msgs.length) sessions[sid].reply_handed = true;
   if (branch) sessions[sid].branch = branch;
   sessions[sid].state = msgs.length ? 'working' : 'idle';
   sessions[sid].last_seen = new Date().toISOString();
