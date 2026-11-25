@@ -8,20 +8,10 @@
 
 AI writes code faster than people can follow, and leaves more text in the terminal than anyone wants to read. ddashboard keeps only **what you need to know**: a status, a three-line summary, and what you should check. You watch the dashboard, and reply on a card to tell that session what to do next.
 
-```
-┌─ DDashboard ───────────┬─ All ─────────── All 6 · Needs review 2 · Blocked 1 · Done 2 ─┐
-│ All                  2 │                                                              │
-│                        │ [Needs review] Handle login token expiry                     │
-│ shop                 1 │ shop · api · feature/auth · 3 files changed, 42 (+)          │
-│  ◉ api  needs you      │  • Reissue with the refresh token on expiry                  │
-│    feature/auth·Working│  • Added 4 tests, all passing                                │
-│  ● web                 │  ┃ Check: is a 30-minute expiry right?                        │
-│    login-ui·Listening  │  ┌─────────────────────────────────────────┐ ┌──────┐         │
-│ blog                 1 │  │ Make it 1 hour and commit                │ │ Send │         │
-│  ● blog  needs you     │  └─────────────────────────────────────────┘ └──────┘         │
-│    feature/rss·Idle    │                                                              │
-└────────────────────────┴──────────────────────────────────────────────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
+  <img alt="ddashboard: live sessions grouped by project in the sidebar, and result cards with reply boxes" src="assets/screenshot-light.png">
+</picture>
 
 ## Features
 
