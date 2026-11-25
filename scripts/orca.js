@@ -61,6 +61,21 @@ function writable(handle) {
   return Boolean(r.ok && r.result?.terminal?.writable);
 }
 
+// Is the terminal open? true | false (closed, orphaned or unknown to Orca) | null (Orca off or not answering).
+function terminalOpen(handle) {
+  if (disabled() || !handle) return null;
+  const r = run(['terminal', 'show', '--terminal', handle, '--json'], 5000);
+  if (r.ok) return Boolean(r.result?.terminal?.writable);
+  return /unknown terminal|not found|no such terminal/i.test(errText(r)) ? false : null;
+}
+
+// Close a terminal (stops what runs in it).
+function closeTerminal(handle) {
+  const r = run(['terminal', 'close', '--terminal', handle, '--json']);
+  if (!r.ok) throw new Error(`orca terminal close failed: ${errText(r)}`);
+  return true;
+}
+
 // Type text into the terminal and press Enter (Orca bracket-pastes it into a running agent).
 function sendText(handle, text) {
   const r = run(['terminal', 'send', '--terminal', handle, '--text', text, '--enter', '--json']);
@@ -68,4 +83,4 @@ function sendText(handle, text) {
   return true;
 }
 
-module.exports = { run, available, openTerminal, writable, sendText, orcaCommand, worktreeRoot };
+module.exports = { run, available, openTerminal, writable, terminalOpen, closeTerminal, sendText, orcaCommand, worktreeRoot };

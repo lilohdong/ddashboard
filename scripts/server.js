@@ -12,7 +12,8 @@
 //   POST /api/mode    {project, mode: team, lead, team?} -> add a team led by that session (a name in use is refused)
 //                     {project, mode: solo, team?} -> remove that team (no team: every team); solo when none is left
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
-//   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
+//   POST /api/sessions/end    {session_id} -> mark an idle, stale session (or one whose Claude process is dead) as ended
+//   POST /api/team/end        {session_id} -> stop a team member (same as `team.js <lead> end <sid>`)
 //   POST /api/team/spawn      {lead, role, model?, stay?, task, group?, runner?: headless|orca|window} -> start a member
 //                             for a live lead (runner left out: the project's runner_member)
 //   POST /api/groups          {project, team, action: create|rename|delete, name, new_name?, purge?} -> manage a team's
@@ -26,8 +27,9 @@ const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
-  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners,
+  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, memberGone, markGone,
 } = require('./lib');
+const orca = require('./orca');
 const cards = require('./cards');
 const usage = require('./usage');
 const team = require('./team');
@@ -86,6 +88,16 @@ function teams(projects, sessions) {
 
 const projectKeyOf = (projects, sessions, name) => (own(projects, name) ? name : own(teams(projects, sessions), name)?.key);
 
+// Orca terminal state per handle, cached for a few seconds (each check runs the orca CLI).
+const termCache = new Map();
+function terminalOpen(handle) {
+  const hit = termCache.get(handle);
+  if (hit && Date.now() - hit.ts < 10000) return hit.open;
+  const open = orca.terminalOpen(handle);
+  termCache.set(handle, { open, ts: Date.now() });
+  return open;
+}
+
 function waiting(sid) {
   try {
     const pid = Number(fs.readFileSync(path.join(paths.inbox(sid), 'wait.lock'), 'utf8'));
@@ -126,6 +138,10 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const sessions = readJson(paths.sessions, {});
     const projects = readProjects();
+    // Members that died without their SessionEnd hook (bug-001) are marked ended.
+    const gone = markGone(Object.values(sessions).filter((s) => s.kind === 'member' && memberGone(s, terminalOpen)).map((s) => s.session_id));
+    const ts = new Date().toISOString();
+    for (const sid of gone) Object.assign(sessions[sid], { state: 'ended', ended: ts, end_reason: 'gone' });
     for (const s of Object.values(sessions)) {
       s.pending = pendingCount(s.session_id);
       s.waiting = waiting(s.session_id);
@@ -232,6 +248,20 @@ const server = http.createServer((req, res) => {
       const r = markEnded(safeId(msg.session_id));
       if (!r.ok) return send(res, r.code, { error: r.error });
       send(res, 200, { ok: true });
+    });
+  }
+
+  // Stop a team member (same code as `team.js <lead> end`).
+  if (req.method === 'POST' && url.pathname === '/api/team/end') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const sid = safeId(msg.session_id);
+      const m = readJson(paths.sessions, {})[sid];
+      if (!m || m.kind !== 'member' || !m.lead) return send(res, 404, { error: 'not a team member' });
+      try {
+        const r = team.endMember(m.lead, sid);
+        send(res, 200, { ok: true, done: r.done });
+      } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });
   }
 

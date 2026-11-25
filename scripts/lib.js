@@ -1235,14 +1235,45 @@ function forgetSessions(ids) {
 }
 
 // Mark a session the user considers dead as ended. Only idle, stale sessions without a live waiter.
+// True when a session is known to be gone without its SessionEnd hook having run (bug-001: an Orca terminal
+// closed by hand kills claude before the hook): its recorded Claude process is dead, or, with no recorded pid,
+// its Orca terminal is closed (isOpen(handle) -> true | false | null for unknown; left out: not checked).
+// Never guesses: a live wait command, an old record with no pid and no terminal, or an unknown terminal state
+// count as alive. Headless sessions keep their own rule (pid exited = "finished", resumable).
+function memberGone(s, isOpen) {
+  if (!s || isEnded(s) || s.headless) return false;
+  if (waitPid(s.session_id)) return false;
+  if (Number(s.claude_pid) > 0) return !alive(Number(s.claude_pid));
+  if (isOpen && s.runner === 'orca' && s.orca?.handle) return isOpen(s.orca.handle) === false;
+  return false;
+}
+
+// Mark these sessions ended (end_reason 'gone') in sessions.json. Returns the ids changed.
+function markGone(sids) {
+  if (!sids.length) return [];
+  const sessions = readJson(paths.sessions, {});
+  const ts = new Date().toISOString();
+  const done = [];
+  for (const sid of sids) {
+    const s = own(sessions, sid);
+    if (!s || isEnded(s)) continue;
+    Object.assign(s, { state: 'ended', ended: ts, end_reason: 'gone' });
+    done.push(sid);
+  }
+  if (done.length) writeJson(paths.sessions, sessions);
+  return done;
+}
+
 function markEnded(sid) {
   const sessions = readJson(paths.sessions, {});
   const s = sessions[sid];
   if (!s) return { ok: false, code: 404, error: 'unknown session' };
   if (isEnded(s)) return { ok: true };
-  if (s.state === 'working' || waitPid(sid) || !isStale(s)) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
+  // A session whose Claude process is dead may be marked ended even while it still says "working".
+  const gone = memberGone(s);
+  if (!gone && (s.state === 'working' || waitPid(sid) || !isStale(s))) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
   const ts = new Date().toISOString();
-  Object.assign(s, { state: 'ended', ended: ts, end_reason: 'marked' });
+  Object.assign(s, { state: 'ended', ended: ts, end_reason: gone ? 'gone' : 'marked' });
   writeJson(paths.sessions, sessions);
   return { ok: true };
 }
@@ -1391,7 +1422,7 @@ module.exports = {
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
-  STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
+  STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
   firstContext, rememberModel, clearLeadContext, envNum,
   leadRulesPath, ensureLeadRules, existingLeadRules,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,

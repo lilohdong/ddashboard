@@ -408,9 +408,10 @@ function spawnHtml(lead, group = '', depth = 1) {
   </form>`;
 }
 
-// Session row actions: remove an ended session, or mark an idle, stale one as ended.
+// Session row actions: remove an ended session, end a team member, or mark an idle, stale one as ended.
 function sessAct(s) {
   if (s.view === 'ended') return `<button class="sess-act" data-forget="${esc(s.session_id)}" title="${esc(t('sess.forget'))}">×</button>`;
+  if (s.team === 'member') return `<button class="sess-act" data-end-member="${esc(s.session_id)}" title="${esc(t('sess.endTitle'))}">${esc(t('sess.end'))}</button>`;
   if (s.view === 'idle' && stale(s)) return `<button class="sess-act" data-mark-ended="${esc(s.session_id)}" title="${esc(t('sess.markEndedTitle', { n: staleMin() }))}">${esc(t('sess.markEnded'))}</button>`;
   return '';
 }
@@ -689,6 +690,12 @@ async function sideAction(e) {
   const el = e.target;
   const forget = el.closest('[data-forget]')?.dataset.forget;
   if (forget) { await post('/api/sessions/forget', { session_id: forget }); return true; }
+  const end = el.closest('[data-end-member]')?.dataset.endMember;
+  if (end) {
+    if (!confirm(t('sess.confirmEnd', { name: state.sessions[end]?.role || state.sessions[end]?.name || end, id: shortId(end) }))) return true;
+    try { await post('/api/team/end', { session_id: end }); } catch (err) { alert(t('err.end', { e: err.message })); }
+    return true;
+  }
   const mark = el.closest('[data-mark-ended]')?.dataset.markEnded;
   if (mark) {
     if (!confirm(t('sess.confirmMarkEnded', { name: state.sessions[mark]?.name || mark, id: shortId(mark) }))) return true;
@@ -738,7 +745,7 @@ async function sideAction(e) {
 }
 
 document.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-team-remove], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
+  if (e.target.closest('[data-forget], [data-end-member], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-team-remove], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
     try { if (await sideAction(e)) load(); } catch (err) { alert(t('err.generic', { e: err.message })); }
     return;
   }

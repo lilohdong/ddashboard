@@ -9,7 +9,9 @@
 //   node team.js <lead sid> send <sid|role> "<text>"
 //       instruction to a member: into its inbox if it is waiting or still running; an idle Orca member gets it
 //       typed into its terminal; else resume it (in a new Orca terminal, or claude -p --resume)
-//   node team.js <lead sid> list                 members: role, state, waiting, last card
+//   node team.js <lead sid> list                 members: role, state, waiting, last card (a member whose Claude
+//       process is dead or whose Orca terminal is closed is marked ended)
+//   node team.js <lead sid> end <sid|role>       stop a member: close its Orca terminal / stop its processes, mark it ended
 //   node team.js <lead sid> show <card-id>       a card in full (long report details)
 //   node team.js <lead sid> handoff <doc> [--spawn] [--headless|--orca|--window] [--model <m>]
 //       prepare a lead handoff; prints the first prompt for the new lead. --spawn starts it with the project's
@@ -38,6 +40,7 @@ function usage() {
   spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca|--window] "<task>"
   send <sid|role> "<text>"
   list
+  end <sid|role>
   show <card-id>
   handoff <doc-path> [--spawn] [--headless|--orca|--window] [--model <m>]
   group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
@@ -377,6 +380,9 @@ function cmdList(leadSid) {
   const { sessions } = context(leadSid);
   const members = Object.values(sessions).filter((s) => s.kind === 'member' && s.lead === leadSid);
   if (!members.length) return 'No members yet. Start one with: spawn --role <role> "<task>"';
+  // Members that died without their SessionEnd hook (e.g. Orca terminal closed by hand) are marked ended.
+  const gone = new Set(lib.markGone(members.filter((s) => lib.memberGone(s, orca.terminalOpen)).map((s) => s.session_id)));
+  for (const s of members) if (gone.has(s.session_id)) Object.assign(s, { state: 'ended', ended: new Date().toISOString(), end_reason: 'gone' });
   return members.map((s) => {
     const waiting = lib.waitPid(s.session_id);
     const state = lib.isEnded(s) ? 'ended' : s.headless && s.pid && !alive(s.pid) && !waiting ? 'finished' : s.state || 'idle';
@@ -385,6 +391,33 @@ function cmdList(leadSid) {
     const last = s.last_title ? ` | last: ${s.last_status} "${s.last_title}"` : '';
     return `${s.session_id}  ${s.role}${s.group ? ` [${s.group}]` : ''}  ${state}${waiting ? ' (waiting)' : ''}${pending ? ` ${pending} queued` : ''}${s.headless ? ' headless' : s.runner === 'orca' || s.runner === 'window' ? ` ${s.runner}` : ''}${s.stay ? ' stay' : ''}${last}`;
   }).join('\n');
+}
+
+// Stop a member of this lead: close its Orca terminal, stop its wait command, Claude process and headless run,
+// and mark it ended (end_reason 'stopped'). Used by `team.js end` and the dashboard (POST /api/team/end).
+// Returns { sid, role, done: [what was stopped] }.
+function endMember(leadSid, key) {
+  const { sessions } = context(leadSid);
+  const m = findMember(sessions, leadSid, key);
+  if (!m) throw new Error(`no member "${key}" of this lead. See: list`);
+  const sid = m.session_id;
+  const done = [];
+  if (m.runner === 'orca' && m.orca?.handle) {
+    try { orca.closeTerminal(m.orca.handle); done.push(`closed its Orca terminal (${m.orca.handle})`); } catch (err) { done.push(`could not close its Orca terminal: ${err.message}`); }
+  }
+  const wp = lib.waitPid(sid);
+  if (wp && lib.killPid(wp)) done.push('stopped its wait command');
+  if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude (pid ${m.claude_pid})`);
+  if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killPid(Number(m.pid))) done.push(`stopped the headless run (pid ${m.pid})`);
+  const now = new Date().toISOString();
+  updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
+  return { sid, role: m.role, done };
+}
+
+function cmdEnd(leadSid, argv) {
+  if (!argv[0]) throw new Error('end needs a member (session id or role).');
+  const r = endMember(leadSid, argv.join(' '));
+  return `Ended ${r.role} (${r.sid.slice(0, 8)})${r.done.length ? `: ${r.done.join('; ')}` : ' (nothing was running)'}. Its cards stay; send resumes it.`;
 }
 
 function findCard(id) {
@@ -524,7 +557,7 @@ function cmdNextHandoff(sid, argv) {
 `);
 }
 
-const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, show: cmdShow, handoff: cmdHandoff, group: cmdGroup, 'next-handoff': cmdNextHandoff };
+const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, end: cmdEnd, show: cmdShow, handoff: cmdHandoff, group: cmdGroup, 'next-handoff': cmdNextHandoff };
 
 function main(argv) {
   const [leadArg, cmd, ...rest] = argv;
@@ -537,7 +570,7 @@ function main(argv) {
   }
 }
 
-module.exports = { main, spawnMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, quoteCmd, pickRunner, configuredRunner, RUNNERS };
+module.exports = { main, spawnMember, endMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, quoteCmd, pickRunner, configuredRunner, RUNNERS };
 
 // Run directly, or through the fixed bin path (which requires this file).
 const viaBin = String(require.main?.filename || '').toLowerCase() === path.resolve(paths.teamBin).toLowerCase();

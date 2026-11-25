@@ -619,6 +619,7 @@ else if (cmd === 'terminal create') {
   out({ ok: true, result: { terminal: { handle: 'term_fake', paneKey: 'tab:leaf' } } });
 } else if (cmd === 'terminal show') out({ ok: true, result: { terminal: { handle: a[3], writable: process.env.FAKE_ORCA_WRITABLE === '1' } } });
 else if (cmd === 'terminal send') out({ ok: true, result: { send: { accepted: true } } });
+else if (cmd === 'terminal close') out({ ok: true, result: { closed: true } });
 else { out({ ok: false }); process.exit(1); }
 `);
   return file;
@@ -897,6 +898,54 @@ test('M-1d: window launcher per platform', () => {
       assert.deepEqual(l.args.slice(0, 2), ['-T', 'lead A']);
     }
   } finally { if (save !== undefined) process.env.DDASH_WINDOW_BIN = save; }
+});
+
+test('BUG-001: team.js end closes an Orca member terminal, stops a headless run, marks both ended', async () => {
+  teamFixture();
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+  const s = readJson(paths.sessions, {});
+  s.V1 = session('V1', { kind: 'member', role: 'ui', lead: 'L1', runner: 'orca', headless: false, orca: { handle: 'term_v1' } });
+  s.H1 = session('H1', { kind: 'member', role: 'api', lead: 'L1', runner: 'headless', headless: true, pid: sleeper.pid, state: 'working' });
+  writeJson(paths.sessions, s);
+  try {
+    orcaEnv();
+    const r = team.main(['L1', 'end', 'ui']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^Ended ui \(V1\): closed its Orca terminal \(term_v1\)/);
+    const close = orcaCalls().find((c) => c[0] === 'terminal' && c[1] === 'close');
+    assert.equal(flagOf(close, '--terminal'), 'term_v1');
+    const exited = new Promise((res) => sleeper.on('exit', res));
+    assert.match(team.main(['L1', 'end', 'H1']).out, /stopped the headless run \(pid \d+\)/);
+    await exited;
+    const after = readJson(paths.sessions, {});
+    for (const id of ['V1', 'H1']) {
+      assert.equal(after[id].state, 'ended');
+      assert.equal(after[id].end_reason, 'stopped');
+    }
+    assert.match(team.main(['L1', 'end', 'nobody']).out, /no member "nobody"/);
+    assert.match(team.main(['L1', 'list']).out, /V1 {2}ui {2}ended/);
+  } finally { orcaOff(); sleeper.kill(); }
+});
+
+test('BUG-001: POST /api/team/end stops a member; non-members are refused', async () => {
+  teamFixture();
+  await withServer(async (post) => {
+    assert.equal((await post('/api/team/end', { session_id: 'O1' })).status, 404);
+    const r = await post('/api/team/end', { session_id: 'M1' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+  });
+  assert.equal(readJson(paths.sessions, {}).M1.end_reason, 'stopped');
+});
+
+test('BUG-001: memberGone never guesses: live wait command, no pid, unknown terminal state', () => {
+  const base = { session_id: 'G1', kind: 'member', runner: 'orca', orca: { handle: 'h' }, state: 'idle' };
+  assert.equal(lib.memberGone(base), false); // no pid, terminal not checked
+  assert.equal(lib.memberGone(base, () => null), false); // Orca cannot tell
+  assert.equal(lib.memberGone(base, () => false), true); // terminal closed
+  assert.equal(lib.memberGone({ ...base, claude_pid: process.pid }, () => false), false); // the pid decides when known
+  assert.equal(lib.memberGone({ ...base, headless: true, claude_pid: 999999 }), false); // headless: "finished" rule
+  assert.equal(lib.memberGone({ ...base, state: 'ended' }, () => false), false);
 });
 
 test('team.js send to an Orca member: inbox, typed into its terminal, or resumed', async () => {

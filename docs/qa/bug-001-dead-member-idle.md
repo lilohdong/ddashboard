@@ -1,6 +1,6 @@
 # BUG-001: 죽은 팀원이 idle(살아 있음)로 계속 보임
 
-- 상태: 재현됨, 수정 전 (수정안만 제안)
+- 상태: 수정됨 (feature/team-mode, 'fix: dead team members shown as alive (BUG-001)' 커밋). 수정안 1~4와 6(`team.js end`, 대시보드 '종료' 버튼)을 반영. 5(orca-launch.js의 exit 기록)는 하지 않음
 - 심각도: 중간. 팀장이 죽은 팀원에게 일을 맡겼다고 믿고 기다리며, `send`가 엉뚱한 경로를 탈 수 있음
 - 자동 테스트: `test/qa-dead-member.test.js` (버그 4건 FAIL, 대조 3건 PASS)
 - 발견: 2026-11-25, feature/team-mode @ 18dd48f
