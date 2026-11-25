@@ -800,12 +800,21 @@ document.addEventListener('input', (e) => {
   spawnDraft = { role: f.elements.role.value, model: f.elements.model.value, stay: f.elements.stay.checked, task: f.elements.task.value };
 });
 
+let spawnBusy = false;
 async function submitSpawn(form) {
   const body = { lead: form.dataset.spawn, group: form.dataset.group || undefined, role: form.elements.role.value.trim(), model: form.elements.model.value.trim() || undefined, stay: form.elements.stay.checked, task: form.elements.task.value.trim() };
   if (!body.role || !body.task) return;
+  // One spawn at a time: a second click or Enter while the first request runs would start a second member.
+  if (spawnBusy) return;
+  spawnBusy = true;
+  form.querySelectorAll('button, input, textarea').forEach((el) => { el.disabled = true; });
   try {
     await post('/api/team/spawn', body);
-  } catch (err) { alert(t('err.spawn', { e: err.message })); return; }
+  } catch (err) {
+    alert(t('err.spawn', { e: err.message }));
+    form.querySelectorAll('button, input, textarea').forEach((el) => { el.disabled = false; });
+    return;
+  } finally { spawnBusy = false; }
   spawnFor = null;
   spawnDraft = { role: '', model: '', stay: false, task: '' };
   load();
