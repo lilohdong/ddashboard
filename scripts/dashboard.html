@@ -72,6 +72,20 @@
   .badge.report { color: var(--muted); }
   .pill { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   .pill.on { border-color: var(--accent); color: var(--accent); }
+  .sess-row { display: flex; align-items: flex-start; gap: 2px; }
+  .sess-row > .nav { flex: 1; min-width: 0; }
+  .sess-act { flex: none; margin-top: 6px; border: 1px solid transparent; background: none; color: var(--muted); border-radius: 6px; padding: 0 6px; font-size: 12px; cursor: pointer; }
+  .sess-act:hover { color: var(--text); border-color: var(--line); }
+  .sid { color: var(--muted); font-size: 11px; font-weight: 400; font-family: ui-monospace, monospace; }
+  .side-act { color: var(--muted); font-size: 12px; padding: 2px 8px 2px 30px; }
+  .side-act.flat { padding-left: 14px; }
+  .spawn-form { display: grid; gap: 6px; margin: 4px 0 6px; padding: 8px; padding-left: 30px; }
+  .spawn-form input[type=text] { width: 100%; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); padding: 0 8px; font: inherit; font-size: 13px; }
+  .spawn-form textarea { min-height: 64px; font-size: 13px; }
+  .spawn-form label { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .spawn-form .row { display: flex; gap: 6px; }
+  .spawn-form .row button { padding: 4px 12px; }
+  .spawn-form .row button[type=button] { background: none; color: var(--muted); border: 1px solid var(--line); }
 
   /* Main */
   .main { min-width: 0; }
@@ -170,6 +184,8 @@ let scope = store.get('scope', { kind: 'all' }); // { kind: 'all' | 'project' | 
 let filter = store.get('filter', 'all');
 let showEnded = store.get('showEnded', false);
 let showReports = store.get('showReports', false); // team mode: also show member reports (dimmed)
+let spawnFor = null; // lead session id whose "+ member" form is open
+let spawnDraft = { role: '', model: '', stay: false, task: '' };
 let drafts = {};
 let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archived_count: 0 };
 
@@ -293,17 +309,46 @@ function teamOrder(list, cmp) {
 }
 
 // solo / team switch next to the project name; choosing team picks the lead session.
+const shortId = (sid) => String(sid).slice(0, 8);
+const staleMin = () => num(state.stale_min) || 60;
+const stale = (s) => !s.last_seen || Date.now() - new Date(s.last_seen) > staleMin() * 60000;
+
+// "+ member" under a live lead in team mode, or its form when open.
+function spawnHtml(lead) {
+  if (spawnFor !== lead.session_id) return `<button class="nav side-act" data-spawn-for="${esc(lead.session_id)}" title="Start a headless member for this lead">+ member</button>`;
+  const d = spawnDraft;
+  return `<form class="spawn-form" data-spawn="${esc(lead.session_id)}">
+    <input type="text" name="role" placeholder="Role (e.g. frontend)" value="${esc(d.role)}" required>
+    <input type="text" name="model" placeholder="Model (optional, e.g. sonnet)" value="${esc(d.model)}">
+    <label><input type="checkbox" name="stay"${d.stay ? ' checked' : ''}> Stay (keep waiting for instructions)</label>
+    <textarea name="task" placeholder="Task" required>${esc(d.task)}</textarea>
+    <div class="row"><button>Spawn</button><button type="button" data-spawn-cancel>Cancel</button></div>
+  </form>`;
+}
+
+// Session row actions: remove an ended session, or mark an idle, stale one as ended.
+function sessAct(s) {
+  if (s.view === 'ended') return `<button class="sess-act" data-forget="${esc(s.session_id)}" title="Remove from the sidebar (cards stay)">×</button>`;
+  if (s.view === 'idle' && stale(s)) return `<button class="sess-act" data-mark-ended="${esc(s.session_id)}" title="Not seen for ${staleMin()}+ min. Mark it as ended if it is gone">Mark ended</button>`;
+  return '';
+}
+
 function modeSelect(p) {
   const t = teams()[p];
   if (!t) return '';
-  const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended');
-  const opts = [['solo', 'solo']];
-  for (const s of live) opts.push([`team:${s.session_id}`, `team · ${s.name}`]);
+  // Lead candidates: live sessions, newest first, labelled so same-named sessions can be told apart.
+  // Sessions not seen for stale_min minutes go into a "stale" group. Only the current lead is ever preselected.
+  const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended')
+    .sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen)));
   const value = t.mode === 'team' ? `team:${t.lead}` : 'solo';
-  if (t.mode === 'team' && !live.some((s) => s.session_id === t.lead)) opts.push([value, `team · ${t.lead_name || 'lead'} (ended)`]);
-  return `<select class="mode-sel" data-mode-key="${esc(t.key)}" data-project="${esc(p)}" title="Solo: every session posts its own cards. Team: only the lead posts; members report to the lead.">
-    ${opts.map(([v, label]) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}
-  </select>`;
+  const opt = (v, label) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`;
+  const label = (s) => `team · ${s.name} · ${shortId(s.session_id)} · ${ago(s.last_seen)}`;
+  const fresh = live.filter((s) => !stale(s));
+  const old = live.filter(stale);
+  let html = opt('solo', 'solo') + fresh.map((s) => opt(`team:${s.session_id}`, label(s))).join('');
+  if (old.length) html += `<optgroup label="stale (not seen for ${staleMin()}+ min)">${old.map((s) => opt(`team:${s.session_id}`, label(s))).join('')}</optgroup>`;
+  if (t.mode === 'team' && !live.some((s) => s.session_id === t.lead)) html += opt(value, `team · ${t.lead_name || 'lead'} · ${shortId(t.lead || '')} (ended)`);
+  return `<select class="mode-sel" data-mode-key="${esc(t.key)}" data-project="${esc(p)}" title="Solo: every session posts its own cards. Team: only the lead posts; members report to the lead.">${html}</select>`;
 }
 
 function sessTags(s, t) {
@@ -336,20 +381,26 @@ function renderSide() {
     const t = teams()[p];
     const list = t?.mode === 'team' ? teamOrder(groups[p], cmp) : groups[p].sort(cmp).map((s) => [s, false]);
     const pu = list.filter(([s]) => urgent[s.session_id]).length;
+    const nameCount = {};
+    for (const [s] of list) nameCount[s.name] = (nameCount[s.name] || 0) + 1;
+    const endedHere = sessions.filter((s) => s.project === p && s.view === 'ended').length;
     html += `<div class="group">
       <div class="group-head">
         <button class="nav group-title ${sel('project', p)}" data-kind="project" data-id="${esc(p)}"><span class="grow">${esc(p)}</span>${pu ? `<span class="count">${pu}</span>` : ''}</button>
         ${modeSelect(p)}
       </div>
       ${list.map(([s, member]) => `
-        <button class="nav sess${member ? ' member' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}">
+        <div class="sess-row">
+        <button class="nav sess${member ? ' member' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}\n${esc(s.session_id)}">
           <span class="dot ${s.view}"></span>
           <span class="grow">
-            <span class="sname">${esc(s.name)}${sessTags(s, t)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
+            <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, t)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
             <span class="sub">${esc(s.branch || '')} · ${VIEW[s.view]}${s.pending ? ` · ${s.pending} queued` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
             ${usageLine(s)}
           </span>
-        </button>`).join('')}
+        </button>${sessAct(s)}
+        </div>${t?.mode === 'team' && s.team === 'lead' && s.view !== 'ended' ? spawnHtml(s) : ''}`).join('')}
+      ${endedHere ? `<button class="nav side-act flat" data-clear-ended="${esc(p)}" title="Remove this project's ended sessions from the sidebar (cards stay)">Clear ${endedHere} ended</button>` : ''}
     </div>`;
   }
   if (ended.length) html += `<button class="nav ended-toggle" data-toggle-ended>${showEnded ? 'Hide ended sessions' : `Show ${ended.length} ended session${ended.length > 1 ? 's' : ''}`}</button>`;
@@ -521,7 +572,39 @@ function clearSearch() {
   if (query) { query = ''; refreshSearch(); } else clearTimeout(searchTimer);
 }
 
-document.addEventListener('click', (e) => {
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+  return res.json();
+}
+
+async function sideAction(e) {
+  const t = e.target;
+  const forget = t.closest('[data-forget]')?.dataset.forget;
+  if (forget) { await post('/api/sessions/forget', { session_id: forget }); return true; }
+  const mark = t.closest('[data-mark-ended]')?.dataset.markEnded;
+  if (mark) {
+    if (!confirm(`Mark "${state.sessions[mark]?.name || mark}" (${shortId(mark)}) as ended? Do this only if the session is really gone.`)) return true;
+    await post('/api/sessions/end', { session_id: mark });
+    return true;
+  }
+  const clear = t.closest('[data-clear-ended]')?.dataset.clearEnded;
+  if (clear) {
+    if (!confirm(`Remove the ended sessions of ${clear} from the sidebar? Their cards stay.`)) return true;
+    await post('/api/sessions/forget', { project: clear, ended: true });
+    return true;
+  }
+  const spawn = t.closest('[data-spawn-for]')?.dataset.spawnFor;
+  if (spawn) { spawnFor = spawn; renderSide(); document.querySelector('.spawn-form input[name=role]')?.focus(); return false; }
+  if (t.closest('[data-spawn-cancel]')) { spawnFor = null; spawnDraft = { role: '', model: '', stay: false, task: '' }; renderSide(); return false; }
+  return null;
+}
+
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel]')) {
+    try { if (await sideAction(e)) load(); } catch (err) { alert('Could not do that: ' + err.message); }
+    return;
+  }
   const arch = e.target.closest('[data-archive], [data-unarchive]');
   if (arch) {
     if (arch.dataset.archive) setArchived(arch.dataset.archive, true);
@@ -590,9 +673,28 @@ document.addEventListener('change', async (e) => {
   load();
 });
 
+// Keep the "+ member" form's values across sidebar re-renders.
+document.addEventListener('input', (e) => {
+  const f = e.target.closest('form[data-spawn]');
+  if (!f) return;
+  spawnDraft = { role: f.elements.role.value, model: f.elements.model.value, stay: f.elements.stay.checked, task: f.elements.task.value };
+});
+
+async function submitSpawn(form) {
+  const body = { lead: form.dataset.spawn, role: form.elements.role.value.trim(), model: form.elements.model.value.trim() || undefined, stay: form.elements.stay.checked, task: form.elements.task.value.trim() };
+  if (!body.role || !body.task) return;
+  try {
+    await post('/api/team/spawn', body);
+  } catch (err) { alert('Could not spawn: ' + err.message); return; }
+  spawnFor = null;
+  spawnDraft = { role: '', model: '', stay: false, task: '' };
+  load();
+}
+
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
+  if (form.dataset.spawn) return submitSpawn(form);
   const ta = form.querySelector('textarea');
   const text = ta.value.trim();
   if (!text) return;
@@ -608,7 +710,7 @@ document.addEventListener('submit', async (e) => {
 applySide();
 load();
 // Don't re-render while a reply is being typed.
-setInterval(() => { if (!document.activeElement?.matches('textarea, select')) load(); }, 3000);
+setInterval(() => { if (!spawnFor && !document.activeElement?.matches('textarea, select, input')) load(); }, 3000);
 </script>
 </body>
 </html>

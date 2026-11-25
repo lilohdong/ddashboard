@@ -99,7 +99,8 @@ Claude Code 안에서 실행합니다.
   | `handoff <문서>` | 새 세션에게 팀장 넘기기(가이드 참고) |
 - **팀원 보고**는 팀장에게 `[Team report]`로, 팀장 지시는 팀원에게 `[Lead instruction]`으로, 내 답글은 그대로 `[Dashboard reply]`로 갑니다. 보고는 카드로 남지만 본문에서는 숨겨지고, `Member reports` 버튼을 켜면 흐리게 보입니다.
 - **헤드리스 권한** 기본값은 `--permission-mode acceptEdits`와 `Bash(git *)`, `Bash(node *)`, `Bash(npm *)` 허용입니다. 프로젝트별로 `~/.ddashboard/projects.json`에서 바꿉니다: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
-- **사이드바:** 팀원은 팀장 아래에 역할 배지와 함께 들여쓰기로 표시됩니다. 태그 없이 들어온 세션은 `outside team`(팀 외부)으로 표시되고 대시보드에 직접 올립니다. 팀장이 종료되면 팀원은 직접 올리고 `lead missing`(팀장 없음)으로 표시됩니다.
+- **사이드바:** 팀원은 팀장 아래에 역할 배지와 함께 들여쓰기로 표시됩니다. 태그 없이 들어온 세션은 `outside team`(팀 외부)으로 표시되고 대시보드에 직접 올립니다. 팀장이 종료되면 팀원은 직접 올리고 `lead missing`(팀장 없음)으로 표시됩니다. 팀장 아래의 `+ member`로 대시보드에서 팀원을 띄울 수 있고(역할, 모델(선택), stay, 과제), 팀장에게 그 사실이 전달됩니다. 팀장 선택 목록은 최근에 본 세션부터 짧은 ID와 마지막 활동 시각을 함께 보여 주고, `DDASH_STALE_MIN`분(60) 넘게 조용한 세션은 stale 묶음으로 따로 보여 줍니다.
+- **정리:** `×`는 종료된 세션을 사이드바에서 지우고, `Clear N ended`는 프로젝트의 종료된 세션을 모두 지웁니다(카드와 토큰 기록은 남음). `DDASH_STALE_MIN`분 넘게 조용한 쉬는 중 세션에는 먼저 `Mark ended`(종료로 표시)가 나옵니다.
 - **팀장 교대:** 팀장 맥락이 커지면 인수인계 문서를 쓰고 `team.js ... handoff <문서>`를 실행합니다. `[ddash lead-handoff from=<기존 ID> doc=<경로>]`로 시작한 새 세션이 팀장이 되어 팀원과 남은 메시지를 넘겨받고, 기존 팀장은 종료 처리되고 멈춥니다.
 
 권장 방식: [팀 모드 가이드](docs/team-mode-guide.md) (영어)
@@ -141,6 +142,7 @@ Claude Code 안에서 실행합니다.
 | `DDASH_POLL_MS` | `1500` | 대기 명령이 답글을 확인하는 주기(ms) |
 | `DDASH_RECENT_DAYS` | `14` | 이 기간이 지난 카드는 자동으로 보관 |
 | `DDASH_CONTEXT_WARN` | `150000` | 세션의 `ctx`가 이 토큰 수를 넘으면 경고 색. 서버가 읽음 |
+| `DDASH_STALE_MIN` | `60` | 이 시간(분) 넘게 활동이 없으면 stale로 봄(팀장 선택 목록, `Mark ended`). 서버가 읽음 |
 
 서버만 따로 다룰 때:
 

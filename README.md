@@ -97,7 +97,8 @@ Each project runs in one of two modes. You can switch at any time, with a comman
   | `handoff <doc>` | Hands the lead over to a new session (see the guide) |
 - **Member reports** reach the lead as `[Team report]`, lead instructions reach members as `[Lead instruction]`, and your replies stay `[Dashboard reply]`. Reports are kept as cards but hidden from the feed; the `Member reports` button shows them, dimmed.
 - **Headless permissions** default to `--permission-mode acceptEdits` plus `Bash(git *)`, `Bash(node *)` and `Bash(npm *)`. Change them per project in `~/.ddashboard/projects.json`: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
-- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`.
+- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`. `+ member` under the lead starts a member from the dashboard (role, optional model, stay, task); the lead is told about it. The lead picker lists sessions newest first with a short id and when they were last seen; sessions not seen for `DDASH_STALE_MIN` minutes (60) are grouped as stale.
+- **Cleaning up:** `×` removes an ended session from the sidebar and `Clear N ended` removes all of a project's ended sessions (their cards and token counts stay). An idle session not seen for `DDASH_STALE_MIN` minutes offers `Mark ended` first.
 - **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead, takes over the members and pending messages, and the old lead is ended and stopped.
 
 Recommended workflow: [Team mode guide](docs/team-mode-guide.md).
@@ -139,6 +140,7 @@ No hook calls the model, and none of them print anything in sessions that aren't
 | `DDASH_POLL_MS` | `1500` | How often the wait command checks for replies (ms) |
 | `DDASH_RECENT_DAYS` | `14` | Cards older than this are archived automatically |
 | `DDASH_CONTEXT_WARN` | `150000` | Context size (tokens) above which a session's `ctx` turns red. Read by the server |
+| `DDASH_STALE_MIN` | `60` | Minutes without activity after which a session counts as stale (lead picker, `Mark ended`). Read by the server |
 
 To manage the server directly:
 
