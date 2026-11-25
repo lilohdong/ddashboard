@@ -27,6 +27,10 @@ killed (read-only phase) — the lead should kill 30268, 26612 and 10876 (tree).
 A healthy waiter looks like this (the lead):
 `Orca.exe → cmd.exe → node orca-launch.js → claude.exe (21408) → bash.exe → bash.exe → bash.exe → node bin/wait.js`.
 
+Lead's notes: the two 0.1.0 waiters (30268, 26612) are the likely reason Orca cannot delete the empty folder of
+worktree `archive-ui` ("open in another program"). The d0504315 chain is old lead #001. Orphans survive plugin
+upgrades, so the sweep (F-5) must match waiters from **any** plugin version, not only the current one.
+
 ## Root causes
 
 ### RC-1: nothing ties wait.js to the life of its Claude process
@@ -74,6 +78,13 @@ the connection closes" has to be done as a liveness check of the waiter's owner 
 fails and the `alive(pid)` guard returns early — the orphan children (which still carry the dead pid as ppid on Windows)
 are never visited. POSIX: SIGTERM only, no SIGKILL escalation (wait.js handles SIGTERM, so fine for it; a hung tool
 process may survive).
+
+### RC-6: "gone" detection exists only for team members
+`memberGone` (lib.js) is only called for `kind === 'member'` (server.js:147), and `claude_pid` is recorded only in team
+mode (session-start.js:24). A solo session, a lead, or an untagged ("outside") session whose Claude dies without
+SessionEnd (terminal closed, killed) stays `idle` forever. It is not ended, so it cannot be forgotten; "mark ended"
+works only after `STALE_MIN` (60 min), and never while an orphan waiter is alive (RC-2). Seen: b53964ef, cec9394b,
+e75ecde6 had no `claude_pid` and stayed idle.
 
 ## Audit: every process the plugin starts or keeps alive
 
@@ -135,6 +146,19 @@ homedir at startup (covers servers started another way).
 names the dead pid on Windows) — only for callers that verified identity (`killClaude` path passes a table taken while
 it was alive; the sweep passes cmdline-matched pids). POSIX: SIGTERM, wait 1 s, then SIGKILL what remains.
 
+**F-9. Gone detection for every session (RC-6).**
+- SessionStart records `claude_pid` for **every** registered session (solo, lead, outside, member), not only in team
+  mode. UserPromptSubmit records it too when it is missing (sessions started before the dashboard was turned on). The
+  waiter fills it in as a fallback (F-3).
+- Generalize `memberGone` to `sessionGone(s, isOpen)`: not ended, not headless, and the recorded Claude pid is dead
+  (or, for a pid that is alive, no longer a Claude process — checked against the sweep's process table, guarding
+  against pid reuse). The Orca-handle rule stays for members without a pid. An orphan waiter no longer counts as
+  alive, because of F-3.
+- `/api/state` runs it for all sessions → `state: 'ended', end_reason: 'gone'`, and `stopWaiter(sid)` kills a leftover
+  waiter. Then the session can be forgotten as usual.
+- `markEnded` accepts a gone session at once (already does via memberGone; it now applies to every kind).
+- Headless sessions keep their own rule (pid exited = finished, resumable).
+
 **F-8. Stay headless members.** Covered by F-1 (owner = the `claude -p` pid; it exits → waiter exits). No extra code.
 
 ## Tests to add (test/team.test.js unless noted)
@@ -155,11 +179,20 @@ it was alive; the sweep passes cmdline-matched pids). POSIX: SIGTERM, wait 1 s, 
    assert via a test hook env (`DDASH_DEBUG_CWD=1` makes server log its cwd) that cwd = homedir.
 9. **killTree dead root** (F-7): spawn parent→child, kill parent only, `killTree(parent, tableTakenBefore)` kills child.
 10. qa-dead-member.test.js: dead member **with an orphan waiter** is detected as gone (was masked by RC-2).
+11. **gone for solo/lead/outside** (F-9): a solo session and a lead with a dead `claude_pid` → `/api/state` shows them
+    `ended` (`end_reason: 'gone'`), forget succeeds; a live pid that is not a Claude process (reused) → also gone; a live
+    Claude pid → stays idle; a headless session is untouched.
+12. **SessionStart records the pid in solo mode** (F-9): session-start hook run under a fake Claude ancestor
+    (`DDASH_WAIT_OWNER`-style override for `findClaudePid`) writes `claude_pid` with the project in solo mode.
+13. **sweep catches old plugin versions** (F-5): table fixture with `.../ddashboard/0.1.0/scripts/wait-inbox.js <sid>`
+    and no live Claude ancestor → killed.
 
 ## Implementation order (phase 2, separate commits)
 
 1. wait-inbox.js: owner watch + chdir + wait.json (F-1, F-2) + tests 1-3.
 2. lib.js: owner-aware waitPid, stopWaiter, killTree dead root (F-3, F-4, F-7) + hooks/forget/markEnded/endMember/
    handoff call sites + tests 4-6, 9, 10.
-3. sweep in server + server/control cwd (F-5, F-6) + tests 7-8.
+2b. Gone detection for every session: SessionStart/UserPromptSubmit pid recording, sessionGone in server (F-9) +
+   tests 11-12.
+3. sweep in server + server/control cwd (F-5, F-6) + tests 7-8, 13.
 Waits for `dev` to finish lib.js/cards.js/dashboard.html before step 2 touches lib.js.
