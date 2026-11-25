@@ -68,4 +68,4 @@ function sendText(handle, text) {
   return true;
 }
 
-module.exports = { run, available, openTerminal, writable, sendText, orcaCommand };
+module.exports = { run, available, openTerminal, writable, sendText, orcaCommand, worktreeRoot };

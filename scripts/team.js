@@ -169,7 +169,8 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   const sid = crypto.randomUUID();
   const flags = { role, model: model ? String(model).trim() : undefined, stay: Boolean(stay) };
   const opts = spawnOptions(project, flags);
-  const cwd = lead.cwd || process.cwd();
+  // The lead may sit in a subfolder (e.g. scripts/); members start at the worktree root so they can reach the whole repo.
+  const cwd = orca.worktreeRoot(lead.cwd || process.cwd());
   const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}${group ? ` group=${group}` : ''}] ${task}`;
 
   // Pre-register so the member shows up at once; its first-prompt hook completes the registration.
