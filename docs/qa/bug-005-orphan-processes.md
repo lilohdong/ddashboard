@@ -196,3 +196,23 @@ it was alive; the sweep passes cmdline-matched pids). POSIX: SIGTERM, wait 1 s, 
    tests 11-12.
 3. sweep in server + server/control cwd (F-5, F-6) + tests 7-8, 13.
 Waits for `dev` to finish lib.js/cards.js/dashboard.html before step 2 touches lib.js.
+
+## Implementation (phase 2)
+
+Commits on `feature/team-mode`: 95f4866 (F-1..F-3), 212d51d (F-4, F-7), 759df96 (F-9), edb3000 (F-5, F-6).
+Tests: `node test/orphans.test.js` (new, 20 tests), `team.test.js` 92/92 and `qa-dead-member.test.js` 7/7 still pass.
+
+Changes from the design:
+- The waiter's info file is `inbox/<sid>/wait.info`, not `wait.json`: every `.json` file in the inbox is read as a message.
+- F-7 became `reapToolShells(claudePid)`: only children of a dead Claude pid whose command is a Claude Code tool shell
+  (`shell-snapshots/snapshot-…`) are killed, with their trees. Killing every descendant of a dead pid was not safe
+  on Windows, where pids are reused. Called from forget, markEnded and `team end`.
+- An orphan is decided strictly (`orphanWaiter`): the waiter chain's parent is dead, its pid was reused (Windows
+  creation time, now in the process table), or it is init/launchd/systemd. "No Claude found above it" alone does not
+  count, because a Claude host the plugin doesn't recognize would lose its waiter every minute.
+- The waiter checks its owner every poll (`alive`) and checks the owner's image name every 60 s (`tasklist`/`ps`, cheap).
+  A whole process-table read happens only once, at start.
+- A new waiter takes over from an orphan that holds the lock. Before, it said "Already waiting" and the session never
+  got its messages.
+- Test note: on Windows, node kills a child that is not detached when the parent dies, so the fixtures start orphans
+  through a launcher that exits. The tests pass with or without a Claude process above the test runner.
