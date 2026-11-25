@@ -1,5 +1,7 @@
 # ddashboard
 
+**English** | [한국어](README.ko.md)
+
 **A local dashboard for Claude Code: see each session's results as a short card, and reply on the card to instruct that session.**
 
 ![version](https://img.shields.io/badge/version-0.1.0-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
