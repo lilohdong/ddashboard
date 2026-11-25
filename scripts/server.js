@@ -39,8 +39,10 @@ const orca = require('./orca');
 const cards = require('./cards');
 const usage = require('./usage');
 const team = require('./team');
+const config = require('./core/config');
+const { newId } = require('./core/ids');
 
-const CONTEXT_WARN = Number(process.env.DDASH_CONTEXT_WARN) || 150000;
+const CONTEXT_WARN = config.get('DDASH_CONTEXT_WARN');
 
 // Static files: the page, its text table, and the web/ modules and style sheet. Names are matched, never joined
 // from the URL as given, so nothing outside this list is served.
@@ -125,7 +127,7 @@ let procTable = null;
 
 // bug-005: at start and every minute, stop wait commands whose session is gone (any plugin version) and drop stale
 // lock files. The process table is read without blocking requests.
-const SWEEP_MS = Number(process.env.DDASH_SWEEP_MS) || 60000;
+const SWEEP_MS = config.get('DDASH_SWEEP_MS');
 let sweeping = false;
 function sweep() {
   if (sweeping) return;
@@ -363,7 +365,7 @@ const server = http.createServer((req, res) => {
       if (sessions[sid].ended || sessions[sid].state === 'ended') return send(res, 409, { error: 'session ended' });
       const reply = {
         type: 'reply',
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: newId(),
         ts: new Date().toISOString(),
         session_id: sid,
         card_id: msg.card_id ? String(msg.card_id) : null,

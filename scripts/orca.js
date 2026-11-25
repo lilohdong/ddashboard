@@ -6,11 +6,12 @@
 //   orca terminal send --terminal <h> --text <t> --enter --json -> result.send.accepted
 // DDASH_ORCA=0 turns Orca off. DDASH_ORCA_BIN overrides the orca command (a .js file runs with node; tests).
 const { execFileSync, execFile } = require('child_process');
+const config = require('./core/config');
 
 const slash = (p) => String(p).replace(/\\/g, '/');
 
 function orcaCommand() {
-  const bin = process.env.DDASH_ORCA_BIN || 'orca';
+  const bin = config.get('DDASH_ORCA_BIN');
   return /\.(c|m)?js$/i.test(bin) ? { file: process.execPath, pre: [bin] } : { file: bin, pre: [] };
 }
 
@@ -29,7 +30,7 @@ function run(args, timeout = 15000) {
 
 const errText = (r) => r?.error?.message || JSON.stringify(r?.error || r || '').slice(0, 200);
 
-const disabled = () => /^(0|false|off|no)$/i.test(process.env.DDASH_ORCA || '');
+const disabled = () => !config.get('DDASH_ORCA');
 
 // True if the Orca app/runtime is reachable on this machine.
 function available() {

@@ -13,8 +13,9 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync, execFileSync } = require('child_process');
+const config = require('./core/config');
 
-const disabled = () => /^(0|false|off|no)$/i.test(process.env.DDASH_WINDOW || '');
+const disabled = () => !config.get('DDASH_WINDOW');
 
 function onPath(cmd) {
   try {
@@ -26,7 +27,7 @@ function onPath(cmd) {
 // Why no window can be opened here ('' when one can).
 function unavailableReason() {
   if (disabled()) return 'terminal windows are turned off (DDASH_WINDOW=0)';
-  if (process.env.DDASH_WINDOW_BIN) return '';
+  if (config.get('DDASH_WINDOW_BIN')) return '';
   if (process.platform === 'win32') return '';
   if (process.platform === 'darwin') return onPath('osascript') ? '' : 'osascript was not found';
   if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return 'no graphical display (DISPLAY/WAYLAND_DISPLAY unset)';
@@ -43,7 +44,7 @@ const batchQuote = (s) => `"${String(s).replace(/%/g, '%%').replace(/"/g, '')}"`
 // How to open the window (pure; exported for tests). argv = [program, ...args] to run in the window.
 // Returns { file, args, verbatim?, script?: { name, content }, sync }.
 function launcher({ title, cwd, argv, name = 'window', platform = process.platform }) {
-  const bin = process.env.DDASH_WINDOW_BIN;
+  const bin = config.get('DDASH_WINDOW_BIN');
   if (bin) {
     const js = /\.(c|m)?js$/i.test(bin);
     return { file: js ? process.execPath : bin, args: [...(js ? [bin] : []), cleanTitle(title), cwd, JSON.stringify(argv)], sync: true };

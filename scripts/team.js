@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
+const config = require('./core/config');
 const lib = require('./lib');
 const orca = require('./orca');
 const terminal = require('./terminal');
@@ -66,7 +67,7 @@ function parseArgs(argv, booleans = []) {
 // On Windows, claude.exe (native install) runs directly, and npm's claude.cmd is run as node + its cli.js, so no
 // cmd.exe parses the arguments (a prompt with %VAR% or & stays as written). Only an unknown .cmd needs the shell.
 function claudeCommand() {
-  const bin = process.env.DDASH_CLAUDE_BIN || 'claude';
+  const bin = config.get('DDASH_CLAUDE_BIN');
   if (/\.(c|m)?js$/i.test(bin)) return { file: process.execPath, pre: [bin], shell: false };
   if (process.platform !== 'win32' || /\.(exe|com)$/i.test(bin)) return { file: bin, pre: [], shell: false };
   let found = [];

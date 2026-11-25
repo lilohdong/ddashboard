@@ -2,70 +2,14 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
+const config = require('./core/config');
+const { BOARD_DIR, PORT, URL, paths, safeId } = require('./core/paths');
+const { ensureDir, readJson, writeJson, atomicWrite, appendJsonl, readJsonl, readTail } = require('./core/fsx');
+const { git, gitOrNull: gitIn } = require('./core/git');
+const { newId } = require('./core/ids');
 
-const BOARD_DIR = (process.env.DDASH_BOARD_DIR || path.join(os.homedir(), '.ddashboard')).replace(/^~(?=$|[\\/])/, os.homedir());
-const PORT = Number(process.env.DDASH_PORT || 7357);
-const URL = `http://127.0.0.1:${PORT}`;
-
-const RECENT_DAYS = Number(process.env.DDASH_RECENT_DAYS || 14);
-
-const paths = {
-  legacyCards: path.join(BOARD_DIR, 'cards.jsonl'), // 0.1.0 card log, read-only from 0.2.0 on
-  cardsDir: path.join(BOARD_DIR, 'cards'),
-  cardsFor: (iso) => path.join(BOARD_DIR, 'cards', `${String(iso).slice(0, 7)}.jsonl`), // cards/YYYY-MM.jsonl
-  archived: path.join(BOARD_DIR, 'archived.json'),
-  waitBin: path.join(BOARD_DIR, 'bin', 'wait.js'),
-  teamBin: path.join(BOARD_DIR, 'bin', 'team.js'),
-  settings: path.join(BOARD_DIR, 'settings.json'),
-  models: path.join(BOARD_DIR, 'models.json'), // session id -> model from SessionStart (context window)
-  logsDir: path.join(BOARD_DIR, 'logs'),
-  log: (sid) => path.join(BOARD_DIR, 'logs', `${safeId(sid)}.log`),
-  replies: path.join(BOARD_DIR, 'replies.jsonl'),
-  sessions: path.join(BOARD_DIR, 'sessions.json'),
-  projects: path.join(BOARD_DIR, 'projects.json'),
-  serverPid: path.join(BOARD_DIR, 'server.pid'),
-  serverLog: path.join(BOARD_DIR, 'server.log'),
-  usageDir: path.join(BOARD_DIR, 'usage'),
-  usageFor: (iso) => path.join(BOARD_DIR, 'usage', `${String(iso).slice(0, 7)}.jsonl`), // usage/YYYY-MM.jsonl
-  inbox: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid)),
-  done: (sid) => path.join(BOARD_DIR, 'inbox', safeId(sid), 'done'),
-};
-
-function safeId(sid) {
-  return String(sid || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80) || 'unknown';
-}
-
-function ensureDir(d) {
-  fs.mkdirSync(d, { recursive: true });
-}
-
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
-
-function writeJson(file, data) {
-  ensureDir(path.dirname(file));
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, file);
-}
-
-function appendJsonl(file, obj) {
-  ensureDir(path.dirname(file));
-  fs.appendFileSync(file, JSON.stringify(obj) + '\n');
-}
-
-function readJsonl(file, limit) {
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  const rows = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try { rows.push(JSON.parse(line)); } catch { /* skip malformed lines */ }
-  }
-  return limit ? rows.slice(-limit) : rows;
-}
+const RECENT_DAYS = config.get('DDASH_RECENT_DAYS');
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -88,10 +32,6 @@ function alive(pid) {
 function serverPid() {
   const info = readJson(paths.serverPid, null);
   return info && alive(info.pid) ? info.pid : 0;
-}
-
-function git(args, cwd) {
-  try { return execSync(`git ${args}`, { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; }
 }
 
 // Worktrees of the same repository count as one project (keyed by the git common dir).
@@ -127,7 +67,7 @@ function registerSession(sid, cwd) {
   sessions[sid] = {
     ...(sessions[sid] || {}),
     session_id: sid,
-    name: process.env.DDASH_NAME || sessions[sid]?.name || path.basename(cwd),
+    name: config.get('DDASH_NAME') || sessions[sid]?.name || path.basename(cwd),
     cwd,
     branch: git('rev-parse --abbrev-ref HEAD', cwd),
     project: projectName(cwd),
@@ -182,16 +122,8 @@ const TAIL_BYTES = 4 * 1024 * 1024; // read only the tail of large transcripts
 
 // Parsed transcript lines (jsonl) from the tail of the file. The first line may be cut off; it is skipped.
 function readTranscriptTail(transcriptPath, tailBytes = TAIL_BYTES) {
-  let buf;
-  try {
-    const fd = fs.openSync(transcriptPath, 'r');
-    try {
-      const size = fs.fstatSync(fd).size;
-      const start = Math.max(0, size - tailBytes);
-      buf = Buffer.alloc(size - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-    } finally { fs.closeSync(fd); }
-  } catch { return []; }
+  const buf = readTail(transcriptPath, tailBytes);
+  if (!buf) return [];
   const rows = [];
   for (const line of buf.toString('utf8').split('\n')) {
     try { rows.push(JSON.parse(line)); } catch { /* partial or malformed line */ }
@@ -281,10 +213,7 @@ require(target);
     if (fs.readFileSync(file, 'utf8') === body) return file;
   } catch { /* not written yet */ }
   try {
-    ensureDir(path.dirname(file));
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, body);
-    fs.renameSync(tmp, file);
+    atomicWrite(file, body);
     return file;
   } catch {
     return target; // board dir not writable: fall back to the plugin path
@@ -708,13 +637,12 @@ function setMember(sid, tag) {
   if (!s) return false;
   Object.assign(s, { kind: 'member', role: tag.role, lead: tag.lead, stay: Boolean(tag.stay) });
   if (tag.group) s.group = tag.group;
-  if (!process.env.DDASH_NAME) s.name = tag.role;
+  if (!config.get('DDASH_NAME')) s.name = tag.role;
   delete s.pending;
   writeJson(paths.sessions, sessions);
   return true;
 }
 
-const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 // Put a message into a session's inbox. type: reply | report | order.
 function deliver(sid, msg) {
@@ -1019,7 +947,7 @@ function orphanWaiter(pid, table) {
 // With DDASH_BOARD_DIR set (tests, a second board), only waiters whose command line lies under that board are
 // touched, so a test never stops the real install's waiters or another run's. The real install never sets it.
 const norm = (p) => String(p).replace(/\\/g, '/').toLowerCase();
-const inScope = (p) => !process.env.DDASH_BOARD_DIR || norm(p.cmd).includes(norm(BOARD_DIR));
+const inScope = (p) => !config.isSet('DDASH_BOARD_DIR') || norm(p.cmd).includes(norm(BOARD_DIR));
 function sweepWaiters(table) {
   const killed = [];
   if (table?.size) {
@@ -1172,10 +1100,6 @@ const briefTemplate = (name) => `# ${name} brief
 
 ## Current state
 `;
-
-function gitIn(args, cwd) {
-  try { return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().trim(); } catch { return null; }
-}
 
 // True if git tracks any file under dir.
 const gitTracked = (dir) => Boolean(gitIn(['ls-files', '--', '.'], dir));
@@ -1347,7 +1271,7 @@ function pruneGroup(g, now = Date.now()) {
   return removed;
 }
 
-const BRIEF_STALE_COMMITS = Number(process.env.DDASH_BRIEF_STALE_COMMITS) || 20;
+const BRIEF_STALE_COMMITS = config.get('DDASH_BRIEF_STALE_COMMITS');
 
 // Brief staleness for a team project's groups. When a brief.md changes (new mtime), remember the git HEAD
 // of its worktree; once HEAD is BRIEF_STALE_COMMITS or more commits past that, tell that team's lead once
@@ -1435,7 +1359,7 @@ function memberStart(sid) {
 
 // --- Sidebar housekeeping ---
 
-const STALE_MIN = Number(process.env.DDASH_STALE_MIN) || 60;
+const STALE_MIN = config.get('DDASH_STALE_MIN');
 const isStale = (s, now = Date.now()) => !s.last_seen || now - new Date(s.last_seen).getTime() > STALE_MIN * 60000;
 
 // Remove a session's inbox dir if nothing is left in it (no pending messages, no live waiter).
@@ -1535,20 +1459,15 @@ function markEnded(sid) {
 //                the cap is told soon; one that starts above it at once).
 // DDASH_LEAD_CONTEXT_LIMIT, when set, is an absolute point that replaces baseline + budget (still cut to 80%).
 // Numbers from the environment: an empty or invalid value means the default; 0 is a value.
-function envNum(name, def) {
-  const v = String(process.env[name] ?? '').trim();
-  if (!v) return def;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : def;
-}
-const LEAD_WORK_BUDGET = envNum('DDASH_LEAD_WORK_BUDGET', 100000);
-const LEAD_CONTEXT_LIMIT = envNum('DDASH_LEAD_CONTEXT_LIMIT', 0); // 0: relative
-const CONTEXT_WINDOW = envNum('DDASH_CONTEXT_WINDOW', 0); // 0: detect (200k, 1M for [1m] models)
+const { envNum } = config;
+const LEAD_WORK_BUDGET = config.get('DDASH_LEAD_WORK_BUDGET');
+const LEAD_CONTEXT_LIMIT = config.get('DDASH_LEAD_CONTEXT_LIMIT'); // 0: relative
+const CONTEXT_WINDOW = config.get('DDASH_CONTEXT_WINDOW'); // 0: detect (200k, 1M for [1m] models)
 const DEFAULT_WINDOW = 200000;
 const LARGE_WINDOW = 1000000;
 const WINDOW_CAP = 0.8;
 const BASELINE_WARN = 0.5;
-const HANDOFF_MAX_TOKENS = envNum('DDASH_HANDOFF_MAX_TOKENS', 6000); // 0: no cap
+const HANDOFF_MAX_TOKENS = config.get('DDASH_HANDOFF_MAX_TOKENS'); // 0: no cap
 
 // Model names a session may run with: its SessionStart model, the transcript's model, Claude settings
 // (user, project, local) and ANTHROPIC_MODEL. Used only to spot 1M-context models ("opus[1m]").

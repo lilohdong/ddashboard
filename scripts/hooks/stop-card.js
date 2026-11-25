@@ -13,7 +13,7 @@ const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession, own,
+  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession, own, newId,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -145,7 +145,7 @@ function parseCard(text) {
   const cardKey = card && JSON.stringify(card);
   const branch = git('rev-parse --abbrev-ref HEAD', cwd);
   if (card && sessions[sid].last_card !== cardKey) {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const id = newId();
     // "replaces":"last" is stored as the id of the card it replaces, so the server can archive that one.
     if (card.replaces === 'last') {
       if (sessions[sid].last_card_id) card.replaces = sessions[sid].last_card_id;

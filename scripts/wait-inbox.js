@@ -12,13 +12,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const lib = require('./lib');
+const config = require('./core/config');
 const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, setState, pendingRules, readJson, writeJson } = lib;
 
 try { process.chdir(os.homedir()); } catch { /* stay where we are */ }
 
 const sid = safeId(process.argv[2]);
-const POLL_MS = Number(process.env.DDASH_POLL_MS || 1500);
-const CHECK_MS = Number(process.env.DDASH_WAIT_CHECK_MS || 60000); // owner identity re-check (pid reuse)
+const POLL_MS = config.get('DDASH_POLL_MS');
+const CHECK_MS = config.get('DDASH_WAIT_CHECK_MS'); // owner identity re-check (pid reuse)
 const dir = paths.inbox(sid);
 const lock = lib.waitLockPath(sid);
 const info = lib.waitInfoPath(sid);
@@ -41,7 +42,7 @@ fs.writeFileSync(lock, String(process.pid));
 
 // The owner: the Claude process this waiter serves.
 const startPpid = process.ppid;
-let owner = Number(process.env.DDASH_WAIT_OWNER) || 0;
+let owner = config.get('DDASH_WAIT_OWNER');
 let ownerIsClaude = false;
 if (!owner) {
   owner = lib.findClaudePid(process.ppid);
