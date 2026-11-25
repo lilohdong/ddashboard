@@ -472,7 +472,7 @@ function renderSide() {
         <button class="nav sess${r.depth ? ' member' : ''}${r.depth > 1 ? ' depth2' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}\n${esc(s.session_id)}">
           <span class="dot ${s.view}"></span>
           <span class="grow">
-            <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, tm)}${urgent[s.session_id] ? ` <span class="count">${esc(t('side.needsYou'))}</span>` : ''}</span>
+            <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, tm)}${s.unresponsive ? ` <span class="tag warn" title="${esc(t('side.unresponsiveTitle', { n: staleMin() }))}">${esc(t('side.unresponsive'))}</span>` : ''}${urgent[s.session_id] ? ` <span class="count">${esc(t('side.needsYou'))}</span>` : ''}</span>
             <span class="sub">${esc(s.branch || '')} · ${esc(viewName(s.view))}${s.pending ? ` · ${esc(t('side.queued', { n: s.pending }))}` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
             ${usageLine(s)}
           </span>

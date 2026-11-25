@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
-  isEnded, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
+  isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -113,6 +113,8 @@ const server = http.createServer((req, res) => {
       s.project = s.project || s.name;
       // Displayed state: ended > working > listening (wait command alive) > idle
       s.view = s.ended || s.state === 'ended' ? 'ended' : s.state === 'working' ? 'working' : s.waiting ? 'waiting' : 'idle';
+      // Unresponsive: idle, no live wait command, not seen for stale_min minutes.
+      s.unresponsive = s.view === 'idle' && isStale(s);
       // Place in the team: solo | lead | member | outside (team mode, untagged)
       s.team = teamRole(s, projects[s.project_key]);
       if (s.team === 'member' && routeCard(sessions, projects, s.session_id).lead_missing) s.lead_missing = true;

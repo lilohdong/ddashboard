@@ -486,6 +486,25 @@ test('server: forget, mark ended, spawn from the dashboard', async () => {
   });
 });
 
+test('server: unresponsive marker and lead context limit in /api/state', async () => {
+  teamFixture();
+  const old = new Date(Date.now() - 2 * 3600e3).toISOString();
+  const s = readJson(paths.sessions, {});
+  s.Q1 = session('Q1', { last_seen: old });
+  s.Q2 = session('Q2', { last_seen: old });
+  s.Q3 = session('Q3', { last_seen: old, state: 'working' });
+  s.Q4 = session('Q4', { last_seen: old, state: 'ended', ended: old });
+  writeJson(paths.sessions, s);
+  fs.mkdirSync(paths.inbox('Q2'), { recursive: true });
+  fs.writeFileSync(path.join(paths.inbox('Q2'), 'wait.lock'), String(process.pid)); // live waiter
+  await withServer(async (_post, base) => {
+    const st = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(st.lead_context_limit, 150000);
+    const un = Object.values(st.sessions).filter((x) => x.unresponsive).map((x) => x.session_id);
+    assert.deepEqual(un, ['Q1']);
+  });
+});
+
 // --- groups ---
 
 const groupDir = (name) => path.join(CWD, 'docs', 'groups', name);
