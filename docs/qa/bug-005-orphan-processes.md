@@ -113,15 +113,15 @@ e75ecde6 had no `claude_pid` and stayed idle.
   Claude process (`isClaudeProcess`).
 - no Claude ancestor found (tests, manual run): fall back to watching the start `ppid` + the 60 s check against the
   bash ancestor being alive; never run unwatched. `DDASH_WAIT_OWNER=<pid>` lets tests inject the owner.
-- on owner death: remove `wait.lock`/`wait.json`, do **not** touch session state (the server decides gone/ended).
+- on owner death: remove `wait.lock`/`wait.info`, do **not** touch session state (the server decides gone/ended).
 - the bash parents exit as soon as node exits (`{ node …; } && pwd -P` finishes), so the whole chain goes.
 
 **F-2. wait.js does not hold the worktree.** `process.chdir(os.homedir())` (BOARD_DIR if writable) at startup, before
 polling. (The bash parents still hold it while the session lives, which is correct; they go with F-1.)
 
-**F-3. Owner-aware "waiting".** wait.js writes `inbox/<sid>/wait.json` = `{ pid, owner, ppid, started, ver }` next to
+**F-3. Owner-aware "waiting".** wait.js writes `inbox/<sid>/wait.info` = `{ pid, owner, ppid, started, ver }` next to
 `wait.lock` (lock format unchanged: older readers keep working). `waitPid(sid)` becomes: lock pid alive **and** (no
-wait.json, or `owner` alive). So a waiter whose owner died is not "waiting" — `markEnded`/`memberGone`/forget work
+wait.info, or `owner` alive). So a waiter whose owner died is not "waiting" — `markEnded`/`memberGone`/forget work
 again, and the dashboard shows idle/gone instead of waiting. wait.js also records `owner` as the session's
 `claude_pid` when none is known (solo sessions get a pid → gone detection works for them too).
 
@@ -167,8 +167,8 @@ it was alive; the sweep passes cmdline-matched pids). POSIX: SIGTERM, wait 1 s, 
    `DDASH_WAIT_OWNER=<owner>` and a temp `DDASH_BOARD_DIR`; kill owner; assert waiter exits < 5 s and wait.lock/json gone.
 2. **owner alive → waiter keeps waiting, delivers a message** (regression).
 3. **cwd** (F-2): waiter started with cwd = temp dir; assert the temp dir can be removed while the waiter runs
-   (Windows-meaningful; on POSIX assert `process.cwd()` reported via a debug line / wait.json `cwd` is the homedir).
-4. **waitPid owner-aware** (F-3): wait.lock with a live pid + wait.json with a dead owner → `waitPid` = 0;
+   (Windows-meaningful; on POSIX assert `process.cwd()` reported via a debug line / wait.info `cwd` is the homedir).
+4. **waitPid owner-aware** (F-3): wait.lock with a live pid + wait.info with a dead owner → `waitPid` = 0;
    `markEnded` succeeds; server `/api/state` view is not `waiting`.
 5. **forget/markEnded/session-end stop the waiter** (F-4): live fake waiter (a node process whose argv contains
    `wait-inbox.js <sid>`) → after `forgetSessions([sid])` it is dead and the inbox dir is removed.
@@ -189,7 +189,7 @@ it was alive; the sweep passes cmdline-matched pids). POSIX: SIGTERM, wait 1 s, 
 
 ## Implementation order (phase 2, separate commits)
 
-1. wait-inbox.js: owner watch + chdir + wait.json (F-1, F-2) + tests 1-3.
+1. wait-inbox.js: owner watch + chdir + wait.info (F-1, F-2) + tests 1-3.
 2. lib.js: owner-aware waitPid, stopWaiter, killTree dead root (F-3, F-4, F-7) + hooks/forget/markEnded/endMember/
    handoff call sites + tests 4-6, 9, 10.
 2b. Gone detection for every session: SessionStart/UserPromptSubmit pid recording, sessionGone in server (F-9) +

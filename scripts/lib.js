@@ -806,12 +806,37 @@ function moveInbox(from, to) {
   return n;
 }
 
-// Pid of the session's wait command, if it is running.
+// --- Wait commands (bug-005: a waiter must never outlive the Claude process that started it) ---
+// inbox/<sid>/wait.lock holds the waiter's pid (format kept for older readers); wait.info next to it (not .json: inbox messages are the .json files) holds
+// { pid, owner, owner_name, ppid, started } written by wait-inbox.js. owner = the Claude process it serves.
+const waitLockPath = (sid) => path.join(paths.inbox(sid), 'wait.lock');
+const waitInfoPath = (sid) => path.join(paths.inbox(sid), 'wait.info');
+const readWaitInfo = (sid) => readJson(waitInfoPath(sid), null);
+
+// Pid of the session's wait command, if it is running and its owner (when known) is alive. A waiter whose
+// Claude process died is an orphan, not "waiting" (it exits by itself; older waiters are swept).
 function waitPid(sid) {
+  let pid;
+  try { pid = Number(fs.readFileSync(waitLockPath(sid), 'utf8')); } catch { return 0; }
+  if (!alive(pid)) return 0;
+  const info = readWaitInfo(sid);
+  if (info && Number(info.pid) === pid && Number(info.owner) > 0 && !alive(Number(info.owner))) return 0;
+  return pid;
+}
+
+// The image name of a live process ('' when it is gone or cannot be read). Cheap (one tasklist/ps call), for
+// checking that a remembered pid still is the same program (pids are reused).
+function processName(pid) {
+  pid = Number(pid);
+  if (!(pid > 0) || !alive(pid)) return '';
   try {
-    const pid = Number(fs.readFileSync(path.join(paths.inbox(sid), 'wait.lock'), 'utf8'));
-    return alive(pid) ? pid : 0;
-  } catch { return 0; }
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 }).toString('utf8');
+      const m = out.match(/^"([^"]+)","(\d+)"/m);
+      return m && Number(m[2]) === pid ? m[1] : '';
+    }
+    return path.basename(execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).toString('utf8').trim());
+  } catch { return ''; }
 }
 
 // --- Processes (for stopping a replaced lead) ---
@@ -1476,6 +1501,7 @@ module.exports = {
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, RULES_TEXT_VER, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
+  waitLockPath, waitInfoPath, readWaitInfo, processName,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
   firstContext, rememberModel, clearLeadContext, envNum,
