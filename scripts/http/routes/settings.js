@@ -1,4 +1,6 @@
 // GET /api/settings; POST /api/settings {lang} (dashboard and card language) or {project, runner_lead?, runner_member?}.
+// A POST is a patch: only the keys it carries change. {lang: null} clears the language; a body with none of these
+// keys ({} included) is 400 bad_request and changes nothing.
 const { paths } = require('../../core/paths');
 const { readJson } = require('../../core/fsx');
 const { readSettings, saveSettings } = require('../../app/settings');
@@ -17,6 +19,7 @@ module.exports = [
         if (!r.ok) throw fail(r.code || 400, r.error);
         return r;
       }
+      if (!Object.hasOwn(msg, 'lang')) throw fail(400, 'nothing to change: send lang, or project with runner_lead/runner_member', 'bad_request');
       const r = saveSettings({ lang: msg.lang || null });
       if (!r.ok) throw fail(400, r.error, 'bad_lang');
       return { ok: true, lang: r.settings.lang || null };

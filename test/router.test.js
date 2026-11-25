@@ -194,6 +194,35 @@ test('router: a POST without an Origin header is accepted; a foreign or "null" O
   });
 });
 
+// verify-011 F2: POST /api/settings is a patch; an empty body or no known key is 400 and keeps lang.
+test('server: POST /api/settings with {} or no known key is 400 bad_request and keeps the language', async () => {
+  reset();
+  writeJson(paths.settings, { lang: 'ko', ver: 5 });
+  await withServer({}, async (post, base) => {
+    for (const body of [{}, { foo: 1 }, { langg: 'en' }]) {
+      const r = await post('/api/settings', body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.code, 'bad_request', JSON.stringify(body));
+      assert.equal(typeof r.body.error, 'string');
+    }
+    assert.deepEqual(readJson(paths.settings, {}), { lang: 'ko', ver: 5 }, 'nothing changed');
+    assert.deepEqual(await (await fetch(`${base}/api/settings`)).json(), { lang: 'ko' });
+    // A project body changes only the runner it carries, never the language.
+    let r = await post('/api/settings', { project: KEY, runner_member: 'window' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    r = await post('/api/settings', { project: KEY });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.code, 'bad_request');
+    assert.equal(readJson(paths.settings, {}).lang, 'ko');
+    // The given key changes; null clears it (as the dashboard's language picker may send).
+    assert.deepEqual((await post('/api/settings', { lang: 'en' })).body, { ok: true, lang: 'en' });
+    assert.deepEqual(readJson(paths.settings, {}), { lang: 'en', ver: 6 });
+    assert.equal((await post('/api/settings', { lang: 'xx' })).body.code, 'bad_lang');
+    assert.deepEqual((await post('/api/settings', { lang: null })).body, { ok: true, lang: null });
+    assert.equal(readJson(paths.settings, {}).lang, undefined);
+  });
+});
+
 test('server: a slow orca does not block /api/state while /api/team/spawn waits for it', async () => {
   reset();
   const DELAY = 2500;
