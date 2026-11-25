@@ -14,6 +14,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync, execFileSync } = require('child_process');
 const config = require('../core/config');
+const { paths } = require('../core/paths');
+const { LAUNCH, launchSpec } = require('./claude-cmd');
 
 const disabled = () => !config.get('DDASH_WINDOW');
 
@@ -102,4 +104,11 @@ function openWindow({ title, cwd, argv, dir, name }) {
   return { pid: child.pid || 0 };
 }
 
-module.exports = { available, unavailableReason, launcher, openWindow, cleanTitle };
+// Start an interactive claude in a new OS terminal window in cwd (through orca-launch.js; no shell command line).
+// args: claude options (--session-id/--resume, ...). Returns { pid }.
+function launch(sid, args, prompt, cwd, title) {
+  const { spec, name } = launchSpec(sid, args, prompt, cwd, 'window');
+  return openWindow({ cwd, title, argv: [process.execPath, LAUNCH, spec], dir: paths.logsDir, name });
+}
+
+module.exports = { launch, available, unavailableReason, launcher, openWindow, cleanTitle };

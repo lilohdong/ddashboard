@@ -7,6 +7,7 @@
 // DDASH_ORCA=0 turns Orca off. DDASH_ORCA_BIN overrides the orca command (a .js file runs with node; tests).
 const { execFileSync, execFile } = require('child_process');
 const config = require('../core/config');
+const { LAUNCH, launchSpec } = require('./claude-cmd');
 
 const slash = (p) => String(p).replace(/\\/g, '/');
 
@@ -101,4 +102,11 @@ function sendText(handle, text) {
   return true;
 }
 
-module.exports = { run, available, openTerminal, writable, terminalOpen, terminalOpenAsync, closeTerminal, sendText, orcaCommand, worktreeRoot };
+// Start an interactive claude in a new, visible Orca terminal in the worktree of cwd (through orca-launch.js).
+// args: claude options (--session-id/--resume, ...). Returns { handle, pane }.
+function launch(sid, args, prompt, cwd, title) {
+  const { spec } = launchSpec(sid, args, prompt, cwd, 'orca');
+  return openTerminal({ cwd, title, command: `node "${slash(LAUNCH)}" "${slash(spec)}"` });
+}
+
+module.exports = { launch, run, available, openTerminal, writable, terminalOpen, terminalOpenAsync, closeTerminal, sendText, orcaCommand, worktreeRoot };
