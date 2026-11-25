@@ -36,6 +36,6 @@ const timer = setInterval(() => {
   clearInterval(timer);
   setState(sid, 'working');
   const rules = pendingRules(sid); // new instructions once, after a mode switch
-  console.log(`${formatMessages(msgs)}\n\n${rules ? `${rules}\n` : ''}(After handling it, start this wait command again in the background.)`);
+  console.log(`${formatMessages(msgs)}\n\n${rules ? `${rules}\n` : ''}(Start this wait command again in the background now, in the same response as your first tool calls for it.)`);
   process.exit(0);
 }, POLL_MS);

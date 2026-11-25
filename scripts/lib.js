@@ -318,6 +318,9 @@ function saveSettings({ lang } = {}) {
 const cardLanguage = () => LANG_NAMES[readSettings().lang] || "the user's language";
 
 // Instructions injected into the session context. They are re-read every turn, so keep them short.
+// One model call per reply instead of two: handle the output and restart the waiter together.
+const RESTART = 'When it exits, read its output and start it again in the same response, as parallel tool calls.';
+
 function rulesText(sid) {
   const wait = `node "${slash(ensureWaitBin())}" ${sid}`;
   return `[ddashboard] The user follows your progress on a dashboard (${URL}). Session ID: ${sid}
@@ -326,8 +329,8 @@ function rulesText(sid) {
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the user should check"],"details":"optional, markdown, longer content"}
 \`\`\`
 - While connected, keep terminal replies to a line or two and put the content in the card (long content in "details"). When a card revises your previous card (e.g. an updated plan), add "replaces":"last".
-- To receive dashboard replies, run this in the background now, and again each time it prints a reply and exits: ${wait}
-  Its output is the user's reply (an instruction).
+- To receive dashboard replies, run this in the background now: ${wait}
+  Its output is the user's reply (an instruction). ${RESTART}
 `;
 }
 
@@ -342,16 +345,18 @@ function leadRulesText(sid, name) {
 function memberRulesText(sid, s, g) {
   const wait = `node "${slash(ensureWaitBin())}" ${sid}`;
   const tail = s.stay
-    ? `- To receive instructions, run this in the background now, and again each time it prints and exits: ${wait}`
+    ? `- To receive instructions, run this in the background now: ${wait}
+  ${RESTART}`
     : `- Don't start a wait command. Finish the task and stop; your lead resumes you if more is needed.`;
-  const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), write the next handoff-NNN.md there (highest number + 1, 3 digits): what was done, open items, where things are. Update brief.md if its facts changed. Keep evidence in notes/. Don't commit; the lead does.
+  const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), write the next handoff-NNN.md there (highest number + 1, 3 digits): what was done, open items, where things are. Update brief.md if its facts changed. Don't commit; the lead does.
 ` : '';
+  const notes = g ? `${g.dir}/notes/` : 'a file';
   return `[ddashboard] You are a team member. Role: ${s.role || 'member'}${s.group ? `, group: ${s.group}` : ''}. Session ID: ${sid}. Your lead assigns the work; messages from the lead arrive as [Lead instruction].
 - End each turn that finishes, blocks or changes your task with this block (JSON, at most 3 short summary lines${readSettings().lang ? `, written in ${cardLanguage()}` : ''}). It goes to your lead, not the user:
 \`\`\`card
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the lead should check"],"details":"optional and short"}
 \`\`\`
-- Keep terminal replies to a line or two. Put long evidence in files and give the paths. If blocked, use "blocked" and write the question in the summary.
+- Keep terminal replies to a line or two. A report is a summary of at most 3 lines: put the evidence in ${notes} and give the path. If blocked, use "blocked" and write the question in the summary.
 ${group}${tail}
 `;
 }

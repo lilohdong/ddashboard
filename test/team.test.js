@@ -164,6 +164,19 @@ test('rules: solo text unchanged, team texts per role, re-injected once on mode 
   assert.equal(lib.pendingRules('M1'), '');
 });
 
+test('rules: every role restarts the wait command in the same response; member reports stay short', () => {
+  teamFixture();
+  const sessions = readJson(paths.sessions, {});
+  const p = { ...readJson(paths.projects, {})[KEY], groups: { front: { dir: 'C:/x/docs/groups/front' } } };
+  const same = /same response, as parallel tool calls/;
+  assert.match(lib.rulesFor(sessions.O1, { mode: 'solo' }), same);
+  assert.match(lib.rulesFor(sessions.L1, p), same);
+  assert.match(lib.rulesFor(sessions.O1, p), same);
+  assert.match(lib.rulesFor({ ...sessions.M1, stay: true }, p), same);
+  assert.match(lib.rulesFor(sessions.M1, p), /summary of at most 3 lines: put the evidence in a file/);
+  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /evidence in C:\/x\/docs\/groups\/front\/notes\/ and give the path/);
+});
+
 test('setMode: team with a new lead moves the members, solo clears the lead', () => {
   teamFixture();
   const r = lib.setMode(KEY, 'team', { lead: 'O1', leadName: 'Beta' });
