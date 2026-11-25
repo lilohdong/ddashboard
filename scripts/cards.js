@@ -92,18 +92,20 @@ function archiver(now = Date.now()) {
   };
 }
 
-function state(limit = 300) {
+// Recent active cards. Member reports to a lead (via_lead) are left out unless reports is true.
+function state(limit = 300, { reports = false } = {}) {
   refresh();
   const isArchived = archiver();
   const recent = [];
   let archivedCount = 0;
   for (let i = cards.length - 1; i >= 0; i--) {
     if (isArchived(cards[i])) archivedCount++;
-    else if (recent.length < limit) recent.push(cards[i]);
+    else if (recent.length < limit && (reports || !cards[i].via_lead)) recent.push(cards[i]);
   }
   const last = {};
   for (const [sid, c] of Object.entries(lastBySession)) {
     last[sid] = { id: c.id, status: c.status, title: c.title, ts: c.ts, archived: isArchived(c) };
+    if (c.via_lead) last[sid].via_lead = c.via_lead;
   }
   return { cards: recent.reverse(), last_by_session: last, archived_count: archivedCount };
 }
