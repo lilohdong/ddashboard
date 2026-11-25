@@ -212,6 +212,7 @@ Changes from the design:
   count, because a Claude host the plugin doesn't recognize would lose its waiter every minute.
 - The waiter checks its owner every poll (`alive`) and checks the owner's image name every 60 s (`tasklist`/`ps`, cheap).
   A whole process-table read happens only once, at start.
+- server.js `waiting()` is `Boolean(lib.waitPid(sid))` (owner-aware; architecture.md step 0), done in 759df96, tested in orphans.test.js.
 - A new waiter takes over from an orphan that holds the lock. Before, it said "Already waiting" and the session never
   got its messages.
 - Test note: on Windows, node kills a child that is not detached when the parent dies, so the fixtures start orphans

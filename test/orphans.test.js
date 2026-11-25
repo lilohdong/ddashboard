@@ -415,6 +415,23 @@ test('F-9: UserPromptSubmit records a missing pid once (0 when no Claude is foun
   assert.equal(readJson(paths.sessions, {}).P2.claude_pid, 0); // no Claude above it
 });
 
+test('F-3: /api/state does not show "waiting" for a waiter whose owner is dead (server uses lib.waitPid)', async () => {
+  const dead = await deadPid();
+  reset({ V1: session('V1'), V2: session('V2') });
+  for (const sid of ['V1', 'V2']) fs.mkdirSync(paths.inbox(sid), { recursive: true });
+  // Live pid in both locks (this test, not a wait command, so the sweep leaves it); V1's owner is dead.
+  fs.writeFileSync(lib.waitLockPath('V1'), String(process.pid));
+  fs.writeFileSync(lib.waitInfoPath('V1'), JSON.stringify({ pid: process.pid, owner: dead }));
+  fs.writeFileSync(lib.waitLockPath('V2'), String(process.pid));
+  fs.writeFileSync(lib.waitInfoPath('V2'), JSON.stringify({ pid: process.pid, owner: process.pid }));
+  await withServer(async (base) => {
+    const st = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(st.sessions.V1.waiting, false);
+    assert.equal(st.sessions.V1.view, 'idle');
+    assert.equal(st.sessions.V2.view, 'waiting');
+  });
+});
+
 // --- F-5 / F-6: orphan sweep, server cwd ---
 
 test('orphanWaiter (table fixture): dead or reused parent, init parent, 0.1.0 path; never a live unknown host', () => {
