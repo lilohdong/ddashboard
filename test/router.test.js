@@ -140,6 +140,11 @@ test('server: errors are {error, code}; unknown paths 404; a body over 64 KB is 
     assert.deepEqual((await post('/api/team/end', { session_id: 'L1' })).body, { error: 'not a team member', code: 'not_member' });
     assert.equal((await post('/api/sessions/end', { session_id: 'nobody' })).body.code, 'unknown_session'); // through the job worker
     assert.equal((await post('/api/archive', { card_id: 'x', archived: 1 })).body.code, 'bad_request');
+    for (const url of POSTS) { // an array body (verify-011 F3) never reaches a handler
+      const r = await post(url, '[1]');
+      assert.equal(r.status, 400, url);
+      assert.equal(r.body.code, 'bad_json', url);
+    }
     const big = await post('/api/reply', JSON.stringify({ session_id: 'L1', text: 'x'.repeat(70 * 1024) }));
     assert.equal(big.status, 413);
     assert.equal(big.body.code, 'too_large');
@@ -165,10 +170,12 @@ test('router: fail() sets status and code; an unexpected throw is 500 internal; 
     assert.deepEqual(await (await fetch(`${base}/c`)).json(), { ok: 1 });
     r = await fetch(`${base}/d`, { method: 'POST', headers: { Origin: 'http://localhost:1' }, body: '{"x":1}' });
     assert.deepEqual(await r.json(), { x: 1 });
-    r = await fetch(`${base}/d`, { method: 'POST', body: '[1]' }); // an array is an object: accepted as before
-    assert.equal(r.status, 200);
-    r = await fetch(`${base}/d`, { method: 'POST', body: 'null' });
-    assert.equal((await r.json()).code, 'bad_json');
+    // verify-011 F3: valid JSON that is not an object is 400 bad_json before the handler runs.
+    for (const body of ['[1]', '[]', '[{"x":1}]', 'null', '1', '"x"', 'true']) {
+      r = await fetch(`${base}/d`, { method: 'POST', body });
+      assert.equal(r.status, 400, body);
+      assert.deepEqual(await r.json(), { error: 'body must be a JSON object', code: 'bad_json' }, body);
+    }
   });
 });
 

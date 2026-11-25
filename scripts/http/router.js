@@ -1,7 +1,7 @@
 // HTTP router (docs/architecture.md §3.2, §3.5). A route is { method, path, sameOrigin, body, handler }:
 //   path       a string, or a function (pathname) -> truthy match (passed to the handler as ctx.match)
 //   sameOrigin refuse requests from other origins (403 forbidden); every POST route sets it
-//   body       parse a JSON object body (at most 64 KB) into ctx.body
+//   body       parse a JSON object body (at most 64 KB) into ctx.body; anything else is 400 bad_json
 //   handler    async ({ req, url, body, match }) -> a JSON value (200), or raw(text, type); throws fail(...) for errors
 // Errors are { error: message, code }; unexpected exceptions are 500 internal.
 const MAX_BODY = 64 * 1024;
@@ -56,7 +56,8 @@ function readBody(req) {
       if (over) return;
       let msg;
       try { msg = JSON.parse(body); } catch { return reject(fail(400, 'bad json', 'bad_json')); }
-      if (!msg || typeof msg !== 'object') return reject(fail(400, 'bad json', 'bad_json'));
+      // Every route expects an object: null, an array, a number or a string is refused here, not by the handler.
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return reject(fail(400, 'body must be a JSON object', 'bad_json'));
       resolve(msg);
     });
   });
