@@ -11,7 +11,7 @@ const NL = 0x0a;
 const files = new Map(); // file -> { offset, partial: Buffer }
 let cards = []; // all cards, oldest first
 let replaced = new Set(); // ids retired by a later card's "replaces"
-let lastBySession = {}; // session_id -> { status, title, ts }
+let lastBySession = {}; // session_id -> latest card of that session
 let unsorted = false;
 
 function reset() {
@@ -30,7 +30,7 @@ function add(card) {
   if (card.replaces) replaced.add(String(card.replaces));
   const sid = card.session_id;
   if (sid && (!lastBySession[sid] || card.ts >= lastBySession[sid].ts)) {
-    lastBySession[sid] = { id: card.id, status: card.status, title: card.title, ts: card.ts };
+    lastBySession[sid] = card;
   }
 }
 
@@ -101,7 +101,11 @@ function state(limit = 300) {
     if (isArchived(cards[i])) archivedCount++;
     else if (recent.length < limit) recent.push(cards[i]);
   }
-  return { cards: recent.reverse(), last_by_session: lastBySession, archived_count: archivedCount };
+  const last = {};
+  for (const [sid, c] of Object.entries(lastBySession)) {
+    last[sid] = { id: c.id, status: c.status, title: c.title, ts: c.ts, archived: isArchived(c) };
+  }
+  return { cards: recent.reverse(), last_by_session: last, archived_count: archivedCount };
 }
 
 const SEARCH_FIELDS = ['title', 'details', 'project', 'session_name', 'branch'];

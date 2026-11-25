@@ -193,7 +193,12 @@ function urgentBySession() {
   }
   const replied = repliedIds();
   const out = {};
-  for (const [sid, c] of Object.entries(last)) if (URGENT.has(c.status) && !answered(c, replied)) out[sid] = 1;
+  for (const [sid, c] of Object.entries(last)) {
+    // Archived cards and ended sessions no longer need you.
+    const archived = c.id in overrides ? overrides[c.id] : c.archived;
+    if (archived || state.sessions[sid]?.view === 'ended') continue;
+    if (URGENT.has(c.status) && !answered(c, replied)) out[sid] = 1;
+  }
   return out;
 }
 
