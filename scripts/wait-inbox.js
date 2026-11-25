@@ -2,9 +2,10 @@
 // Wait command the session runs in the background.
 // It waits quietly (no tokens) until a reply arrives, prints it, and exits.
 // Claude Code reports the background command's exit, which wakes the session.
+// Messages are dashboard replies, team reports (to a lead) or lead instructions (to a member).
 const fs = require('fs');
 const path = require('path');
-const { paths, ensureDir, safeId, alive, takeInbox, formatReplies, setState } = require('./lib');
+const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, setState, pendingRules } = require('./lib');
 
 const sid = safeId(process.argv[2]);
 const POLL_MS = Number(process.env.DDASH_POLL_MS || 1500);
@@ -34,6 +35,7 @@ const timer = setInterval(() => {
   if (!msgs.length) return;
   clearInterval(timer);
   setState(sid, 'working');
-  console.log(`[Dashboard reply]\n${formatReplies(msgs)}\n\n(After handling it, start this wait command again in the background.)`);
+  const rules = pendingRules(sid); // new instructions once, after a mode switch
+  console.log(`${formatMessages(msgs)}\n\n${rules ? `${rules}\n` : ''}(After handling it, start this wait command again in the background.)`);
   process.exit(0);
 }, POLL_MS);

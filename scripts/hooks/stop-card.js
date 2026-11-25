@@ -3,11 +3,15 @@
 // 1) Find the ```card block in this turn's reply and append it to cards/YYYY-MM.jsonl.
 //    "replaces":"last" retires this session's previous card (the server treats it as archived).
 // 2) Add this turn's token usage to usage/YYYY-MM.jsonl and the session's running totals (cards or not).
-// 3) If replies are waiting in the inbox, keep the session going and hand them over as the next instruction.
+//    Team mode: a member's card is stored with via_lead and sent to its lead's inbox as a report
+//    (if the lead has ended, it goes to the dashboard marked lead_missing).
+// 3) If messages are waiting in the inbox (dashboard replies, team reports, lead instructions),
+//    keep the session going and hand them over as the next instruction.
 const path = require('path');
 const {
-  paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatReplies,
-  readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS,
+  paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
+  messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
+  rulesUpdate, replacedText,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -32,7 +36,7 @@ function recordUsage(s, sid, rows) {
   const sameTurn = probe.boundary && probe.boundary === mark.boundary;
   const u = sameTurn ? turnUsage(rows, new Set(mark.ids || [])) : probe;
   let reason = u.reason;
-  if (sameTurn && s.reply_handed) reason = 'reply';
+  if (sameTurn && s.reply_handed) reason = typeof s.reply_handed === 'string' ? s.reply_handed : 'reply';
   delete s.reply_handed;
   s.usage_mark = { boundary: u.boundary, ids: [...(sameTurn ? mark.ids || [] : []), ...u.ids].slice(-MAX_MARK_IDS) };
   if (!u.ids.length) return; // nothing new (e.g. no transcript)
@@ -113,10 +117,23 @@ function parseCard(text) {
   const sid = safeId(input.session_id);
   const sessions = readJson(paths.sessions, {});
   if (!sessions[sid]) return; // not a dashboard session
+  const projects = readJson(paths.projects, {});
   const cwd = input.cwd || process.cwd();
+  const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
+
+  // A lead replaced by a handoff posts nothing and gets no messages (its inbox moved to the new lead).
+  // It is told once to stop: the fallback for when its Claude process could not be stopped.
+  if (sessions[sid].replaced_by) {
+    const s = sessions[sid];
+    try { recordUsage(s, sid, rows); } catch { /* usage is best effort */ }
+    const tell = !s.replaced_told;
+    s.replaced_told = true;
+    writeJson(paths.sessions, sessions);
+    if (tell) process.stdout.write(JSON.stringify({ decision: 'block', reason: replacedText(s) }));
+    return;
+  }
 
   // 1) Record the card. Skip it if it is the same card again (e.g. a reply-driven turn without a new card).
-  const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
   const text = input.last_assistant_message || lastTurnText(rows);
   const card = parseCard(text);
   const cardKey = card && JSON.stringify(card);
@@ -128,7 +145,8 @@ function parseCard(text) {
       if (sessions[sid].last_card_id) card.replaces = sessions[sid].last_card_id;
       else delete card.replaces;
     }
-    appendCard({
+    const route = routeCard(sessions, projects, sid);
+    const stored = {
       id,
       ts: new Date().toISOString(),
       session_id: sid,
@@ -137,7 +155,11 @@ function parseCard(text) {
       branch,
       diffstat: git('diff --shortstat HEAD', cwd),
       ...card,
-    });
+    };
+    if (route.to === 'lead') stored.via_lead = route.lead;
+    if (route.lead_missing) stored.lead_missing = true;
+    appendCard(stored);
+    if (route.to === 'lead') deliver(route.lead, reportMessage(stored, sessions[sid]));
     sessions[sid].last_card = cardKey;
     sessions[sid].last_card_id = id;
     sessions[sid].last_status = card.status;
@@ -147,15 +169,20 @@ function parseCard(text) {
   // 2) Token usage of this turn (never blocks the rest of the hook).
   try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }
 
-  // 3) Hand over waiting replies (the session then stays "working").
+  // 3) Hand over waiting messages (the session then stays "working").
+  //    After a mode switch, the new instructions ride along once.
   const msgs = takeInbox(sid);
-  if (msgs.length) sessions[sid].reply_handed = true;
+  let rules = '';
+  if (msgs.length) {
+    sessions[sid].reply_handed = messagesReason(msgs);
+    rules = rulesUpdate(sessions[sid], projects[sessions[sid].project_key]);
+  }
   if (branch) sessions[sid].branch = branch;
   sessions[sid].state = msgs.length ? 'working' : 'idle';
   sessions[sid].last_seen = new Date().toISOString();
   writeJson(paths.sessions, sessions);
 
   if (msgs.length) {
-    process.stdout.write(JSON.stringify({ decision: 'block', reason: `[Dashboard reply]\n${formatReplies(msgs)}` }));
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: `${formatMessages(msgs)}${rules ? `\n\n${rules}` : ''}` }));
   }
 })();
