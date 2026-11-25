@@ -39,3 +39,8 @@ Fixed rules for every lead of this team. Handoff docs hold only the current stat
 - In Git Bash, prefix commands whose arguments start with `/` with `MSYS_NO_PATHCONV=1`.
 - New Orca worktrees: `orca worktree create --repo id:<repo> --name <n> --base-branch <branch> --branch <branch> --setup skip` (with `--agent` the launch check fails). Then `orca terminal create --worktree path:<dir> --command "claude ..."`; a new folder shows a trust prompt (send Down, then Enter).
 - For a lead handoff use `T handoff <doc> --orca` so the new lead is visible in Orca (the project's runner setting defaults to headless).
+
+## QA in parallel
+
+- One QA member per verification target. Each runs its own server from the target worktree with `DDASH_PORT` (7358+) and a temp `DDASH_BOARD_DIR`; never the installed copy on 7357.
+- One-off QA members are ended after their report.
