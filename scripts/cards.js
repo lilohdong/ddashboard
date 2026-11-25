@@ -11,7 +11,7 @@ const NL = 0x0a;
 const files = new Map(); // file -> { offset, partial: Buffer }
 let cards = []; // all cards, oldest first
 let replaced = new Set(); // ids retired by a later card's "replaces" or by a newer card with the same key
-let byKey = new Map(); // project_key + key -> { latest card, count of cards }
+let byKey = new Map(); // project_key + key -> { latest card, times: ts of every card in the group }
 let lastBySession = {}; // session_id -> latest card of that session
 let unsorted = false;
 
@@ -31,8 +31,8 @@ function addKeyed(card) {
   const k = keyOf(card);
   if (!k) return;
   const g = byKey.get(k);
-  if (!g) { byKey.set(k, { latest: card, count: 1 }); return; }
-  g.count++;
+  if (!g) { byKey.set(k, { latest: card, times: [card.ts] }); return; }
+  g.times.push(card.ts);
   if (card.ts >= g.latest.ts) { replaced.add(g.latest.id); g.latest = card; } else replaced.add(card.id);
 }
 
@@ -108,10 +108,13 @@ function archiver(now = Date.now()) {
   };
 }
 
-// A keyed card carries key_prev: how many earlier cards of its project share its key.
+// A keyed card carries key_prev: how many earlier cards of its project share its key
+// (older than this one, so an unarchived old card doesn't count the newer ones).
 function withHistory(card) {
   const g = keyOf(card) && byKey.get(keyOf(card));
-  return g && g.count > 1 ? { ...card, key_prev: g.count - 1 } : card;
+  if (!g) return card;
+  const prev = g.times.filter((ts) => ts < card.ts).length;
+  return prev ? { ...card, key_prev: prev } : card;
 }
 
 // Recent active cards. Member reports to a lead (via_lead) are left out unless reports is true.
@@ -144,7 +147,8 @@ function matches(card, q) {
 }
 
 // Newest first. mode: include (all cards) | only (archived only) | exclude (active only).
-function search(query, mode = 'include', limit = 100) {
+// key: only cards with exactly this key and project_key (a task's history; reports never carry a key).
+function search(query, mode = 'include', limit = 100, { key, project_key } = {}) {
   refresh();
   const q = String(query || '').trim().toLowerCase();
   const isArchived = archiver();
@@ -153,6 +157,7 @@ function search(query, mode = 'include', limit = 100) {
     const c = cards[i];
     const archived = isArchived(c);
     if ((mode === 'only' && !archived) || (mode === 'exclude' && archived)) continue;
+    if (key && (c.key !== key || (c.project_key || '') !== (project_key || ''))) continue;
     if (matches(c, q)) out.push({ ...c, archived });
   }
   return out;

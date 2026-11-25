@@ -19,6 +19,8 @@ const {
 const MAX_DETAILS = 4000;
 const MAX_MARK_IDS = 500;
 const KEY_RE = /^[a-z0-9_-]{1,60}$/; // card "key": a task name; anything else is dropped, the card is kept
+// Lowercased, with spaces as '-', before the check ("Login Fix" -> "login-fix").
+const normKey = (k) => k.trim().toLowerCase().replace(/\s+/g, '-');
 
 // Assistant text after the last human input.
 function lastTurnText(rows) {
@@ -109,7 +111,7 @@ function parseCard(text) {
     };
     if (c.details != null && String(c.details).trim()) card.details = String(c.details).slice(0, MAX_DETAILS);
     if (c.replaces === 'last') card.replaces = 'last';
-    if (typeof c.key === 'string' && KEY_RE.test(c.key)) card.key = c.key;
+    if (typeof c.key === 'string' && KEY_RE.test(normKey(c.key))) card.key = normKey(c.key);
     return card;
   } catch {
     return { status: 'done', title: raw.split('\n')[0].slice(0, 200), summary: raw.split('\n').slice(1, 4), review: [] };

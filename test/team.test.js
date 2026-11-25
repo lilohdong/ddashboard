@@ -41,7 +41,7 @@ const test = (name, fn) => tests.push({ name, fn });
 // --- fixtures ---
 
 function session(sid, extra = {}) {
-  return { session_id: sid, name: sid, cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', last_seen: new Date().toISOString(), ...extra };
+  return { session_id: sid, name: sid, cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', last_seen: new Date().toISOString(), text_ver: lib.RULES_TEXT_VER, ...extra };
 }
 
 function reset({ mode = 'solo', lead, sessions = {} } = {}) {
@@ -1888,7 +1888,7 @@ const post = (sid, c) => runHook('stop-card.js', { session_id: sid, cwd: CWD, la
 test('key: valid keys are stored with project_key; invalid keys are dropped, the card is kept', () => {
   reset({ sessions: { S1: session('S1') } });
   post('S1', { title: 'a', key: 'login-fix_2' });
-  for (const key of ['Login', 'has space', 'x'.repeat(61), '', 42, 'ünï']) post('S1', { title: `bad ${JSON.stringify(key)}`, key });
+  for (const key of ['x'.repeat(61), '', '   ', 42, 'ünï', 'a/b']) post('S1', { title: `bad ${JSON.stringify(key)}`, key });
   const all = allCards();
   assert.equal(all.length, 7);
   assert.equal(all[0].key, 'login-fix_2');
@@ -1972,6 +1972,84 @@ test('key: the card instructions explain keys in every card language, for solo a
     assert.ok(i18n.DICT[lang]['card.keyTitle'], lang);
     assert.match(i18n.DICT[lang]['card.keyPrev'], /\{n\}/, lang);
   }
+});
+
+test('key: uppercase and spaces are normalized (lowercase, spaces to -) instead of dropped', () => {
+  reset({ sessions: { S1: session('S1') } });
+  post('S1', { title: 'v1', key: 'Login Fix' });
+  post('S1', { title: 'v2', key: ' login-FIX ' });
+  assert.deepEqual(allCards().map((c) => c.key), ['login-fix', 'login-fix']);
+  assert.deepEqual(cardsIndex().state().cards.map((c) => c.title), ['v2']);
+});
+
+// Ported from method C: a manual unarchive beats key replacement; the unarchived old card counts only older cards.
+test('key: a manual unarchive of a replaced card wins, and its "earlier" count only counts older cards', () => {
+  reset({ sessions: { S1: session('S1') } });
+  post('S1', { title: 'v1', key: 'task' });
+  post('S1', { title: 'v2', key: 'task' });
+  post('S1', { title: 'v3', key: 'task' });
+  const v2 = allCards().find((c) => c.title === 'v2');
+  const cards = cardsIndex();
+  assert.deepEqual(cards.state().cards.map((c) => c.title), ['v3']);
+  cards.setArchived(v2.id, false);
+  const st = cards.state();
+  assert.deepEqual(st.cards.map((c) => [c.title, c.key_prev]), [['v2', 1], ['v3', 2]]);
+});
+
+// Ported from method C.
+test('key: the same key in another project is untouched (sessions in two projects)', () => {
+  reset({ sessions: { S1: session('S1'), S2: session('S2', { project_key: 'other-project' }) } });
+  post('S1', { title: 'mine', key: 'task' });
+  post('S2', { title: 'theirs', key: 'task' });
+  assert.deepEqual(cardsIndex().state().cards.map((c) => c.title).sort(), ['mine', 'theirs']);
+  post('S2', { title: 'theirs2', key: 'task' });
+  assert.deepEqual(cardsIndex().state().cards.map((c) => c.title).sort(), ['mine', 'theirs2']);
+});
+
+test('key: history search matches the exact key and project, not substrings or other projects', () => {
+  reset({ sessions: { S1: session('S1'), S2: session('S2', { project_key: 'other-project' }) } });
+  post('S1', { title: 'v1', key: 'login-fix' });
+  post('S1', { title: 'v2 fix the login', key: 'login-fix' });
+  post('S1', { title: 'short', key: 'fix' });
+  post('S1', { title: 'mentions fix in title' });
+  post('S2', { title: 'other project', key: 'login-fix' });
+  const cards = cardsIndex();
+  const titles = (key, pk) => cards.search('', 'include', 100, { key, project_key: pk }).map((c) => c.title);
+  assert.deepEqual(titles('login-fix', KEY), ['v2 fix the login', 'v1']);
+  assert.deepEqual(titles('fix', KEY), ['short']);
+  assert.deepEqual(titles('login-fix', 'other-project'), ['other project']);
+  assert.equal(cards.search('fix').length, 5); // plain text search is unchanged
+});
+
+test('server: /api/search with key and project_key returns one task history', async () => {
+  reset({ sessions: { S1: session('S1'), S2: session('S2', { project_key: 'other-project' }) } });
+  post('S1', { title: 'v1', key: 'login-fix' });
+  post('S1', { title: 'short', key: 'fix' });
+  post('S2', { title: 'other', key: 'login-fix' });
+  await withServer(async (_post, base) => {
+    const r = await (await fetch(`${base}/api/search?key=fix&project_key=${encodeURIComponent(KEY)}`)).json();
+    assert.deepEqual(r.cards.map((c) => c.title), ['short']);
+  });
+});
+
+test('rules: a running session gets the instructions again once when the instruction text changes', () => {
+  reset({ sessions: { S1: session('S1', { text_ver: 0 }) } });
+  const update = lib.pendingRules('S1');
+  assert.match(update, /instructions were updated/);
+  assert.match(update, /"key":"task-name"/);
+  assert.equal(lib.pendingRules('S1'), '');
+  assert.equal(readJson(paths.sessions, {}).S1.text_ver, lib.RULES_TEXT_VER);
+});
+
+// Ported from method C.
+test('dashboard: key tag carries the project and its click uses the exact key filter; i18n in all languages', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
+  assert.match(html, /badge key/);
+  assert.match(html, /data-key-project=/);
+  assert.match(html, /params\.set\('key', keyFilter\.key\)/);
+  const i18n = fs.readFileSync(path.join(ROOT, 'scripts', 'i18n.js'), 'utf8');
+  assert.equal((i18n.match(/'card\.keyTitle'/g) || []).length, 3);
+  assert.equal((i18n.match(/'card\.keyPrev'/g) || []).length, 3);
 });
 
 // --- run ---

@@ -18,7 +18,8 @@
 //                             for a live lead (runner left out: the project's runner_member)
 //   POST /api/groups          {project, team, action: create|rename|delete, name, new_name?, purge?} -> manage a team's
 //                             groups (team may be left out when the project has one team)
-//   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
+//   GET  /api/search  ?q=&archived=include|only|exclude&limit=100[&key=&project_key=] -> matching cards, newest first
+//                     (key: exact key and project_key match, one task's history)
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
 const http = require('http');
@@ -184,7 +185,8 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/search') {
     const mode = ['include', 'only', 'exclude'].includes(url.searchParams.get('archived')) ? url.searchParams.get('archived') : 'include';
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
-    return send(res, 200, { cards: cards.search(url.searchParams.get('q') || '', mode, limit) });
+    const filter = { key: url.searchParams.get('key') || '', project_key: url.searchParams.get('project_key') || '' };
+    return send(res, 200, { cards: cards.search(url.searchParams.get('q') || '', mode, limit, filter) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/archive') {

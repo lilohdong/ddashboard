@@ -58,7 +58,7 @@ To turn it off, type `/ddashboard:dashboard off`. The server stops once no proje
 - **Filters:** narrow cards by status, with a count for each.
 - **Archive:** each card has an Archive button. Cards older than 14 days, and cards replaced by a newer version, are archived automatically. `Archived (N)` at the bottom of the sidebar opens the archive, where you can unarchive.
 - **Cards:** project, session, branch, time, and diff stats, plus the summary, what to check, and a collapsible `Details` section for longer content. Cards from ended sessions don't show a reply box.
-- **Task keys:** a card can carry `"key":"login-fix"` (lowercase letters, digits, `-`, `_`; up to 60). A newer card with the same key in the same project replaces the older ones, even from another session (e.g. a new lead after a handoff); member reports ignore keys. The card shows the key as a tag, with `N earlier`; click it to see the whole history.
+- **Task keys:** a card can carry `"key":"login-fix"` (lowercase letters, digits, `-`, `_`; up to 60; uppercase is lowercased and spaces become `-`). A newer card with the same key in the same project replaces the older ones, even from another session (e.g. a new lead after a handoff); member reports ignore keys. The card shows the key as a tag, with `N earlier`; click it to see that key's whole history in that project. Sessions already running get the key instruction once.
 - **Language:** English, 한국어 (Korean) or 简体中文 (Simplified Chinese), picked in the header; until you pick one it follows the browser. The choice is saved in `~/.ddashboard/settings.json` and also sets the language sessions write new cards in (each session gets the updated instructions once).
 
 ## Multiple sessions and projects

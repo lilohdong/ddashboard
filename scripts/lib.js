@@ -420,6 +420,10 @@ function rulesFor(s, p) {
   return rulesText(sid);
 }
 
+// Version of the instruction text itself. Bump it when rulesText/leadRulesText/memberRulesText change
+// so running sessions get the new text once (see rulesUpdate). 1: card "key".
+const RULES_TEXT_VER = 1;
+
 // Instructions for a registered session; marks them as given for the project's current mode.
 function injectRules(sid) {
   const sessions = readJson(paths.sessions, {});
@@ -428,6 +432,7 @@ function injectRules(sid) {
   const p = readProjects()[s.project_key];
   s.rules_ver = Number(p?.mode_ver) || 0;
   s.lang_ver = Number(readSettings().ver) || 0;
+  s.text_ver = RULES_TEXT_VER;
   writeJson(paths.sessions, sessions);
   return rulesFor(s, p);
 }
@@ -441,10 +446,14 @@ function rulesUpdate(s, p) {
   const langVer = Number(readSettings().ver) || 0;
   const modeChanged = (Number(s.rules_ver) || 0) !== ver;
   const langChanged = (Number(s.lang_ver) || 0) !== langVer;
-  if (!modeChanged && !langChanged) return '';
+  const textChanged = (Number(s.text_ver) || 0) !== RULES_TEXT_VER;
+  if (!modeChanged && !langChanged && !textChanged) return '';
   s.rules_ver = ver;
   s.lang_ver = langVer;
-  const why = modeChanged ? `The project's dashboard mode changed (now ${p.mode || 'solo'})` : `The card language changed (now ${cardLanguage()})`;
+  s.text_ver = RULES_TEXT_VER;
+  const why = modeChanged ? `The project's dashboard mode changed (now ${p.mode || 'solo'})`
+    : langChanged ? `The card language changed (now ${cardLanguage()})`
+    : 'The dashboard instructions were updated';
   return `[ddashboard] ${why}. Updated instructions:\n${rulesFor(s, p)}`;
 }
 
@@ -1242,6 +1251,7 @@ function memberStart(sid) {
   }
   s.rules_ver = Number(p?.mode_ver) || 0;
   s.lang_ver = Number(readSettings().ver) || 0;
+  s.text_ver = RULES_TEXT_VER;
   s.start_rules = true;
   writeJson(paths.sessions, sessions);
   return head + rulesFor(s, p);
@@ -1464,7 +1474,7 @@ module.exports = {
   safeId, ensureDir, readJson, writeJson, appendJsonl, readJsonl,
   readHookInput, alive, serverPid, git, projectKey, projectName, projectActive, setProject,
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
-  DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
+  DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, RULES_TEXT_VER, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,

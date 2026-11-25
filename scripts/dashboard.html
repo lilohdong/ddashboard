@@ -229,6 +229,7 @@ let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archive
 
 // Search / archive view. results is null while not searching (or while the first search is loading).
 let query = '';
+let keyFilter = null; // { key, project_key } while showing one task key's history (exact match, that project only)
 let archivedView = false;
 let results = null;
 let searchError = '';
@@ -236,7 +237,7 @@ let searchSeq = 0;
 let searchTimer = 0;
 const overrides = {};          // card_id -> archived, applied optimistically until the server catches up
 const openDetails = new Set(); // card ids whose Details section is expanded
-const searching = () => Boolean(query) || archivedView;
+const searching = () => Boolean(query) || Boolean(keyFilter) || archivedView;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const time = (iso) => new Date(iso).toLocaleString(lang, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -540,7 +541,7 @@ function cardHtml(c, byCard) {
         ${c.archived ? `<span class="badge archived">${esc(t('card.archived'))}</span>` : ''}
         ${c.via_lead ? `<span class="badge report">${esc(t('card.reportTo', { name: leadName }))}</span>` : ''}
         ${c.lead_missing ? `<span class="badge warn" title="${esc(t('card.leadMissingTitle'))}">${esc(t('card.leadMissing'))}</span>` : ''}
-        ${c.key ? `<button class="badge key" data-key="${esc(c.key)}" title="${esc(t('card.keyTitle'))}">#${esc(c.key)}${c.key_prev ? ` · ${esc(t('card.keyPrev', { n: c.key_prev }))}` : ''}</button>` : ''}
+        ${c.key ? `<button class="badge key" data-key="${esc(c.key)}" data-key-project="${esc(c.project_key || '')}" title="${esc(t('card.keyTitle'))}">#${esc(c.key)}${c.key_prev ? ` · ${esc(t('card.keyPrev', { n: c.key_prev }))}` : ''}</button>` : ''}
         <span class="title">${esc(c.title)}</span>
         ${c.archived
           ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="${esc(t('card.unarchiveTitle'))}">${esc(t('card.unarchive'))}</button>`
@@ -558,7 +559,8 @@ function cardHtml(c, byCard) {
 function renderMain() {
   saveDrafts();
   const all = viewCards();
-  const scoped = (all || []).filter(inScope);
+  const scoped = (all || []).filter((c) => keyFilter || inScope(c)); // a key's history spans sessions
+  const label = keyFilter ? `#${keyFilter.key}` : query;
   const counts = {};
   const replied = repliedIds();
   for (const c of scoped) c.answered = answered(c, replied);
@@ -575,9 +577,9 @@ function renderMain() {
   if (searching()) {
     const where = archivedView ? t('search.inArchived') : t('search.inAll');
     const status = searchError ? t('search.unavailable') : !all ? t('search.searching')
-      : query ? t('search.results', { q: query, where, n: list.length }) : t('search.count', { where, n: list.length });
+      : label ? t('search.results', { q: label, where, n: list.length }) : t('search.count', { where, n: list.length });
     mode = `<span>${esc(status)}</span>
-      ${query ? `<button data-clear-search>${esc(t('search.clear'))}</button>` : ''}
+      ${label ? `<button data-clear-search>${esc(t('search.clear'))}</button>` : ''}
       ${archivedView ? `<button data-archived>${esc(t('search.back'))}</button>` : ''}`;
   }
   // Project scope: how its new leads and members start (projects.json spawn.runner_lead / runner_member).
@@ -595,7 +597,7 @@ function renderMain() {
 
   const byCard = {};
   for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
-  const empty = searching() ? (all ? (query ? t('empty.noMatch') : t('empty.noArchived')) : '') : t('empty.none');
+  const empty = searching() ? (all ? (label ? t('empty.noMatch') : t('empty.noArchived')) : '') : t('empty.none');
   document.getElementById('cards').innerHTML = list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${esc(empty)}</div>` : '';
 }
 
@@ -607,6 +609,7 @@ async function runSearch() {
   if (!searching()) { results = null; searchError = ''; return; }
   const seq = ++searchSeq;
   const params = new URLSearchParams({ q: query, archived: archivedView ? 'only' : 'include', limit: '100' });
+  if (keyFilter) { params.set('key', keyFilter.key); params.set('project_key', keyFilter.project_key); }
   try {
     const res = await fetch('/api/search?' + params);
     const data = await res.json();
@@ -675,12 +678,13 @@ qInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     const next = qInput.value.trim();
-    if (next !== query) { query = next; refreshSearch(); }
+    if (keyFilter) { keyFilter = null; query = next; refreshSearch(); } // typing leaves the key history
+    else if (next !== query) { query = next; refreshSearch(); }
   }, 300);
 });
 function clearSearch() {
   qInput.value = '';
-  if (query) { query = ''; refreshSearch(); } else clearTimeout(searchTimer);
+  if (query || keyFilter) { query = ''; keyFilter = null; refreshSearch(); } else clearTimeout(searchTimer);
 }
 
 async function post(url, body) {
@@ -766,9 +770,10 @@ document.addEventListener('click', async (e) => {
   }
   if (e.target.closest('[data-clear-search]')) { clearSearch(); return; }
   const keyTag = e.target.closest('[data-key]');
-  if (keyTag) { // a key's whole history: search for it across active and archived cards
-    query = keyTag.dataset.key;
-    qInput.value = query;
+  if (keyTag) { // a key's whole history: active and archived cards with exactly this key in this project
+    keyFilter = { key: keyTag.dataset.key, project_key: keyTag.dataset.keyProject || '' };
+    query = '';
+    qInput.value = `#${keyFilter.key}`;
     archivedView = false;
     refreshSearch();
     return;
