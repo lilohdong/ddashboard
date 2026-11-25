@@ -36,12 +36,36 @@ function lastTurnText(transcriptPath) {
   return texts.join('\n');
 }
 
+// Escape raw control characters that appear inside JSON string literals (models often write
+// multi-line "details" with real newlines). Characters outside strings are left as they are.
+function escapeControlsInStrings(raw) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of raw) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      else if (ch === '\n') { out += '\\n'; continue; }
+      else if (ch === '\r') { out += '\\r'; continue; }
+      else if (ch === '\t') { out += '\\t'; continue; }
+    } else if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
+}
+
+function parseJsonLenient(raw) {
+  try { return JSON.parse(raw); } catch { return JSON.parse(escapeControlsInStrings(raw)); }
+}
+
 function parseCard(text) {
   const blocks = [...String(text).matchAll(/```card\s*\n([\s\S]*?)```/g)];
   if (!blocks.length) return null;
   const raw = blocks[blocks.length - 1][1].trim();
   try {
-    const c = JSON.parse(raw);
+    const c = parseJsonLenient(raw);
     const card = {
       status: String(c.status || 'done'),
       title: String(c.title || '(untitled)').slice(0, 200),
