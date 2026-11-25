@@ -841,21 +841,22 @@ function processName(pid) {
 
 // --- Processes (for stopping a replaced lead) ---
 
-const PS_LIST = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$(($_.CommandLine -replace "[`r`n`t]", " "))" }';
+const PS_LIST = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 })`t$(($_.CommandLine -replace "[`r`n`t]", " "))" }';
 
 // How to list every process: [file, args] (Windows: one CIM query, ~0.4 s).
 const PROC_CMD = () => (process.platform === 'win32'
   ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_LIST]]
   : ['ps', ['-A', '-o', 'pid=,ppid=,comm=,args=']]);
 
-// pid -> { pid, ppid, name, cmd } from the list command's output. table.taken = when the read started (ms).
+// pid -> { pid, ppid, name, cmd, start? } from the list command's output. table.taken = when the read started (ms).
+// start (Windows only): creation time (FILETIME), to tell a parent from a later process that reused its pid.
 function parseProcessList(out, taken = Date.now()) {
   const table = new Map();
   table.taken = taken;
   if (process.platform === 'win32') {
     for (const line of String(out).split(/\r?\n/)) {
-      const [pid, ppid, name, cmd] = line.split('\t');
-      if (Number(pid)) table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), name: name || '', cmd: cmd || '' });
+      const [pid, ppid, name, start, ...cmd] = line.split('\t');
+      if (Number(pid)) table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), name: name || '', start: Number(start) || 0, cmd: cmd.join(' ') });
     }
   } else {
     for (const line of String(out).split('\n')) {
@@ -998,8 +999,43 @@ function killWaiterChain(pid, table) {
   return napUntil(() => !alive(pid), 1000);
 }
 
-// A waiter with no live Claude Code process above it (its session died; it would wait forever).
-const orphanWaiter = (pid, table) => waiterChain(pid, table).length > 0 && !findClaudePid(pid, table);
+// A waiter whose session is provably gone (it would wait forever): the process that started its chain is dead
+// (Windows keeps the dead pid as parent; a live process with that pid started later is a reuse), or it was
+// re-parented to init/launchd/systemd (POSIX). A chain under a live Claude, or under a live program that is not
+// recognized as Claude, is never called an orphan (no guessing: a wrong answer would kill a working session's waiter).
+function orphanWaiter(pid, table) {
+  const chain = waiterChain(pid, table);
+  if (!chain.length) return false;
+  const top = table.get(chain[chain.length - 1]);
+  const parent = table.get(top.ppid);
+  if (!top.ppid || !parent || !alive(top.ppid)) return true;
+  if (parent.start && top.start && parent.start > top.start) return true; // pid reused after the parent died
+  if (isClaudeProcess(parent)) return false;
+  return top.ppid === 1 || /^(init|systemd|launchd)$/i.test(parent.name);
+}
+
+// Stop every orphan waiter in the process table (any plugin version, see orphanWaiter) with its wrapper shells, and
+// remove lock files whose waiter is dead. Run by the server at start and every minute. Returns { killed, locks }.
+function sweepWaiters(table) {
+  const killed = [];
+  if (table?.size) {
+    for (const p of table.values()) {
+      const sid = isNodeLike(p) ? waitCommandSid(p.cmd) : '';
+      if (sid && alive(p.pid) && orphanWaiter(p.pid, table) && killWaiterChain(p.pid, table)) killed.push({ pid: p.pid, sid });
+    }
+  }
+  let locks = 0;
+  let dirs = [];
+  try { dirs = fs.readdirSync(path.join(BOARD_DIR, 'inbox')); } catch { /* no inbox yet */ }
+  for (const d of dirs) {
+    let pid = 0;
+    try { pid = Number(fs.readFileSync(waitLockPath(d), 'utf8')); } catch { continue; }
+    if (pid > 0 && alive(pid)) continue;
+    try { fs.unlinkSync(waitLockPath(d)); locks++; } catch { /* gone */ }
+    try { if (!alive(Number(readWaitInfo(d)?.pid))) fs.unlinkSync(waitInfoPath(d)); } catch { /* gone */ }
+  }
+  return { killed, locks };
+}
 
 // Stop the session's wait command, if it runs (pid-reuse safe: the pid must still run the wait command for
 // this session), and remove its lock files. Returns true if a waiter was stopped.
@@ -1631,7 +1667,7 @@ module.exports = {
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, RULES_TEXT_VER, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
-  waitLockPath, waitInfoPath, readWaitInfo, processName, napUntil, waitCommandSid, waiterChain, killWaiterChain, orphanWaiter, stopWaiter,
+  waitLockPath, waitInfoPath, readWaitInfo, processName, napUntil, waitCommandSid, waiterChain, killWaiterChain, orphanWaiter, stopWaiter, sweepWaiters,
   reapToolShells, stopSessionProcesses,
   processTable, processTableAsync, parseProcessList, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, memberGone, sessionGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,

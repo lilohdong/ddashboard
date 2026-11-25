@@ -162,6 +162,7 @@ test('F-3: the waiter records its owner as the session\'s claude_pid when none i
 
 // Start node <file> <args> as an orphan, like a process whose Claude died: a launcher starts it detached and
 // exits at once, so nothing (not even a Claude running these tests) is above it. Returns its pid.
+const orphansStarted = new Set(); // every orphan this file started (the sweep may only ever kill these)
 async function startOrphan(file, args = []) {
   const launcher = path.join(BOARD, 'launch.js');
   fs.writeFileSync(launcher, `const { spawn } = require('child_process');
@@ -175,6 +176,7 @@ console.log(c.pid);
   await exited(l);
   const pid = Number(out.trim());
   assert.ok(pid > 0, 'orphan did not start');
+  orphansStarted.add(pid);
   started.push({ kill: () => { try { process.kill(pid); } catch {} } });
   return pid;
 }
@@ -214,6 +216,7 @@ async function startWrappedWaiter(sid) {
   const wrapper = await startOrphan(wrap, [path.join(BOARD, 'bin', 'wait.js'), sid, out]);
   assert.ok(await until(() => fs.existsSync(out) && Number(fs.readFileSync(out, 'utf8')) > 0), 'wrapped waiter did not start');
   const pid = Number(fs.readFileSync(out, 'utf8'));
+  orphansStarted.add(pid);
   started.push({ kill: () => { try { process.kill(pid); } catch {} } });
   fs.mkdirSync(paths.inbox(sid), { recursive: true });
   fs.writeFileSync(lib.waitLockPath(sid), String(pid));
@@ -410,6 +413,97 @@ test('F-9: UserPromptSubmit records a missing pid once (0 when no Claude is foun
   await startOrphan(runner);
   assert.ok(await until(() => readJson(paths.sessions, {}).P2?.claude_pid !== undefined, 15000), 'nothing recorded');
   assert.equal(readJson(paths.sessions, {}).P2.claude_pid, 0); // no Claude above it
+});
+
+// --- F-5 / F-6: orphan sweep, server cwd ---
+
+test('orphanWaiter (table fixture): dead or reused parent, init parent, 0.1.0 path; never a live unknown host', () => {
+  const W = (pid, ppid, cmd, extra = {}) => [pid, { pid, ppid, name: 'node.exe', cmd, start: 200, ...extra }];
+  const old = '"C:\\Program Files\\nodejs\\node.exe" C:/u/.claude/plugins/cache/ddashboard/ddashboard/0.1.0/scripts/wait-inbox.js s1';
+  const cur = 'node C:/u/.ddashboard/bin/wait.js s2';
+  const bash = (pid, ppid, sid) => [pid, { pid, ppid, name: 'bash.exe', start: 150, cmd: `bash -c "{ eval 'node \\"C:/u/.ddashboard/bin/wait.js\\" ${sid}' < /dev/null; }"` }];
+  // pids that are alive (this process) stand in for live processes; 4000000+ are dead.
+  const live = process.pid;
+  const t = new Map([
+    W(4000001, 4000099, old), // 0.1.0 waiter, parent gone
+    W(live, 4000098, cur), // parent gone... but checked through its own pid below
+  ]);
+  assert.equal(lib.orphanWaiter(4000001, t), true);
+  // A waiter under a live Claude: never.
+  const t2 = new Map([
+    W(live, 9, cur), [9, { pid: 9, ppid: 0, name: 'claude.exe', cmd: 'claude', start: 100 }],
+  ]);
+  assert.equal(lib.orphanWaiter(live, t2), lib.alive(9) ? false : true); // pid 9 alive only on some systems
+  // Under a live program that is not Claude (unknown host): not provable, never killed.
+  const t3 = new Map([W(live, process.ppid, cur), [process.ppid, { pid: process.ppid, ppid: 0, name: 'Code.exe', cmd: 'code', start: 100 }]]);
+  assert.equal(lib.orphanWaiter(live, t3), false);
+  // Same, but that pid was started after the waiter: a reuse of the dead parent's pid.
+  t3.get(process.ppid).start = 300;
+  assert.equal(lib.orphanWaiter(live, t3), true);
+  // POSIX: re-parented to init.
+  const t4 = new Map([W(live, 1, cur, { start: 0 }), [1, { pid: 1, ppid: 0, name: 'systemd', cmd: '/sbin/init' }]]);
+  if (lib.alive(1)) assert.equal(lib.orphanWaiter(live, t4), true);
+  // The bash wrappers count as part of the waiter: their parent decides.
+  const t5 = new Map([W(live, process.ppid, cur), bash(process.ppid, 4000097, 's2')]);
+  assert.equal(lib.orphanWaiter(live, t5), true);
+});
+
+test('sweepWaiters: stops orphan waiters of any version, keeps live ones, removes stale locks', async () => {
+  reset({ Y1: session('Y1'), Y2: session('Y2'), Y3: session('Y3'), Y4: session('Y4') });
+  const orphan = await startFakeWaiter('Y1'); // like the 0.1.0 waiters seen live (old/scripts/wait-inbox.js)
+  const { wrapper, pid: wrapped } = await startWrappedWaiter('Y2');
+  const claude = claudeWithWaiter('Y3'); // a working session
+  assert.ok(await until(() => lib.readWaitInfo('Y3')?.owner === claude.pid, 15000));
+  const y3 = lib.readWaitInfo('Y3').pid;
+  const { file } = fakeWaiterFiles();
+  const hosted = track(spawn(process.execPath, [file, 'Y5'], { stdio: 'ignore' })); // live parent (this test): kept
+  fs.mkdirSync(paths.inbox('Y4'), { recursive: true });
+  fs.writeFileSync(lib.waitLockPath('Y4'), String(await deadPid())); // stale lock
+  await sleep(300);
+  const r = lib.sweepWaiters(lib.processTable());
+  const killed = r.killed.map((k) => k.pid);
+  assert.ok(killed.includes(orphan.pid) && killed.includes(wrapped), `not stopped: ${JSON.stringify(r.killed)}`);
+  // Leftovers of earlier tests in this file may be stopped too; nothing else may be.
+  for (const k of r.killed) assert.ok(orphansStarted.has(k.pid), `sweep stopped a process this test did not start: ${JSON.stringify(k)}`);
+  assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper left running');
+  assert.equal(lib.alive(y3), true);
+  assert.equal(lib.alive(hosted.pid), true);
+  assert.ok(r.locks >= 1);
+  assert.equal(fs.existsSync(lib.waitLockPath('Y4')), false);
+  assert.equal(fs.existsSync(lib.waitLockPath('Y3')), true);
+  claude.kill();
+});
+
+test('server: sweeps orphan waiters at start', async () => {
+  reset({ Y6: session('Y6') });
+  const orphan = await startFakeWaiter('Y6');
+  await sleep(300);
+  await withServer(async () => {
+    assert.ok(await until(() => !lib.alive(orphan.pid), 15000), 'server did not stop the orphan waiter');
+  });
+});
+
+test('F-6: control.start runs the server outside the session folder', async () => {
+  reset({});
+  fs.rmSync(paths.serverPid, { force: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-orph-start-'));
+  const port = 7700 + Math.floor(Math.random() * 90);
+  const runner = path.join(BOARD, 'start-runner.js');
+  fs.writeFileSync(runner, `process.env.DDASH_PORT = '${port}';
+require(${JSON.stringify(path.join(ROOT, 'scripts', 'control.js'))}).start().then((m) => console.log(m));
+`);
+  const r = require('child_process').spawnSync(process.execPath, [runner], { cwd: dir, env: { ...process.env, DDASH_PORT: String(port) }, encoding: 'utf8' });
+  assert.match(r.stdout, /started/i, r.stdout + r.stderr);
+  const pid = readJson(paths.serverPid, {}).pid;
+  started.push({ kill: () => { try { process.kill(pid); } catch {} } });
+  try {
+    // Windows refuses to remove a folder that is a running process's cwd.
+    fs.rmSync(dir, { recursive: true });
+    assert.equal(fs.existsSync(dir), false);
+  } finally {
+    try { process.kill(pid); } catch {}
+    await until(() => !lib.alive(pid));
+  }
 });
 
 // --- run ---

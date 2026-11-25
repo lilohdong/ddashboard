@@ -4,6 +4,7 @@
 //   node control.js stop    stop the server
 //   node control.js status
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { URL, paths, ensureDir, serverPid } = require('./lib');
@@ -14,6 +15,7 @@ async function start() {
   const log = fs.openSync(paths.serverLog, 'a');
   const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
     detached: true,
+    cwd: os.homedir(), // not the session's worktree: the server outlives it (bug-005)
     stdio: ['ignore', log, log],
     windowsHide: true,
     env: process.env,

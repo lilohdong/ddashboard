@@ -23,12 +23,16 @@
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
 const http = require('http');
+const os = require('os');
+
+// Never keep a worktree as the current folder (Windows could not delete it while the server runs; bug-005).
+try { process.chdir(os.homedir()); } catch { /* stay */ }
 const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
-  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, sessionGone, markGone, waitPid,
+  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, sessionGone, markGone, waitPid, processTableAsync, sweepWaiters,
 } = require('./lib');
 const orca = require('./orca');
 const cards = require('./cards');
@@ -106,8 +110,26 @@ function terminalOpen(handle) {
 // A live wait command whose owner (when known) is alive: see lib.waitPid.
 const waiting = (sid) => Boolean(waitPid(sid));
 
-// The last process table (read in the background, see sweep below); null until the first read.
+// The last process table (read in the background by sweep); null until the first read.
 let procTable = null;
+
+// bug-005: at start and every minute, stop wait commands whose session is gone (any plugin version) and drop stale
+// lock files. The process table is read without blocking requests.
+const SWEEP_MS = Number(process.env.DDASH_SWEEP_MS) || 60000;
+let sweeping = false;
+function sweep() {
+  if (sweeping) return;
+  sweeping = true;
+  processTableAsync((table) => {
+    sweeping = false;
+    if (!table.size) return;
+    procTable = table;
+    try {
+      const r = sweepWaiters(table);
+      for (const k of r.killed) console.log(`ddashboard: stopped an orphan wait command (pid ${k.pid}, session ${k.sid})`);
+    } catch (err) { console.log(`ddashboard: sweep failed: ${err.message}`); }
+  });
+}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -365,4 +387,6 @@ server.on('error', (err) => {
 server.listen(PORT, '127.0.0.1', () => {
   writeJson(paths.serverPid, { pid: process.pid, port: PORT, started: new Date().toISOString() });
   console.log(`ddashboard: http://127.0.0.1:${PORT}  (board: ${BOARD_DIR})`);
+  sweep();
+  setInterval(sweep, SWEEP_MS).unref();
 });
