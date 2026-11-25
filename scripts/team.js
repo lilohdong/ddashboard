@@ -29,6 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const config = require('./core/config');
+const sessionsStore = require('./store/sessions');
 const lib = require('./lib');
 const orca = require('./orca');
 const terminal = require('./terminal');
@@ -130,7 +131,7 @@ function claudeArgs(opts) {
 }
 
 function context(leadSid) {
-  const sessions = readJson(paths.sessions, {});
+  const sessions = sessionsStore.read();
   const lead = sessions[leadSid];
   if (!lead) throw new Error(`unknown session ${leadSid}. Pass your own session ID (it is in your [ddashboard] instructions).`);
   const projects = lib.readProjects();
@@ -220,11 +221,7 @@ function runWindow(sid, args, prompt, cwd, title) {
 }
 
 function updateSession(sid, fields, drop = []) {
-  const sessions = readJson(paths.sessions, {});
-  if (!sessions[sid]) return;
-  Object.assign(sessions[sid], fields);
-  for (const k of drop) delete sessions[sid][k];
-  writeJson(paths.sessions, sessions);
+  sessionsStore.patch(sid, { ...fields, ...Object.fromEntries(drop.map((k) => [k, undefined])) });
 }
 
 // Start a member of this lead with the project's runner_member (see pickRunner). Used by `team.js spawn` and the
@@ -253,16 +250,16 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}${group ? ` group=${group}` : ''}] ${task}`;
 
   // Pre-register so the member shows up at once; its first-prompt hook completes the registration.
-  const sessions = readJson(paths.sessions, {});
   const now = new Date().toISOString();
-  sessions[sid] = {
-    session_id: sid, name: flags.role, cwd, branch: lead.branch || '', project: lead.project, project_key: lead.project_key,
-    state: 'working', started: now, last_seen: now, pending: true,
-    kind: 'member', role: flags.role, lead: leadSid, stay: Boolean(flags.stay), headless: how === 'headless', runner: how,
-    spawn: { ...opts, cwd }, log: paths.log(sid),
-  };
-  if (group) sessions[sid].group = group;
-  writeJson(paths.sessions, sessions);
+  sessionsStore.update((sessions) => {
+    sessions[sid] = {
+      session_id: sid, name: flags.role, cwd, branch: lead.branch || '', project: lead.project, project_key: lead.project_key,
+      state: 'working', started: now, last_seen: now, pending: true,
+      kind: 'member', role: flags.role, lead: leadSid, stay: Boolean(flags.stay), headless: how === 'headless', runner: how,
+      spawn: { ...opts, cwd }, log: paths.log(sid),
+    };
+    if (group) sessions[sid].group = group;
+  });
   const log = slash(paths.log(sid));
   let note = picked.note;
   if (how !== 'headless') {
@@ -278,9 +275,7 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
       return { sid, runner: how, pid: 0, terminal: t.handle, log, note };
     } catch (err) {
       if (runner === how) {
-        const all = readJson(paths.sessions, {});
-        delete all[sid];
-        writeJson(paths.sessions, all);
+        sessionsStore.update((all) => { delete all[sid]; });
         throw err;
       }
       note = `${runnerLabel(how)} could not open a terminal (${err.message}); started headless instead.`;
@@ -303,10 +298,7 @@ function cmdSpawn(leadSid, argv) {
 }
 
 function setPid(sid, pid) {
-  const sessions = readJson(paths.sessions, {});
-  if (!sessions[sid]) return;
-  sessions[sid].pid = pid;
-  writeJson(paths.sessions, sessions);
+  sessionsStore.patch(sid, { pid });
 }
 
 // A member of this lead by full id, id prefix or role (the most recently active one wins).
@@ -346,12 +338,7 @@ function cmdSend(leadSid, argv) {
   // Headless member that has finished: resume it with the same options.
   const opts = m.spawn || {};
   const pid = runClaude(sid, ['-p', '--resume', sid, ...claudeArgs(opts)], `[Lead instruction]\n${text}`, opts.cwd || m.cwd || process.cwd());
-  const all = readJson(paths.sessions, {});
-  if (all[sid]) {
-    Object.assign(all[sid], { pid, state: 'working', last_seen: new Date().toISOString() });
-    delete all[sid].ended;
-    writeJson(paths.sessions, all);
-  }
+  sessionsStore.patch(sid, { pid, state: 'working', last_seen: new Date().toISOString(), ended: undefined });
   return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}). Log: ${paths.log(sid).replace(/\\/g, '/')}`;
 }
 

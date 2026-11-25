@@ -15,6 +15,7 @@ const {
   memberStart, addTeam, removeTeams, teamOfLead, readProjects,
 } = require('../lib');
 const control = require('../control');
+const sessionsStore = require('../store/sessions');
 
 const ACTIVATE = /^\s*\/(?:ddashboard:)?dashboard\b(.*)$/i;
 
@@ -30,8 +31,9 @@ The members (${res.members}) now report to you; ${res.moved} pending message(s) 
 // Record the session's Claude pid; when none is found, remember that (claude_pid 0) so later prompts don't search again.
 function recordPidOnce(sid) {
   if (recordClaudePid(sid)) return;
-  const sessions = readJson(paths.sessions, {});
-  if (sessions[sid] && sessions[sid].claude_pid === undefined) { sessions[sid].claude_pid = 0; writeJson(paths.sessions, sessions); }
+  sessionsStore.update((sessions) => {
+    if (sessions[sid] && sessions[sid].claude_pid === undefined) sessions[sid].claude_pid = 0;
+  });
 }
 
 (async () => {

@@ -13,6 +13,7 @@ const os = require('os');
 const path = require('path');
 const lib = require('./lib');
 const config = require('./core/config');
+const sessionsStore = require('./store/sessions');
 const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, setState, pendingRules, readJson, writeJson } = lib;
 
 try { process.chdir(os.homedir()); } catch { /* stay where we are */ }
@@ -58,12 +59,10 @@ try {
 // A session without a recorded Claude pid (e.g. solo mode) gets it from here, so its death can be detected.
 if (ownerIsClaude) {
   try {
-    const sessions = readJson(paths.sessions, {});
-    const s = sessions[sid];
-    if (s && !(Number(s.claude_pid) > 0) && !s.headless) {
-      s.claude_pid = owner;
-      writeJson(paths.sessions, sessions);
-    }
+    sessionsStore.update((sessions) => {
+      const s = lib.own(sessions, sid);
+      if (s && !(Number(s.claude_pid) > 0) && !s.headless) s.claude_pid = owner;
+    });
   } catch { /* best effort */ }
 }
 

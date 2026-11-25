@@ -16,6 +16,9 @@ const {
   rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession, own, newId,
 } = require('../lib');
 
+const sessionsStore = require('../store/sessions');
+const { clone } = require('../store/record');
+
 const MAX_DETAILS = 4000;
 const MAX_MARK_IDS = 500;
 const KEY_RE = /^[a-z0-9_-]{1,60}$/; // card "key": a task name; anything else is dropped, the card is kept
@@ -121,8 +124,11 @@ function parseCard(text) {
 (async () => {
   const input = await readHookInput();
   const sid = safeId(input.session_id);
-  const sessions = readJson(paths.sessions, {});
+  // Works on a copy; at the end only the fields this hook changed are written (patchDiff), so the slow parts
+  // (git, transcript, group upkeep) never overwrite what other processes wrote meanwhile.
+  const sessions = sessionsStore.read();
   if (!sessions[sid]) return; // not a dashboard session
+  const before = clone(sessions[sid]);
   const projects = readProjects();
   const cwd = input.cwd || process.cwd();
   const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
@@ -134,7 +140,7 @@ function parseCard(text) {
     try { recordUsage(s, sid, rows); } catch { /* usage is best effort */ }
     const tell = !s.replaced_told;
     s.replaced_told = true;
-    writeJson(paths.sessions, sessions);
+    sessionsStore.patchDiff(sid, before, s);
     if (tell) process.stdout.write(JSON.stringify({ decision: 'block', reason: replacedText(s) }));
     return;
   }
@@ -201,7 +207,10 @@ function parseCard(text) {
   if (branch) sessions[sid].branch = branch;
   sessions[sid].state = msgs.length || notice ? 'working' : 'idle';
   sessions[sid].last_seen = new Date().toISOString();
-  writeJson(paths.sessions, sessions);
+  // A session ended meanwhile (team end, handoff, marked ended) stays ended.
+  sessionsStore.patchDiff(sid, before, sessions[sid], (cur, changes) => {
+    if (cur.state === 'ended' || cur.ended) delete changes.state;
+  });
 
   const parts = [];
   if (msgs.length) parts.push(`${formatMessages(msgs)}${rules ? `\n\n${rules}` : ''}`);

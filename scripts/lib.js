@@ -8,6 +8,8 @@ const { BOARD_DIR, PORT, URL, paths, safeId } = require('./core/paths');
 const { ensureDir, readJson, writeJson, atomicWrite, appendJsonl, readJsonl, readTail } = require('./core/fsx');
 const { git, gitOrNull: gitIn } = require('./core/git');
 const { newId } = require('./core/ids');
+const sessionsStore = require('./store/sessions');
+const projectsStore = require('./store/projects');
 
 const RECENT_DAYS = config.get('DDASH_RECENT_DAYS');
 
@@ -54,47 +56,48 @@ function projectActive(cwd) {
 
 // Turning a project on keeps its team settings (mode, teams, rules) from before.
 function setProject(cwd, on) {
-  const projects = readProjects();
   const key = projectKey(cwd);
-  if (on) projects[key] = { ...(projects[key] || {}), since: new Date().toISOString(), cwd, name: projectName(cwd) };
-  else delete projects[key];
-  writeJson(paths.projects, projects);
-  return Object.keys(projects).length;
+  const name = on ? projectName(cwd) : '';
+  readProjects(); // migrate first (outside our update)
+  return projectsStore.update((projects) => {
+    if (on) projects[key] = { ...(projects[key] || {}), since: new Date().toISOString(), cwd, name };
+    else delete projects[key];
+    return Object.keys(projects).length;
+  });
 }
 
 function registerSession(sid, cwd) {
-  const sessions = readJson(paths.sessions, {});
-  sessions[sid] = {
-    ...(sessions[sid] || {}),
-    session_id: sid,
-    name: config.get('DDASH_NAME') || sessions[sid]?.name || path.basename(cwd),
-    cwd,
-    branch: git('rev-parse --abbrev-ref HEAD', cwd),
-    project: projectName(cwd),
-    project_key: projectKey(cwd),
-    state: sessions[sid]?.state === 'working' ? 'working' : 'idle',
-    started: sessions[sid]?.started || new Date().toISOString(),
-    last_seen: new Date().toISOString(),
-  };
-  // A lead replaced by a handoff stays ended even if the session is resumed.
-  if (sessions[sid].replaced_by) sessions[sid].state = 'ended';
-  else delete sessions[sid].ended;
-  writeJson(paths.sessions, sessions);
+  // git first, outside the lock.
+  const branch = git('rev-parse --abbrev-ref HEAD', cwd);
+  const project = projectName(cwd);
+  const key = projectKey(cwd);
+  sessionsStore.update((sessions) => {
+    sessions[sid] = {
+      ...(sessions[sid] || {}),
+      session_id: sid,
+      name: config.get('DDASH_NAME') || sessions[sid]?.name || path.basename(cwd),
+      cwd,
+      branch,
+      project,
+      project_key: key,
+      state: sessions[sid]?.state === 'working' ? 'working' : 'idle',
+      started: sessions[sid]?.started || new Date().toISOString(),
+      last_seen: new Date().toISOString(),
+    };
+    // A lead replaced by a handoff stays ended even if the session is resumed.
+    if (sessions[sid].replaced_by) sessions[sid].state = 'ended';
+    else delete sessions[sid].ended;
+  });
 }
 
 // Record session state: working | idle | ended. Only touches registered sessions.
 function setState(sid, state) {
-  const sessions = readJson(paths.sessions, {});
-  if (!sessions[sid]) return false;
-  sessions[sid].state = state;
-  sessions[sid].last_seen = new Date().toISOString();
-  if (state === 'ended') sessions[sid].ended = sessions[sid].last_seen;
-  writeJson(paths.sessions, sessions);
-  return true;
+  const ts = new Date().toISOString();
+  return sessionsStore.patch(sid, { state, last_seen: ts, ...(state === 'ended' ? { ended: ts } : {}) });
 }
 
 function isRegistered(sid) {
-  return Boolean(readJson(paths.sessions, {})[sid]);
+  return Boolean(sessionsStore.get(sid));
 }
 
 // Card log files, oldest first: the 0.1.0 file, then the monthly files.
@@ -304,16 +307,17 @@ const runnersOf = (p) => Object.fromEntries(['runner_lead', 'runner_member'].map
 
 // Save a project's runners (either or both). Returns { ok, runner_lead, runner_member } or { ok: false, code, error }.
 function setRunners(key, values = {}) {
-  const projects = readProjects();
-  const p = own(projects, key);
-  if (!p) return { ok: false, code: 404, error: 'project is not connected' };
-  const keys = ['runner_lead', 'runner_member'].filter((k) => values[k] !== undefined);
-  if (!keys.length) return { ok: false, code: 400, error: 'runner_lead or runner_member required' };
-  for (const k of keys) if (!RUNNER_VALUES.includes(values[k])) return { ok: false, code: 400, error: `${k} must be one of ${RUNNER_VALUES.join(', ')}` };
-  p.spawn = { ...(p.spawn || {}) };
-  for (const k of keys) p.spawn[k] = values[k];
-  writeJson(paths.projects, projects);
-  return { ok: true, ...runnersOf(p) };
+  readProjects(); // migrate first
+  return projectsStore.update((projects) => {
+    const p = own(projects, key);
+    if (!p) return { ok: false, code: 404, error: 'project is not connected' };
+    const keys = ['runner_lead', 'runner_member'].filter((k) => values[k] !== undefined);
+    if (!keys.length) return { ok: false, code: 400, error: 'runner_lead or runner_member required' };
+    for (const k of keys) if (!RUNNER_VALUES.includes(values[k])) return { ok: false, code: 400, error: `${k} must be one of ${RUNNER_VALUES.join(', ')}` };
+    p.spawn = { ...(p.spawn || {}) };
+    for (const k of keys) p.spawn[k] = values[k];
+    return { ok: true, ...runnersOf(p) };
+  });
 }
 const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
@@ -355,15 +359,17 @@ const RULES_TEXT_VER = 1;
 
 // Instructions for a registered session; marks them as given for the project's current mode.
 function injectRules(sid) {
-  const sessions = readJson(paths.sessions, {});
-  const s = sessions[sid];
-  if (!s) return rulesText(sid);
-  const p = readProjects()[s.project_key];
-  s.rules_ver = Number(p?.mode_ver) || 0;
-  s.lang_ver = Number(readSettings().ver) || 0;
-  s.text_ver = RULES_TEXT_VER;
-  writeJson(paths.sessions, sessions);
-  return rulesFor(s, p);
+  const projects = readProjects();
+  const langVer = Number(readSettings().ver) || 0;
+  return sessionsStore.update((sessions) => {
+    const s = sessions[sid];
+    if (!s) return rulesText(sid);
+    const p = projects[s.project_key];
+    s.rules_ver = Number(p?.mode_ver) || 0;
+    s.lang_ver = langVer;
+    s.text_ver = RULES_TEXT_VER;
+    return rulesFor(s, p);
+  });
 }
 
 // The instructions again, once, if the project's mode changed since they were last given ('' otherwise).
@@ -388,11 +394,11 @@ function rulesUpdate(s, p) {
 
 // Same as rulesUpdate, reading and saving the files.
 function pendingRules(sid) {
-  const sessions = readJson(paths.sessions, {});
-  const s = sessions[sid];
-  const text = rulesUpdate(s, s && readProjects()[s.project_key]);
-  if (text) writeJson(paths.sessions, sessions);
-  return text;
+  const projects = readProjects();
+  return sessionsStore.update((sessions) => {
+    const s = sessions[sid];
+    return rulesUpdate(s, s && projects[s.project_key]);
+  });
 }
 
 // --- Teams: projects.json[key].teams = { <name>: { lead, worktree, groups, created } } ---
@@ -527,19 +533,21 @@ function migrateProject(p, sessions) {
 }
 
 // projects.json, with settings from before M-1b moved to teams (saved once, on first read).
-function readProjects() {
-  const projects = readJson(paths.projects, {});
-  if (!projects || typeof projects !== 'object') return {};
-  let sessions = null;
-  let changed = false;
+// Inside a sessions update the migration is applied in memory only (lock order: projects before sessions); the
+// next read outside it saves it.
+const needsMigration = (projects) => Object.values(projects).some((p) => p && typeof p === 'object' && !p.teams);
+function migrateAll(projects) {
+  const sessions = sessionsStore.read();
   for (const p of Object.values(projects)) {
-    if (p && typeof p === 'object' && !p.teams) {
-      sessions ||= readJson(paths.sessions, {});
-      if (migrateProject(p, sessions)) changed = true;
-    }
+    if (p && typeof p === 'object' && !p.teams) migrateProject(p, sessions);
   }
-  if (changed) writeJson(paths.projects, projects);
   return projects;
+}
+function readProjects() {
+  const projects = projectsStore.read();
+  if (!needsMigration(projects)) return projects;
+  if (projectsStore.inUpdate() || sessionsStore.inUpdate()) return migrateAll(projects);
+  return projectsStore.update(migrateAll);
 }
 
 function bumpMode(p) {
@@ -551,10 +559,15 @@ function bumpMode(p) {
 // Add a team led by the given session. Refuses a name in use and a session that already leads a team.
 // No name: team1, team2, ... Other teams are not touched. Bumps mode_ver (every session gets new instructions once).
 function addTeam(key, name, lead) {
-  const projects = readProjects();
+  readProjects(); // migrate first
+  // git outside the locks: the worktree of the lead's folder.
+  const before = own(sessionsStore.read(), lead);
+  const worktree = worktreeRoot(before?.cwd || projectsStore.get(key)?.cwd || process.cwd());
+  return projectsStore.update((projects) => sessionsStore.update((sessions) => addTeamIn(projects, sessions, key, name, lead, worktree)));
+}
+function addTeamIn(projects, sessions, key, name, lead, worktree) {
   const p = projects[key];
   if (!p) return { ok: false, error: 'project is not connected' };
-  const sessions = readJson(paths.sessions, {});
   if (!own(sessions, lead)) return { ok: false, error: 'unknown lead session' };
   p.teams ||= {};
   const team = name ? teamSlug(name) : nextTeamName(p);
@@ -563,13 +576,11 @@ function addTeam(key, name, lead) {
   if (taken) return { ok: false, code: 409, error: `team ${taken} exists in this project (names ignore case); pick another name` };
   const led = teamOfLead(p, lead);
   if (led) return { ok: false, code: 409, error: `this session already leads team ${led.name}` };
-  p.teams[team] = { lead, worktree: worktreeRoot(sessions[lead].cwd || p.cwd || process.cwd()), groups: {}, created: new Date().toISOString() };
+  p.teams[team] = { lead, worktree, groups: {}, created: new Date().toISOString() };
   ensureLeadRules(p.teams[team], team);
   bumpMode(p);
   sessions[lead].kind = 'lead';
   clearLeadContext(sessions[lead]);
-  writeJson(paths.sessions, sessions);
-  writeJson(paths.projects, projects);
   return { ok: true, team, mode: p.mode, mode_ver: p.mode_ver, lead };
 }
 
@@ -577,12 +588,14 @@ function addTeam(key, name, lead) {
 // cleared; former_lead kept), so they post to the dashboard and never rejoin a later team. Folders stay.
 // The project is solo when no team is left.
 function removeTeams(key, names = []) {
-  const projects = readProjects();
+  readProjects(); // migrate first
+  return projectsStore.update((projects) => sessionsStore.update((sessions) => removeTeamsIn(projects, sessions, key, names)));
+}
+function removeTeamsIn(projects, sessions, key, names) {
   const p = projects[key];
   if (!p) return { ok: false, error: 'project is not connected' };
   const list = names.length ? names : Object.keys(teamsOf(p));
   for (const n of list) if (!own(teamsOf(p), n)) return { ok: false, code: 404, error: `no team ${n}` };
-  const sessions = readJson(paths.sessions, {});
   for (const n of list) {
     const leadSid = p.teams[n].lead;
     const lead = own(sessions, leadSid);
@@ -597,8 +610,6 @@ function removeTeams(key, names = []) {
     delete p.teams[n];
   }
   bumpMode(p);
-  writeJson(paths.sessions, sessions);
-  writeJson(paths.projects, projects);
   return { ok: true, removed: list, mode: p.mode, mode_ver: p.mode_ver };
 }
 
@@ -632,15 +643,11 @@ function parseTag(prompt) {
 
 // Register a session as a member (from its tag). The session must be registered already.
 function setMember(sid, tag) {
-  const sessions = readJson(paths.sessions, {});
-  const s = sessions[sid];
-  if (!s) return false;
-  Object.assign(s, { kind: 'member', role: tag.role, lead: tag.lead, stay: Boolean(tag.stay) });
-  if (tag.group) s.group = tag.group;
-  if (!config.get('DDASH_NAME')) s.name = tag.role;
-  delete s.pending;
-  writeJson(paths.sessions, sessions);
-  return true;
+  return sessionsStore.patch(sid, {
+    kind: 'member', role: tag.role, lead: tag.lead, stay: Boolean(tag.stay), pending: undefined,
+    ...(tag.group ? { group: tag.group } : {}),
+    ...(config.get('DDASH_NAME') ? {} : { name: tag.role }),
+  });
 }
 
 
@@ -844,11 +851,7 @@ function findClaudePid(startPid = process.ppid, table = processTable()) {
 function recordClaudePid(sid, startPid = process.ppid) {
   const pid = findClaudePid(startPid);
   if (!pid) return 0;
-  const sessions = readJson(paths.sessions, {});
-  if (!sessions[sid]) return 0;
-  sessions[sid].claude_pid = pid;
-  writeJson(paths.sessions, sessions);
-  return pid;
+  return sessionsStore.patch(sid, { claude_pid: pid }) ? pid : 0;
 }
 
 function killPid(pid) {
@@ -1020,10 +1023,8 @@ function killClaude(pid) {
 
 // Read projects.json, let fn change it, write it at once (keeps changes made since an earlier read). Returns fn's result.
 function updateProjects(fn) {
-  const projects = readProjects();
-  const r = fn(projects);
-  writeJson(paths.projects, projects);
-  return r;
+  readProjects(); // migrate first
+  return projectsStore.update(fn);
 }
 
 // New lead `to` takes over from `from` (called from the new lead's first-prompt hook).
@@ -1031,8 +1032,29 @@ function updateProjects(fn) {
 // ended (reason: handoff) and stops its wait command and Claude process. opts.kill / opts.killClaude for tests.
 function performHandoff(from, to, doc, opts = {}) {
   const stopClaude = opts.killClaude || killClaude;
-  const sessions = readJson(paths.sessions, {});
   const projects = readProjects();
+  const r = sessionsStore.update((sessions) => handoffSessions(sessions, projects, from, to, doc));
+  if (!r.ok) return r;
+  const { key, t, old, members, ts } = r;
+  // Re-read before writing: only this team's lead and handoff records change.
+  updateProjects((all) => {
+    const ft = teamOfLead(own(all, key), from);
+    if (!ft) return;
+    ft.team.lead = to;
+    ft.team.last_handoff = { from, to, doc, ts };
+    delete ft.team.handoff;
+  });
+
+  const moved = moveInbox(from, to);
+  const wp = waitPid(from);
+  const waitKilled = wp ? (opts.kill ? opts.kill(wp) : stopWaiter(from)) : false;
+  const claudeKilled = old.claude_pid ? stopClaude(Number(old.claude_pid)) : false;
+  const rules = existingLeadRules(t.team, t.name);
+  return { ok: true, team: t.name, rules, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
+}
+
+// The sessions part of a handoff (inside the sessions lock): checks, new lead, members, old lead ended.
+function handoffSessions(sessions, projects, from, to, doc) {
   const old = sessions[from];
   const me = sessions[to];
   if (!old) return { ok: false, error: `unknown session ${from}` };
@@ -1060,22 +1082,7 @@ function performHandoff(from, to, doc, opts = {}) {
   }
   delete old.kind;
   Object.assign(old, { state: 'ended', ended: ts, end_reason: 'handoff', replaced_by: to, last_seen: ts });
-  writeJson(paths.sessions, sessions);
-  // Re-read before writing: only this team's lead and handoff records change.
-  updateProjects((all) => {
-    const ft = teamOfLead(own(all, key), from);
-    if (!ft) return;
-    ft.team.lead = to;
-    ft.team.last_handoff = { from, to, doc, ts };
-    delete ft.team.handoff;
-  });
-
-  const moved = moveInbox(from, to);
-  const wp = waitPid(from);
-  const waitKilled = wp ? (opts.kill ? opts.kill(wp) : stopWaiter(from)) : false;
-  const claudeKilled = old.claude_pid ? stopClaude(Number(old.claude_pid)) : false;
-  const rules = existingLeadRules(t.team, t.name);
-  return { ok: true, team: t.name, rules, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
+  return { ok: true, key, t, old, members, ts };
 }
 
 // --- Groups (team mode): docs/teams/<team>/<group>/ in the team lead's worktree holds a group's memory ---
@@ -1118,17 +1125,27 @@ function ensureGroupDir(dir, name) {
 const badGroupName = (name) => !GROUP_NAME.test(String(name || '')) || String(name).startsWith('_');
 const GROUP_NAME_ERROR = 'group names use letters, digits, - and _ (up to 40)';
 
-// The team's entry in projects (read for writing): { projects, p, team } or { error }.
+// The team's entry in a copy of projects (for checks and folder work outside the lock): { p, team } or { error }.
+// Its worktree is filled in when missing (git), so teamIn can store it.
 function teamFor(key, teamName) {
-  const projects = readProjects();
-  const p = projects[key];
+  const p = own(readProjects(), key);
   if (!p) return { error: 'project is not connected' };
   const team = own(teamsOf(p), teamName);
   if (!team) return { error: `no team ${teamName}` };
   team.groups ||= {};
-  if (!team.worktree) team.worktree = worktreeRoot(readJson(paths.sessions, {})[team.lead]?.cwd || p.cwd || process.cwd());
-  return { projects, p, team };
+  if (!team.worktree) team.worktree = worktreeRoot(sessionsStore.get(team.lead)?.cwd || p.cwd || process.cwd());
+  return { p, team };
 }
+
+// The same team inside a projects update (the map being written), or null when it is gone meanwhile.
+function teamIn(projects, key, teamName, worktree) {
+  const team = own(teamsOf(own(projects, key)), teamName);
+  if (!team) return null;
+  team.groups ||= {};
+  team.worktree ||= worktree;
+  return team;
+}
+const TEAM_GONE = (teamName) => ({ ok: false, error: `no team ${teamName}` });
 
 // Members of a team (by its current lead).
 const teamMembers = (sessions, key, team) => Object.values(sessions).filter((s) => s.project_key === key && s.kind === 'member' && s.lead === team.lead);
@@ -1139,15 +1156,20 @@ function groupsOf(key, teamName) {
 
 function createGroup(key, teamName, name) {
   if (badGroupName(name)) return { ok: false, error: GROUP_NAME_ERROR };
-  const { projects, team, error } = teamFor(key, teamName);
+  const { team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
   const taken = sameName(team.groups, name);
   if (taken) return { ok: false, error: `group ${taken} exists in team ${teamName} (names ignore case)` };
   const dir = slash(path.join(teamDir(team, teamName), name));
   ensureGroupDir(dir, name);
-  team.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
-  writeJson(paths.projects, projects);
-  return { ok: true, dir };
+  return projectsStore.update((projects) => {
+    const t = teamIn(projects, key, teamName, team.worktree);
+    if (!t) return TEAM_GONE(teamName);
+    const again = sameName(t.groups, name);
+    if (again) return { ok: false, error: `group ${again} exists in team ${teamName} (names ignore case)` };
+    t.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
+    return { ok: true, dir };
+  });
 }
 
 // Move a folder: git mv when tracked (the lead commits it), a plain rename otherwise. A tracked folder that
@@ -1165,7 +1187,7 @@ function moveDir(from, to) {
 
 function renameGroup(key, teamName, name, next) {
   if (badGroupName(next)) return { ok: false, error: GROUP_NAME_ERROR };
-  const { projects, team, error } = teamFor(key, teamName);
+  const { team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
   const g = own(team.groups, name);
   if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
@@ -1175,12 +1197,15 @@ function renameGroup(key, teamName, name, next) {
   if (fs.existsSync(dir)) return { ok: false, error: `folder exists: ${dir}` };
   let how = 'none';
   if (fs.existsSync(g.dir)) how = moveDir(g.dir, dir);
-  delete team.groups[name];
-  team.groups[next] = { ...g, dir };
-  writeJson(paths.projects, projects);
-  const sessions = readJson(paths.sessions, {});
-  for (const s of teamMembers(sessions, key, team)) if (s.group === name) s.group = next;
-  writeJson(paths.sessions, sessions);
+  projectsStore.update((projects) => {
+    const t = teamIn(projects, key, teamName, team.worktree);
+    if (!t) return;
+    t.groups[next] = { ...(own(t.groups, name) || g), dir };
+    delete t.groups[name];
+  });
+  sessionsStore.update((sessions) => {
+    for (const s of teamMembers(sessions, key, team)) if (s.group === name) s.group = next;
+  });
   return { ok: true, dir, moved: how };
 }
 
@@ -1189,7 +1214,7 @@ const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 // Remove a group: its members become unassigned; the folder moves to docs/teams/<team>/_archived/<name>-<date>/
 // (purge: deleted instead).
 function deleteGroup(key, teamName, name, { purge = false } = {}) {
-  const { projects, team, error } = teamFor(key, teamName);
+  const { team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
   const g = own(team.groups, name);
   if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
@@ -1206,11 +1231,13 @@ function deleteGroup(key, teamName, name, { purge = false } = {}) {
       folder = slash(to);
     }
   }
-  delete team.groups[name];
-  writeJson(paths.projects, projects);
-  const sessions = readJson(paths.sessions, {});
-  for (const s of teamMembers(sessions, key, team)) if (s.group === name) delete s.group;
-  writeJson(paths.sessions, sessions);
+  projectsStore.update((projects) => {
+    const t = teamIn(projects, key, teamName, team.worktree);
+    if (t) delete t.groups[name];
+  });
+  sessionsStore.update((sessions) => {
+    for (const s of teamMembers(sessions, key, team)) if (s.group === name) delete s.group;
+  });
   return { ok: true, folder };
 }
 
@@ -1278,10 +1305,9 @@ const BRIEF_STALE_COMMITS = config.get('DDASH_BRIEF_STALE_COMMITS');
 // (until the brief changes again). Called from the Stop hook and team.js spawn. Returns the groups reported
 // (as <team>/<group>).
 function checkBriefs(key) {
-  const projects = readProjects();
-  const p = projects[key];
+  const p = own(readProjects(), key);
   if (!hasTeams(p)) return [];
-  let changed = false;
+  const changes = []; // [teamName, group name, fields (undefined deletes)]
   const told = [];
   for (const [teamName, team] of Object.entries(p.teams)) {
     for (const [name, g] of Object.entries(team.groups || {})) {
@@ -1290,9 +1316,7 @@ function checkBriefs(key) {
       const head = gitIn(['rev-parse', 'HEAD'], g.dir);
       if (!head) continue;
       if (g.brief_mtime !== mtime || !g.brief_head) {
-        Object.assign(g, { brief_mtime: mtime, brief_head: head });
-        delete g.brief_stale_warned;
-        changed = true;
+        changes.push([teamName, name, { brief_mtime: mtime, brief_head: head, brief_stale_warned: undefined }]);
         continue;
       }
       if (g.brief_stale_warned || g.brief_head === head || !team.lead) continue;
@@ -1302,13 +1326,27 @@ function checkBriefs(key) {
         type: 'report', from: name, role: 'ddashboard', status: 'review',
         title: `brief ${name} may be stale: ${n} commits since it was last updated (${slash(path.join(g.dir, 'brief.md'))})`,
       });
-      g.brief_stale_warned = head;
-      changed = true;
+      changes.push([teamName, name, { brief_stale_warned: head }]);
       told.push(`${teamName}/${name}`);
     }
   }
-  if (changed) writeJson(paths.projects, projects);
+  if (changes.length) setGroupFields(key, changes);
   return told;
+}
+
+// Set fields of groups in projects.json: changes = [[teamName, groupName, { field: value | undefined }]].
+// Groups removed meanwhile are skipped.
+function setGroupFields(key, changes) {
+  projectsStore.update((projects) => {
+    for (const [teamName, name, fields] of changes) {
+      const g = own(own(teamsOf(own(projects, key)), teamName)?.groups, name);
+      if (!g) continue;
+      for (const [k, v] of Object.entries(fields)) {
+        if (v === undefined) delete g[k];
+        else g[k] = v;
+      }
+    }
+  });
 }
 
 // Group memory for a new member, put before its task: the brief (capped) and the latest handoff.
@@ -1330,9 +1368,8 @@ Latest handoff: ${last ? `${last} (read it before you start)` : 'none yet'}
 // group, so it can share the prompt cache), then its own instructions. Marks the instructions as given.
 // If the brief had to be cut, the lead is told once per brief size.
 function memberStart(sid) {
-  const sessions = readJson(paths.sessions, {});
   const projects = readProjects();
-  const s = sessions[sid];
+  const s = sessionsStore.get(sid);
   if (!s) return rulesText(sid);
   const p = projects[s.project_key];
   const g = s.group && own(teamOfSession(s, p)?.team.groups, s.group);
@@ -1346,14 +1383,13 @@ function memberStart(sid) {
         title: `brief ${s.group} needs trimming (${ctx.chars} characters; members get the first ${BRIEF_MAX_CHARS})`,
       });
       g.brief_warned = ctx.chars;
-      writeJson(paths.projects, projects);
+      const t = teamOfSession(s, p);
+      setGroupFields(s.project_key, [[t.name, s.group, { brief_warned: ctx.chars }]]);
     }
   }
-  s.rules_ver = Number(p?.mode_ver) || 0;
-  s.lang_ver = Number(readSettings().ver) || 0;
-  s.text_ver = RULES_TEXT_VER;
-  s.start_rules = true;
-  writeJson(paths.sessions, sessions);
+  const stamp = { rules_ver: Number(p?.mode_ver) || 0, lang_ver: Number(readSettings().ver) || 0, text_ver: RULES_TEXT_VER, start_rules: true };
+  Object.assign(s, stamp);
+  sessionsStore.patch(sid, stamp);
   return head + rulesFor(s, p);
 }
 
@@ -1374,17 +1410,17 @@ function removeEmptyInbox(sid) {
 // Drop ended sessions from sessions.json (cards and usage stay). Returns { forgotten, refused }:
 // sessions that are not ended are refused.
 function forgetSessions(ids) {
-  const sessions = readJson(paths.sessions, {});
   const forgotten = [];
   const refused = [];
-  for (const id of ids) {
-    const s = sessions[id];
-    if (!s) continue;
-    if (!isEnded(s)) { refused.push(id); continue; }
-    delete sessions[id];
-    forgotten.push(s);
-  }
-  if (forgotten.length) writeJson(paths.sessions, sessions);
+  sessionsStore.update((sessions) => {
+    for (const id of ids) {
+      const s = own(sessions, id);
+      if (!s) continue;
+      if (!isEnded(s)) { refused.push(id); continue; }
+      delete sessions[id];
+      forgotten.push(s);
+    }
+  });
   // Nothing of a forgotten session may keep running (bug-005): its waiter, a dead Claude's tool shells.
   let table = null;
   for (const s of forgotten) {
@@ -1420,22 +1456,21 @@ const memberGone = sessionGone;
 // Mark these sessions ended (end_reason 'gone') in sessions.json. Returns the ids changed.
 function markGone(sids) {
   if (!sids.length) return [];
-  const sessions = readJson(paths.sessions, {});
   const ts = new Date().toISOString();
   const done = [];
-  for (const sid of sids) {
-    const s = own(sessions, sid);
-    if (!s || isEnded(s)) continue;
-    Object.assign(s, { state: 'ended', ended: ts, end_reason: 'gone' });
-    done.push(sid);
-  }
-  if (done.length) writeJson(paths.sessions, sessions);
+  sessionsStore.update((sessions) => {
+    for (const sid of sids) {
+      const s = own(sessions, sid);
+      if (!s || isEnded(s)) continue;
+      Object.assign(s, { state: 'ended', ended: ts, end_reason: 'gone' });
+      done.push(sid);
+    }
+  });
   return done;
 }
 
 function markEnded(sid) {
-  const sessions = readJson(paths.sessions, {});
-  const s = sessions[sid];
+  const s = sessionsStore.get(sid);
   if (!s) return { ok: false, code: 404, error: 'unknown session' };
   if (isEnded(s)) return { ok: true };
   // A session whose Claude process is dead may be marked ended even while it still says "working".
@@ -1446,8 +1481,12 @@ function markEnded(sid) {
   const waiting = wp && !orphanWaiter(wp, (table = processTable()));
   if (!gone && (s.state === 'working' || waiting || !isStale(s))) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
   const ts = new Date().toISOString();
-  Object.assign(s, { state: 'ended', ended: ts, end_reason: gone ? 'gone' : 'marked' });
-  writeJson(paths.sessions, sessions);
+  const fields = { state: 'ended', ended: ts, end_reason: gone ? 'gone' : 'marked' };
+  Object.assign(s, fields);
+  sessionsStore.update((all) => {
+    const cur = own(all, sid);
+    if (cur && !isEnded(cur)) Object.assign(cur, fields);
+  });
   try { stopSessionProcesses(s, table || undefined); } catch { /* best effort */ }
   return { ok: true };
 }

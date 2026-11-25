@@ -13,12 +13,7 @@ const lib = require('./lib');
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (spec.kind === 'window' && spec.sid) {
   try {
-    const sessions = lib.readJson(lib.paths.sessions, {});
-    const s = lib.own(sessions, spec.sid);
-    if (s) {
-      Object.assign(s, { window_launch_pid: process.pid, window_shell_pid: process.ppid });
-      lib.writeJson(lib.paths.sessions, sessions);
-    }
+    require('./store/sessions').patch(spec.sid, { window_launch_pid: process.pid, window_shell_pid: process.ppid });
   } catch { /* best effort */ }
 }
 const prompt = fs.readFileSync(spec.prompt_file, 'utf8');
