@@ -278,6 +278,9 @@ const server = http.createServer((req, res) => {
       const role = String(msg.role || '').trim();
       const task = String(msg.task || '').trim();
       if (!role || !task) return send(res, 400, { error: 'role and task required' });
+      if (msg.runner !== undefined && msg.runner !== null && msg.runner !== '' && !team.RUNNERS.includes(msg.runner)) {
+        return send(res, 400, { error: `runner must be one of ${team.RUNNERS.join(', ')}` });
+      }
       let r;
       try {
         r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: team.RUNNERS.includes(msg.runner) ? msg.runner : undefined });

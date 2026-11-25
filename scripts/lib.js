@@ -871,6 +871,14 @@ function killClaude(pid) {
   return killPid(pid);
 }
 
+// Read projects.json, let fn change it, write it at once (keeps changes made since an earlier read). Returns fn's result.
+function updateProjects(fn) {
+  const projects = readProjects();
+  const r = fn(projects);
+  writeJson(paths.projects, projects);
+  return r;
+}
+
 // New lead `to` takes over from `from` (called from the new lead's first-prompt hook).
 // Only the old lead's team changes: its lead and its members move; other teams are untouched. Moves the old lead's pending messages, marks the old lead
 // ended (reason: handoff) and stops its wait command and Claude process. opts.kill / opts.killClaude for tests.
@@ -895,9 +903,6 @@ function performHandoff(from, to, doc, opts = {}) {
   if (mine) return { ok: false, error: `the new lead already leads team ${mine.name}` };
 
   const ts = new Date().toISOString();
-  t.team.lead = to;
-  t.team.last_handoff = { from, to, doc, ts };
-  delete t.team.handoff;
 
   me.kind = 'lead';
   clearLeadContext(me);
@@ -910,7 +915,14 @@ function performHandoff(from, to, doc, opts = {}) {
   delete old.kind;
   Object.assign(old, { state: 'ended', ended: ts, end_reason: 'handoff', replaced_by: to, last_seen: ts });
   writeJson(paths.sessions, sessions);
-  writeJson(paths.projects, projects);
+  // Re-read before writing: only this team's lead and handoff records change.
+  updateProjects((all) => {
+    const ft = teamOfLead(own(all, key), from);
+    if (!ft) return;
+    ft.team.lead = to;
+    ft.team.last_handoff = { from, to, doc, ts };
+    delete ft.team.handoff;
+  });
 
   const moved = moveInbox(from, to);
   const wp = waitPid(from);
@@ -1428,5 +1440,5 @@ module.exports = {
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
   pruneGroup, groupContext, memberStart, BRIEF_STALE_COMMITS, checkBriefs, LANG_NAMES, readSettings, saveSettings,
   TEAM_NAME, teamsOf, hasTeams, teamOfLead, teamOfSession, teamSlug, worktreeRoot, migrateProject, readProjects,
-  addTeam, removeTeams, teamMembers, ensureGroupDir, reserveHandoff, own, sameName,
+  updateProjects, addTeam, removeTeams, teamMembers, ensureGroupDir, reserveHandoff, own, sameName,
 };

@@ -5,15 +5,13 @@
 // spec: { args: [claude options], prompt_file, cwd }
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { claudeCommand, quoteCmd } = require('./team');
+const { claudeCommand, interactiveArgs, quoteCmd } = require('./team');
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-let prompt = fs.readFileSync(spec.prompt_file, 'utf8');
+const prompt = fs.readFileSync(spec.prompt_file, 'utf8');
 const cmd = claudeCommand();
-// Through cmd.exe (claude.cmd) a newline would end the command line.
-if (cmd.shell) prompt = prompt.replace(/\r?\n/g, ' ');
-// The prompt goes first: options such as --allowedTools take every following word as a value.
-const all = [...cmd.pre, prompt, ...(spec.args || [])];
+// No shell when claude can run without one (see claudeCommand); else the prompt text goes to its file.
+const all = interactiveArgs(cmd, prompt, spec.args || [], spec.prompt_file);
 const env = { ...process.env };
 delete env.CLAUDECODE;
 delete env.CLAUDE_CODE_ENTRYPOINT;

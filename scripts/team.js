@@ -63,17 +63,36 @@ function parseArgs(argv, booleans = []) {
 }
 
 // The claude command as [file, args prefix, use shell]. DDASH_CLAUDE_BIN may point at a .js file (tests).
+// On Windows, claude.exe (native install) runs directly, and npm's claude.cmd is run as node + its cli.js, so no
+// cmd.exe parses the arguments (a prompt with %VAR% or & stays as written). Only an unknown .cmd needs the shell.
 function claudeCommand() {
   const bin = process.env.DDASH_CLAUDE_BIN || 'claude';
   if (/\.(c|m)?js$/i.test(bin)) return { file: process.execPath, pre: [bin], shell: false };
-  if (process.platform === 'win32' && !/\.(exe|com)$/i.test(bin)) {
-    // claude.exe (native install) runs directly; claude.cmd (npm install) needs cmd.exe.
-    let found = '';
-    try { found = execFileSync('where', [bin], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().split(/\r?\n/)[0].trim(); } catch {}
-    if (found && /\.(exe|com)$/i.test(found)) return { file: found, pre: [], shell: false };
-    return { file: bin, pre: [], shell: true };
+  if (process.platform !== 'win32' || /\.(exe|com)$/i.test(bin)) return { file: bin, pre: [], shell: false };
+  let found = [];
+  if (fs.existsSync(bin)) found = [bin];
+  else {
+    try { found = execFileSync('where', [bin], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().split(/\r?\n/).map((l) => l.trim()).filter(Boolean); } catch {}
   }
-  return { file: bin, pre: [], shell: false };
+  const exe = found.find((f) => /\.(exe|com)$/i.test(f));
+  if (exe) return { file: exe, pre: [], shell: false };
+  for (const f of found.filter((x) => /\.(cmd|bat)$/i.test(x))) {
+    const cli = path.join(path.dirname(f), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+    if (fs.existsSync(cli)) return { file: process.execPath, pre: [cli], shell: false };
+  }
+  return { file: found.find((x) => /\.(cmd|bat)$/i.test(x)) || bin, pre: [], shell: true };
+}
+
+// Arguments for an interactive claude (prompt first: options such as --allowedTools take every following word).
+// Through cmd.exe (cmd.shell) a newline would end the command line and %VAR% would expand, so then the text after
+// the [ddash ...] tag moves to promptFile and the prompt only points at it.
+function interactiveArgs(cmd, prompt, args, promptFile) {
+  let p = String(prompt);
+  if (cmd.shell && /[%\r\n"^&|<>!]/.test(p)) {
+    const tag = (p.match(/^\[ddash [^\]]*\]/) || [''])[0];
+    p = `${tag ? `${tag} ` : ''}Your first message is in ${slash(promptFile)} (moved there because the Windows shell would change it). Read that file first and follow it.`;
+  }
+  return [...cmd.pre, p, ...args];
 }
 
 const quoteCmd = (a) => (/^[\w./:=@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '""')}"`);
@@ -177,23 +196,26 @@ const runnerLabel = (r) => (r === 'orca' ? 'Orca' : 'The terminal window');
 
 // Spec file for orca-launch.js (starts an interactive claude with the prompt as its first message) and the
 // short command that runs it. Going through a file keeps long or multi-line prompts free of shell quoting.
-function launchCommand(sid, args, prompt, cwd, kind) {
+function launchSpec(sid, args, prompt, cwd, kind) {
   ensureDir(paths.logsDir);
   const base = path.join(paths.logsDir, `${safeId(sid)}.${kind}-${Date.now()}`);
   fs.writeFileSync(`${base}.prompt.txt`, prompt);
   fs.writeFileSync(`${base}.json`, JSON.stringify({ args, prompt_file: `${base}.prompt.txt`, cwd }));
   fs.appendFileSync(paths.log(sid), `\n--- ${new Date().toISOString()} ${kind} terminal: claude ${args.join(' ')}\n`);
-  return `node "${slash(path.join(__dirname, 'orca-launch.js'))}" "${slash(base)}.json"`;
+  return { spec: `${base}.json`, name: path.basename(base) };
 }
+const LAUNCH = path.join(__dirname, 'orca-launch.js');
 
 // Start an interactive claude in a new, visible Orca terminal in the worktree of cwd. Returns { handle, pane }.
 function runOrca(sid, args, prompt, cwd, title) {
-  return orca.openTerminal({ cwd, title, command: launchCommand(sid, args, prompt, cwd, 'orca') });
+  const { spec } = launchSpec(sid, args, prompt, cwd, 'orca');
+  return orca.openTerminal({ cwd, title, command: `node "${slash(LAUNCH)}" "${slash(spec)}"` });
 }
 
-// Start an interactive claude in a new OS terminal window in cwd. Returns { pid } of the launcher.
+// Start an interactive claude in a new OS terminal window in cwd (no shell command line: see terminal.js).
 function runWindow(sid, args, prompt, cwd, title) {
-  return terminal.openWindow({ cwd, title, command: launchCommand(sid, args, prompt, cwd, 'window') });
+  const { spec, name } = launchSpec(sid, args, prompt, cwd, 'window');
+  return terminal.openWindow({ cwd, title, argv: [process.execPath, LAUNCH, spec], dir: paths.logsDir, name });
 }
 
 function updateSession(sid, fields, drop = []) {
@@ -305,11 +327,19 @@ function cmdSend(leadSid, argv) {
   if (!m) throw new Error(`no member "${target}" of this lead. See: list`);
   const sid = m.session_id;
   if (m.runner === 'orca') return sendOrca(leadSid, m, text);
+  if (m.runner === 'window' && !lib.isEnded(m) && lib.memberGone(m)) {
+    lib.markGone([sid]);
+    m.state = 'ended';
+    m.ended = new Date().toISOString();
+  }
   if (m.runner === 'window' && lib.isEnded(m)) return resumeWindow(m, text);
   const running = m.headless && alive(m.pid);
   if (lib.waitPid(sid) || running || !m.headless) {
     lib.deliver(sid, { type: 'order', from: leadSid, text: text.slice(0, 8000) });
-    const how = lib.waitPid(sid) ? 'it is waiting and wakes up now' : running ? 'it gets it when its current turn ends' : 'it gets it on its next turn';
+    const how = lib.waitPid(sid) ? 'it is waiting and wakes up now' : running ? 'it gets it when its current turn ends'
+      : m.state === 'working' ? 'it gets it when its current turn ends'
+        : m.runner === 'window' ? 'it is idle in its terminal window and reads it only on its next turn. Nothing can type into that window: type something there yourself (or end it and send again to resume it)'
+          : 'it gets it on its next turn';
     return `Queued for ${m.role} (${sid.slice(0, 8)}): ${how}.`;
   }
   // Headless member that has finished: resume it with the same options.
@@ -455,10 +485,13 @@ function cmdHandoff(leadSid, argv) {
   const own = ownTeam(project, leadSid);
   // This command runs under the lead's own Claude process: remember its pid so the takeover can stop it.
   const claudePid = lib.recordClaudePid(leadSid, process.ppid);
-  own.team.handoff = { from: leadSid, doc, ts: new Date().toISOString() };
   const rules = lib.existingLeadRules(own.team, own.name);
   if (!rules) process.stderr.write(`team.js handoff: warning: ${lib.leadRulesPath(own.team, own.name)} does not exist (it is created with the team); the new lead is not told to read it.\n`);
-  writeJson(paths.projects, projects);
+  // Re-read just before writing: only the handoff record changes (settings changed meanwhile, e.g. on the dashboard, stay).
+  lib.updateProjects((all) => {
+    const t = lib.teamOfLead(lib.own(all, lead.project_key), leadSid);
+    if (t) t.team.handoff = { from: leadSid, doc, ts: new Date().toISOString() };
+  });
   const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read only this handoff doc${rules ? ` and the team rules ${rules}` : ''} (not older handoff docs), then take over as team lead. Start the wait command from your instructions.`;
   const stop = claudePid ? `this session (Claude pid ${claudePid}) is stopped` : 'this session is told to stop (its Claude process was not found)';
   if (picked) {
@@ -471,7 +504,7 @@ function cmdHandoff(leadSid, argv) {
       // Interactive (no -p) in a visible terminal; Orca at the worktree root like members.
       try {
         if (picked.how === 'window') {
-          runWindow(sid, args, prompt, cwd, `lead ${own.name}`);
+          runWindow(sid, args, prompt, orca.worktreeRoot(cwd), `lead ${own.name}`);
           return `${note}Started the new lead in a new terminal window: ${sid}. When it registers, ${stop}.`;
         }
         const t = runOrca(sid, args, prompt, orca.worktreeRoot(cwd), `lead ${own.name}`);
@@ -570,7 +603,7 @@ function main(argv) {
   }
 }
 
-module.exports = { main, spawnMember, endMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, quoteCmd, pickRunner, configuredRunner, RUNNERS };
+module.exports = { main, spawnMember, endMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, interactiveArgs, quoteCmd, pickRunner, configuredRunner, RUNNERS };
 
 // Run directly, or through the fixed bin path (which requires this file).
 const viaBin = String(require.main?.filename || '').toLowerCase() === path.resolve(paths.teamBin).toLowerCase();

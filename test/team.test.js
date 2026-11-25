@@ -764,9 +764,10 @@ function windowEnv(on = true) {
 }
 const windowOff = () => { process.env.DDASH_WINDOW = '0'; delete process.env.DDASH_WINDOW_BIN; };
 const windowSpec = async () => {
-  const [title, cwd, command] = await waitFor(process.env.FAKE_WINDOW_OUT);
-  const spec = JSON.parse(fs.readFileSync(command.match(/"([^"]+\.json)"$/)[1], 'utf8'));
-  return { title, cwd, command, spec };
+  const [title, cwd, argvJson] = await waitFor(process.env.FAKE_WINDOW_OUT);
+  const argv = JSON.parse(argvJson);
+  const spec = JSON.parse(fs.readFileSync(argv[2], 'utf8'));
+  return { title, cwd, argv, spec };
 };
 
 test('M-1d: runners default to headless even when Orca runs', async () => {
@@ -801,7 +802,9 @@ test('M-1d: runner window opens a terminal window (members, leads, resume)', asy
     const w = await windowSpec();
     assert.equal(w.title, 'fe');
     assert.equal(slash(w.cwd), slash(CWD));
-    assert.match(w.command, /^node ".*\/orca-launch\.js" ".*\.window-\d+\.json"$/);
+    assert.equal(w.argv[0], process.execPath);
+    assert.match(slash(w.argv[1]), /\/orca-launch\.js$/);
+    assert.match(slash(w.argv[2]), /\.window-\d+\.json$/);
     assert.ok(!w.spec.args.includes('-p'));
     const sid = flagOf(w.spec.args, '--session-id');
     const s = readJson(paths.sessions, {})[sid];
@@ -882,22 +885,102 @@ test('M-1d: setRunners validates; /api/settings with a project saves runners, /a
   assert.equal(project().spawn.runner_member, 'orca');
 });
 
-test('M-1d: window launcher per platform', () => {
+test('M-1d review: window launcher never puts paths on a shell command line (&, %, ^, quotes)', () => {
   const save = process.env.DDASH_WINDOW_BIN;
   delete process.env.DDASH_WINDOW_BIN;
+  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  const cwd = 'C:/a&b/100%PATH%^x';
+  const argv = ['C:/node js/node.exe', 'C:/x&y/orca-launch.js', 'C:/logs/50%/s.json'];
   try {
-    const l = require(path.join(ROOT, 'scripts', 'terminal.js')).launcher({ title: 'lead "A"', cwd: 'C:/w', command: 'node "a.js" "b.json"' });
-    if (process.platform === 'win32') {
-      assert.deepEqual(l.args.slice(0, 3), ['/d', '/s', '/c']);
-      assert.equal(l.args[3], '"start "lead A" /D "C:/w" cmd /k "node "a.js" "b.json"""');
-      assert.equal(l.verbatim, true);
-    } else if (process.platform === 'darwin') {
-      assert.equal(l.file, 'osascript');
-      assert.match(l.args[1], /do script "cd 'C:\/w' && node \\"a\.js\\" \\"b\.json\\""/);
-    } else {
-      assert.deepEqual(l.args.slice(0, 2), ['-T', 'lead A']);
-    }
+    const w = term.launcher({ title: 'lead "A" & del', cwd, argv, name: 'sid.window-1', platform: 'win32' });
+    assert.equal(w.verbatim, true);
+    assert.deepEqual(w.args, ['/d', '/c', 'start "lead A  del" cmd /k sid.window-1.cmd']);
+    assert.equal(w.script.name, 'sid.window-1.cmd');
+    const lines = w.script.content.split('\r\n');
+    assert.equal(lines[2], 'cd /d "C:/a&b/100%%PATH%%^x"');
+    assert.equal(lines[3], '"C:/node js/node.exe" "C:/x&y/orca-launch.js" "C:/logs/50%%/s.json"');
+    const mac = term.launcher({ title: 't', cwd: "/a'b&c", argv: ['/n', '/l "x".js'], platform: 'darwin' });
+    assert.equal(mac.args[1], 'tell application "Terminal" to do script "cd \'/a\'\\\\\'\'b&c\' && \'/n\' \'/l \\"x\\".js\'"');
+    const lin = term.launcher({ title: 't', cwd: '/a&b', argv: ['/n'], platform: 'linux' });
+    assert.equal(lin.sync, false);
+    assert.match(lin.args[5], /^cd '\/a&b' && '\/n' \|\| \{ .*read x; \}$/);
   } finally { if (save !== undefined) process.env.DDASH_WINDOW_BIN = save; }
+});
+
+test('M-1d review: openWindow refuses a missing folder and a failing launcher (so spawn falls back to headless)', async () => {
+  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  teamFixture(); // resets the board: before the fake launchers are written
+  windowEnv();
+  try {
+    assert.throws(() => term.openWindow({ title: 't', cwd: path.join(CWD, 'nope'), argv: ['x'], dir: BOARD }), /folder does not exist/);
+    const bad = path.join(BOARD, 'bad-window.js');
+    fs.writeFileSync(bad, 'process.exit(3);\n');
+    process.env.DDASH_WINDOW_BIN = bad;
+    assert.throws(() => term.openWindow({ title: 't', cwd: CWD, argv: ['x'], dir: BOARD }), /failed \(exit 3\)/);
+    // A configured window runner whose launch fails: headless with a note.
+    lib.setRunners(KEY, { runner_member: 'window' });
+    process.env.DDASH_CLAUDE_BIN = fakeClaude();
+    process.env.FAKE_OUT = path.join(BOARD, 'wf.json');
+    assert.match(team.main(['L1', 'spawn', '--role', 'be', 'api']).out, /^The terminal window could not open a terminal \(.*failed \(exit 3\)\); started headless instead\./);
+    await waitFor(process.env.FAKE_OUT);
+  } finally { windowOff(); }
+});
+
+test('M-1d review: window members: dead Claude process -> ended and resumed on send; idle -> honest queue text', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  const dead = spawn(process.execPath, ['-e', '0']);
+  await new Promise((r) => dead.on('exit', r));
+  const s = readJson(paths.sessions, {});
+  s.W1 = session('W1', { kind: 'member', role: 'ui', lead: 'L1', runner: 'window', headless: false, claude_pid: process.pid, spawn: { cwd: CWD } });
+  s.W2 = session('W2', { kind: 'member', role: 'db', lead: 'L1', runner: 'window', headless: false, claude_pid: dead.pid, spawn: { cwd: CWD } });
+  writeJson(paths.sessions, s);
+  try {
+    assert.match(team.main(['L1', 'send', 'ui', 'hi']).out, /idle in its terminal window and reads it only on its next turn.*type something there yourself/);
+    assert.match(team.main(['L1', 'list']).out, /W2 {2}db {2}ended/);
+    windowEnv();
+    const w2 = readJson(paths.sessions, {});
+    delete w2.W2.ended; w2.W2.state = 'idle'; // not yet noticed by list
+    writeJson(paths.sessions, w2);
+    assert.match(team.main(['L1', 'send', 'db', 'next']).out, /Resumed db .*in a new terminal window/);
+    assert.deepEqual((await windowSpec()).spec.args.slice(0, 2), ['--resume', 'W2']);
+  } finally { windowOff(); }
+});
+
+test('M-1d review: claude runs without cmd.exe when possible; through it, the prompt moves to its file', () => {
+  const dir = path.join(BOARD, 'npm-bin');
+  const cli = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  fs.mkdirSync(path.dirname(cli), { recursive: true });
+  fs.writeFileSync(cli, '');
+  fs.writeFileSync(path.join(dir, 'claude.cmd'), '@node "%~dp0\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*');
+  const save = process.env.DDASH_CLAUDE_BIN;
+  try {
+    process.env.DDASH_CLAUDE_BIN = path.join(dir, 'claude.cmd');
+    const cmd = team.claudeCommand();
+    if (process.platform === 'win32') assert.deepEqual(cmd, { file: process.execPath, pre: [cli], shell: false });
+    // Through a shell, special characters never reach the command line.
+    const viaShell = { file: 'claude.cmd', pre: [], shell: true };
+    const args = team.interactiveArgs(viaShell, '[ddash role=fe lead=L1 stay=0] use %PATH% & echo\nline 2', ['--model', 'x'], 'C:/logs/p.txt');
+    assert.equal(args[0], '[ddash role=fe lead=L1 stay=0] Your first message is in C:/logs/p.txt (moved there because the Windows shell would change it). Read that file first and follow it.');
+    assert.deepEqual(args.slice(1), ['--model', 'x']);
+    assert.deepEqual(team.interactiveArgs({ pre: ['cli.js'], shell: false }, 'a %B% c', []), ['cli.js', 'a %B% c']);
+  } finally { if (save === undefined) delete process.env.DDASH_CLAUDE_BIN; else process.env.DDASH_CLAUDE_BIN = save; }
+});
+
+test('M-1d review: handoff keeps project settings changed while it ran; /api/team/spawn refuses unknown runners', async () => {
+  teamFixture();
+  const doc = path.join(BOARD, 'handoff.md');
+  fs.writeFileSync(doc, '# handoff');
+  const orig = lib.recordClaudePid;
+  lib.recordClaudePid = (...a) => { lib.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
+  try { assert.equal(team.main(['L1', 'handoff', doc]).code, 0); } finally { lib.recordClaudePid = orig; }
+  assert.equal(project().spawn.runner_member, 'orca');
+  assert.equal(teamConf().handoff.from, 'L1');
+  await withServer(async (post) => {
+    const r = await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'x', runner: 'tmux' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /runner must be one of headless, orca, window/);
+  });
 });
 
 test('BUG-001: team.js end closes an Orca member terminal, stops a headless run, marks both ended', async () => {
