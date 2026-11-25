@@ -108,12 +108,12 @@ function projectName(cwd) {
 }
 
 function projectActive(cwd) {
-  return Boolean(readJson(paths.projects, {})[projectKey(cwd)]);
+  return Boolean(readProjects()[projectKey(cwd)]);
 }
 
-// Turning a project on keeps its team settings (mode, lead, rules) from before.
+// Turning a project on keeps its team settings (mode, teams, rules) from before.
 function setProject(cwd, on) {
-  const projects = readJson(paths.projects, {});
+  const projects = readProjects();
   const key = projectKey(cwd);
   if (on) projects[key] = { ...(projects[key] || {}), since: new Date().toISOString(), cwd, name: projectName(cwd) };
   else delete projects[key];
@@ -336,9 +336,9 @@ function rulesText(sid) {
 
 function leadRulesText(sid, name) {
   const t = `node "${slash(ensureTeamBin())}" ${sid}`;
-  return `${rulesText(sid)}- Team mode: you are the team lead "${name || 'lead'}". The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
+  return `${rulesText(sid)}- Team mode: you are the lead of team "${name || 'lead'}" (other teams in this repo have their own leads and members). The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
 - Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless] "<task>" (visible in Orca when it runs) | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
-- Groups (shared memory in docs/groups/<g>/: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
+- Groups (shared memory in docs/teams/${name || 'lead'}/<g>/ of your worktree: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
 `;
 }
 
@@ -348,7 +348,7 @@ function memberRulesText(sid, s, g) {
     ? `- To receive instructions, run this in the background now: ${wait}
   ${RESTART}`
     : `- Don't start a wait command. Finish the task and stop; your lead resumes you if more is needed.`;
-  const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), write the next handoff-NNN.md there (highest number + 1, 3 digits): what was done, open items, where things are. Update brief.md if its facts changed. Don't commit; the lead does.
+  const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), run node "${slash(ensureTeamBin())}" ${sid} next-handoff: it creates the next handoff-NNN.md there and prints its path. Write into that file: what was done, open items, where things are. Update brief.md if its facts changed. Don't commit; the lead does.
 ` : '';
   const notes = g ? `${g.dir}/notes/` : 'a file';
   return `[ddashboard] You are a team member. Role: ${s.role || 'member'}${s.group ? `, group: ${s.group}` : ''}. Session ID: ${sid}. Your lead assigns the work; messages from the lead arrive as [Lead instruction].
@@ -368,11 +368,12 @@ const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
 const isEnded = (s) => Boolean(s && (s.ended || s.state === 'ended'));
 
-// Where a session stands in its project: solo | lead | member | outside (team mode, untagged).
+// Where a session stands in its project: solo | lead | member | outside (team mode, in no team).
+// A member belongs to the team whose lead spawned it (s.lead); a member of a removed team is outside.
 function teamRole(s, p) {
-  if (!s || !p || p.mode !== 'team') return 'solo';
-  if (s.session_id === p.lead) return 'lead';
-  if (s.kind === 'member' && s.lead) return 'member';
+  if (!s || !p || !hasTeams(p)) return 'solo';
+  if (teamOfLead(p, s.session_id)) return 'lead';
+  if (s.kind === 'member' && s.lead && teamOfLead(p, s.lead)) return 'member';
   return 'outside';
 }
 
@@ -391,9 +392,9 @@ function routeCard(sessions, projects, sid) {
 function rulesFor(s, p) {
   const sid = s.session_id;
   const role = teamRole(s, p);
-  if (role === 'lead') return leadRulesText(sid, p.lead_name);
-  if (role === 'member') return memberRulesText(sid, s, s.group && p.groups?.[s.group]);
-  if (role === 'outside') return `${rulesText(sid)}- This project is in team mode (lead: ${p.lead_name || 'lead'}). You are outside the team, so your cards still go straight to the dashboard.\n`;
+  if (role === 'lead') return leadRulesText(sid, teamOfLead(p, sid).name);
+  if (role === 'member') return memberRulesText(sid, s, s.group && teamOfSession(s, p)?.team.groups?.[s.group]);
+  if (role === 'outside') return `${rulesText(sid)}- This project is in team mode (teams: ${Object.keys(p.teams).sort().join(', ')}). You are outside every team, so your cards still go straight to the dashboard.\n`;
   return rulesText(sid);
 }
 
@@ -402,7 +403,7 @@ function injectRules(sid) {
   const sessions = readJson(paths.sessions, {});
   const s = sessions[sid];
   if (!s) return rulesText(sid);
-  const p = readJson(paths.projects, {})[s.project_key];
+  const p = readProjects()[s.project_key];
   s.rules_ver = Number(p?.mode_ver) || 0;
   s.lang_ver = Number(readSettings().ver) || 0;
   writeJson(paths.sessions, sessions);
@@ -429,40 +430,153 @@ function rulesUpdate(s, p) {
 function pendingRules(sid) {
   const sessions = readJson(paths.sessions, {});
   const s = sessions[sid];
-  const text = rulesUpdate(s, s && readJson(paths.projects, {})[s.project_key]);
+  const text = rulesUpdate(s, s && readProjects()[s.project_key]);
   if (text) writeJson(paths.sessions, sessions);
   return text;
 }
 
-// Switch a project between solo and team. Bumps mode_ver so each session gets new instructions once.
-// In team mode the given session becomes the lead; members of the previous lead move to it.
-function setMode(key, mode, { lead, leadName } = {}) {
+// --- Teams: projects.json[key].teams = { <name>: { lead, worktree, groups, created } } ---
+// A repo can have several teams. Each has one lead session; its members report only to that lead.
+// A handoff changes only lead; name, worktree and groups stay. mode is 'team' while any team is left.
+
+const TEAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+const teamsOf = (p) => (p && p.teams && typeof p.teams === 'object' ? p.teams : {});
+const hasTeams = (p) => Object.keys(teamsOf(p)).length > 0;
+
+// The team a session leads: { name, team } or null.
+function teamOfLead(p, sid) {
+  if (!sid) return null;
+  for (const [name, team] of Object.entries(teamsOf(p))) if (team.lead === sid) return { name, team };
+  return null;
+}
+
+// The team of a lead or member session: { name, team } or null.
+function teamOfSession(s, p) {
+  if (!s) return null;
+  return teamOfLead(p, s.session_id) || (s.kind === 'member' && s.lead ? teamOfLead(p, s.lead) : null);
+}
+
+// A folder-safe team name from free text ('' if nothing usable is left).
+const teamSlug = (name) => String(name || '').trim().replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 40);
+
+function nextTeamName(p) {
+  for (let i = 1; ; i++) if (!teamsOf(p)[`team${i}`]) return `team${i}`;
+}
+
+// Root of the git worktree that holds dir (dir itself outside git), with forward slashes.
+const worktreeRoot = (dir) => slash(gitIn(['rev-parse', '--show-toplevel'], dir) || dir);
+
+// docs/teams/<name>/ in the team's worktree: the parent of its group folders.
+const teamDir = (team, name) => slash(path.join(team.worktree, 'docs', 'teams', name));
+
+function syncMode(p) {
+  if (hasTeams(p)) p.mode = 'team';
+  else if (p.mode) p.mode = 'solo';
+}
+
+// 0.3.0 settings before M-1b kept one lead per project (lead, lead_name, groups). They become one team named
+// after lead_name, and docs/groups/<g>/ moves to docs/teams/<team>/<g>/ (git mv when tracked).
+// Returns true if p changed.
+function migrateProject(p, sessions) {
+  if (!p || typeof p !== 'object' || (p.teams && typeof p.teams === 'object')) return false;
+  p.teams = {};
+  if (p.mode === 'team' && p.lead) {
+    const name = teamSlug(p.lead_name) || 'team1';
+    const dirs = Object.values(p.groups || {}).map((g) => g && g.dir).filter(Boolean);
+    const base = sessions[p.lead]?.cwd || (dirs[0] && path.dirname(path.dirname(path.dirname(dirs[0])))) || p.cwd;
+    const team = { lead: p.lead, worktree: worktreeRoot(base), groups: {} };
+    if (p.handoff) team.handoff = p.handoff;
+    if (p.last_handoff) team.last_handoff = p.last_handoff;
+    const oldRoots = new Set();
+    for (const [g, conf] of Object.entries(p.groups || {})) {
+      const dir = slash(path.join(teamDir(team, name), g));
+      try {
+        if (conf?.dir && fs.existsSync(conf.dir) && !fs.existsSync(dir)) {
+          moveDir(conf.dir, dir);
+          oldRoots.add(path.dirname(conf.dir));
+        }
+        ensureGroupDir(dir, g);
+      } catch { /* the folder can be fixed by hand; the settings still move */ }
+      team.groups[g] = { ...conf, dir };
+    }
+    // Drop the old docs/groups/ folder if nothing is left in it.
+    for (const d of oldRoots) try { fs.rmdirSync(d); } catch { /* not empty */ }
+    p.teams[name] = team;
+  }
+  for (const k of ['lead', 'lead_name', 'groups', 'handoff', 'last_handoff']) delete p[k];
+  syncMode(p);
+  return true;
+}
+
+// projects.json, with settings from before M-1b moved to teams (saved once, on first read).
+function readProjects() {
   const projects = readJson(paths.projects, {});
+  if (!projects || typeof projects !== 'object') return {};
+  let sessions = null;
+  let changed = false;
+  for (const p of Object.values(projects)) {
+    if (p && typeof p === 'object' && !p.teams) {
+      sessions ||= readJson(paths.sessions, {});
+      if (migrateProject(p, sessions)) changed = true;
+    }
+  }
+  if (changed) writeJson(paths.projects, projects);
+  return projects;
+}
+
+function bumpMode(p) {
+  syncMode(p);
+  p.mode_ver = (Number(p.mode_ver) || 0) + 1;
+  p.rules = { ...DEFAULT_TEAM_RULES, ...(p.rules || {}) };
+}
+
+// Add a team led by the given session. Refuses a name in use and a session that already leads a team.
+// No name: team1, team2, ... Other teams are not touched. Bumps mode_ver (every session gets new instructions once).
+function addTeam(key, name, lead) {
+  const projects = readProjects();
   const p = projects[key];
   if (!p) return { ok: false, error: 'project is not connected' };
   const sessions = readJson(paths.sessions, {});
-  if (mode === 'team' && !sessions[lead]) return { ok: false, error: 'unknown lead session' };
-  const prev = p.lead;
-  p.mode = mode === 'team' ? 'team' : 'solo';
-  p.mode_ver = (Number(p.mode_ver) || 0) + 1;
-  p.rules = { ...DEFAULT_TEAM_RULES, ...(p.rules || {}) };
-  for (const s of Object.values(sessions)) {
-    if (s.project_key === key && s.kind === 'lead' && s.session_id !== lead) delete s.kind;
-  }
-  if (p.mode === 'team') {
-    p.lead = lead;
-    p.lead_name = String(leadName || (prev === lead && p.lead_name) || sessions[lead].name || 'lead').slice(0, 60);
-    sessions[lead].kind = 'lead';
-    for (const s of Object.values(sessions)) {
-      if (prev && prev !== lead && s.kind === 'member' && s.lead === prev) s.lead = lead;
-    }
-  } else {
-    delete p.lead;
-    delete p.lead_name;
-  }
+  if (!sessions[lead]) return { ok: false, error: 'unknown lead session' };
+  p.teams ||= {};
+  const team = name ? teamSlug(name) : nextTeamName(p);
+  if (!TEAM_NAME.test(team)) return { ok: false, error: 'team names use letters, digits, - and _ (up to 40)' };
+  if (p.teams[team]) return { ok: false, code: 409, error: `team ${team} exists in this project; pick another name` };
+  const own = teamOfLead(p, lead);
+  if (own) return { ok: false, code: 409, error: `this session already leads team ${own.name}` };
+  p.teams[team] = { lead, worktree: worktreeRoot(sessions[lead].cwd || p.cwd || process.cwd()), groups: {}, created: new Date().toISOString() };
+  bumpMode(p);
+  sessions[lead].kind = 'lead';
   writeJson(paths.sessions, sessions);
   writeJson(paths.projects, projects);
-  return { ok: true, mode: p.mode, mode_ver: p.mode_ver, lead: p.lead };
+  return { ok: true, team, mode: p.mode, mode_ver: p.mode_ver, lead };
+}
+
+// Remove teams by name (every team when names is empty). Their members become outside sessions; folders stay.
+// The project is solo when no team is left.
+function removeTeams(key, names = []) {
+  const projects = readProjects();
+  const p = projects[key];
+  if (!p) return { ok: false, error: 'project is not connected' };
+  const list = names.length ? names : Object.keys(teamsOf(p));
+  for (const n of list) if (!teamsOf(p)[n]) return { ok: false, code: 404, error: `no team ${n}` };
+  const sessions = readJson(paths.sessions, {});
+  for (const n of list) {
+    const lead = sessions[p.teams[n].lead];
+    if (lead?.kind === 'lead') delete lead.kind;
+    delete p.teams[n];
+  }
+  bumpMode(p);
+  writeJson(paths.sessions, sessions);
+  writeJson(paths.projects, projects);
+  return { ok: true, removed: list, mode: p.mode, mode_ver: p.mode_ver };
+}
+
+// Dashboard switch. team: add a team led by lead (named team or leadName). solo: remove the named team,
+// or every team when none is named.
+function setMode(key, mode, { lead, leadName, team } = {}) {
+  if (mode === 'team') return addTeam(key, team || leadName, lead);
+  return removeTeams(key, team ? [team] : []);
 }
 
 // First-prompt tags:
@@ -667,13 +781,13 @@ function killClaude(pid) {
 }
 
 // New lead `to` takes over from `from` (called from the new lead's first-prompt hook).
-// Moves the project lead and the members, moves the old lead's pending messages, marks the old lead
+// Only the old lead's team changes: its lead and its members move; other teams are untouched. Moves the old lead's pending messages, marks the old lead
 // ended (reason: handoff) and stops its wait command and Claude process. opts.kill / opts.killClaude for tests.
 function performHandoff(from, to, doc, opts = {}) {
   const kill = opts.kill || killPid;
   const stopClaude = opts.killClaude || killClaude;
   const sessions = readJson(paths.sessions, {});
-  const projects = readJson(paths.projects, {});
+  const projects = readProjects();
   const old = sessions[from];
   const me = sessions[to];
   if (!old) return { ok: false, error: `unknown session ${from}` };
@@ -684,14 +798,15 @@ function performHandoff(from, to, doc, opts = {}) {
   if (!p) return { ok: false, error: 'the old lead\'s project is not connected' };
   if (me.project_key !== key) return { ok: false, error: 'the new lead is in a different project' };
 
+  const t = teamOfLead(p, from);
+  if (!t) return { ok: false, error: 'the old session leads no team' };
+  const mine = teamOfLead(p, to);
+  if (mine) return { ok: false, error: `the new lead already leads team ${mine.name}` };
+
   const ts = new Date().toISOString();
-  if (p.mode !== 'team') p.mode_ver = (Number(p.mode_ver) || 0) + 1;
-  p.mode = 'team';
-  p.rules = { ...DEFAULT_TEAM_RULES, ...(p.rules || {}) };
-  p.lead = to;
-  p.lead_name = p.lead_name || old.name || 'lead';
-  p.last_handoff = { from, to, doc, ts };
-  delete p.handoff;
+  t.team.lead = to;
+  t.team.last_handoff = { from, to, doc, ts };
+  delete t.team.handoff;
 
   me.kind = 'lead';
   me.handoff_from = from;
@@ -709,11 +824,13 @@ function performHandoff(from, to, doc, opts = {}) {
   const wp = waitPid(from);
   const waitKilled = wp ? kill(wp) : false;
   const claudeKilled = old.claude_pid ? stopClaude(Number(old.claude_pid)) : false;
-  return { ok: true, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
+  return { ok: true, team: t.name, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
 }
 
-// --- Groups (team mode): docs/groups/<name>/ in the lead's worktree holds a group's memory ---
+// --- Groups (team mode): docs/teams/<team>/<group>/ in the team lead's worktree holds a group's memory ---
 // brief.md (injected into every new member before its task), handoff-NNN.md, notes/.
+// Groups belong to one team: two teams may use the same group name, and one team's upkeep never
+// touches another team's folders.
 
 const GROUP_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const BRIEF_MAX_CHARS = 16000; // about 4000 tokens
@@ -744,22 +861,43 @@ function groupSettings(g) {
   return { ...GROUP_DEFAULTS, ...(g || {}) };
 }
 
-function groupsOf(key) {
-  return readJson(paths.projects, {})[key]?.groups || {};
-}
-
-function createGroup(key, name, leadCwd) {
-  if (!GROUP_NAME.test(String(name || '')) || name.startsWith('_')) return { ok: false, error: 'group names use letters, digits, - and _ (up to 40)' };
-  const projects = readJson(paths.projects, {});
-  const p = projects[key];
-  if (!p) return { ok: false, error: 'project is not connected' };
-  p.groups ||= {};
-  if (p.groups[name]) return { ok: false, error: `group ${name} exists` };
-  const dir = slash(path.join(leadCwd, 'docs', 'groups', name));
+// A group folder with notes/ and a brief template (an existing brief is kept).
+function ensureGroupDir(dir, name) {
   ensureDir(path.join(dir, 'notes'));
   const brief = path.join(dir, 'brief.md');
   if (!fs.existsSync(brief)) fs.writeFileSync(brief, briefTemplate(name));
-  p.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
+}
+
+const badGroupName = (name) => !GROUP_NAME.test(String(name || '')) || String(name).startsWith('_');
+const GROUP_NAME_ERROR = 'group names use letters, digits, - and _ (up to 40)';
+
+// The team's entry in projects (read for writing): { projects, p, team } or { error }.
+function teamFor(key, teamName) {
+  const projects = readProjects();
+  const p = projects[key];
+  if (!p) return { error: 'project is not connected' };
+  const team = teamsOf(p)[teamName];
+  if (!team) return { error: `no team ${teamName}` };
+  team.groups ||= {};
+  if (!team.worktree) team.worktree = worktreeRoot(readJson(paths.sessions, {})[team.lead]?.cwd || p.cwd || process.cwd());
+  return { projects, p, team };
+}
+
+// Members of a team (by its current lead).
+const teamMembers = (sessions, key, team) => Object.values(sessions).filter((s) => s.project_key === key && s.kind === 'member' && s.lead === team.lead);
+
+function groupsOf(key, teamName) {
+  return teamsOf(readProjects()[key])[teamName]?.groups || {};
+}
+
+function createGroup(key, teamName, name) {
+  if (badGroupName(name)) return { ok: false, error: GROUP_NAME_ERROR };
+  const { projects, team, error } = teamFor(key, teamName);
+  if (error) return { ok: false, error };
+  if (team.groups[name]) return { ok: false, error: `group ${name} exists in team ${teamName}` };
+  const dir = slash(path.join(teamDir(team, teamName), name));
+  ensureGroupDir(dir, name);
+  team.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
   writeJson(paths.projects, projects);
   return { ok: true, dir };
 }
@@ -772,33 +910,35 @@ function moveDir(from, to) {
   return 'rename';
 }
 
-function renameGroup(key, name, next) {
-  if (!GROUP_NAME.test(String(next || '')) || next.startsWith('_')) return { ok: false, error: 'group names use letters, digits, - and _ (up to 40)' };
-  const projects = readJson(paths.projects, {});
-  const g = projects[key]?.groups?.[name];
-  if (!g) return { ok: false, error: `no group ${name}` };
-  if (projects[key].groups[next]) return { ok: false, error: `group ${next} exists` };
+function renameGroup(key, teamName, name, next) {
+  if (badGroupName(next)) return { ok: false, error: GROUP_NAME_ERROR };
+  const { projects, team, error } = teamFor(key, teamName);
+  if (error) return { ok: false, error };
+  const g = team.groups[name];
+  if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
+  if (team.groups[next]) return { ok: false, error: `group ${next} exists in team ${teamName}` };
   const dir = slash(path.join(path.dirname(g.dir), next));
   if (fs.existsSync(dir)) return { ok: false, error: `folder exists: ${dir}` };
   let how = 'none';
   if (fs.existsSync(g.dir)) how = moveDir(g.dir, dir);
-  delete projects[key].groups[name];
-  projects[key].groups[next] = { ...g, dir };
+  delete team.groups[name];
+  team.groups[next] = { ...g, dir };
   writeJson(paths.projects, projects);
   const sessions = readJson(paths.sessions, {});
-  for (const s of Object.values(sessions)) if (s.project_key === key && s.group === name) s.group = next;
+  for (const s of teamMembers(sessions, key, team)) if (s.group === name) s.group = next;
   writeJson(paths.sessions, sessions);
   return { ok: true, dir, moved: how };
 }
 
 const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-// Remove a group: its members become unassigned; the folder moves to docs/groups/_archived/<name>-<date>/
+// Remove a group: its members become unassigned; the folder moves to docs/teams/<team>/_archived/<name>-<date>/
 // (purge: deleted instead).
-function deleteGroup(key, name, { purge = false } = {}) {
-  const projects = readJson(paths.projects, {});
-  const g = projects[key]?.groups?.[name];
-  if (!g) return { ok: false, error: `no group ${name}` };
+function deleteGroup(key, teamName, name, { purge = false } = {}) {
+  const { projects, team, error } = teamFor(key, teamName);
+  if (error) return { ok: false, error };
+  const g = team.groups[name];
+  if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
   let folder = null;
   if (fs.existsSync(g.dir)) {
     if (purge) {
@@ -812,10 +952,10 @@ function deleteGroup(key, name, { purge = false } = {}) {
       folder = slash(to);
     }
   }
-  delete projects[key].groups[name];
+  delete team.groups[name];
   writeJson(paths.projects, projects);
   const sessions = readJson(paths.sessions, {});
-  for (const s of Object.values(sessions)) if (s.project_key === key && s.group === name) delete s.group;
+  for (const s of teamMembers(sessions, key, team)) if (s.group === name) delete s.group;
   writeJson(paths.sessions, sessions);
   return { ok: true, folder };
 }
@@ -832,6 +972,25 @@ const latestHandoff = (dir) => {
   const list = handoffs(dir);
   return list.length ? slash(path.join(dir, list[list.length - 1])) : '';
 };
+
+// Create the next handoff-NNN.md in dir and return its path. The file is created exclusively ('wx'), so two
+// members finishing at the same time never get the same number: on a clash the next number is tried.
+function reserveHandoff(dir, header = '') {
+  ensureDir(dir);
+  const list = handoffs(dir);
+  let n = list.length ? Number(list[list.length - 1].match(HANDOFF)[1]) + 1 : 1;
+  for (let tries = 0; tries < 1000; tries++, n++) {
+    const file = path.join(dir, `handoff-${String(n).padStart(3, '0')}.md`);
+    let fd;
+    try { fd = fs.openSync(file, 'wx'); } catch (err) {
+      if (err.code === 'EEXIST') continue;
+      throw err;
+    }
+    try { fs.writeSync(fd, header); } finally { fs.closeSync(fd); }
+    return slash(file);
+  }
+  throw new Error(`could not create a handoff file in ${dir}`);
+}
 
 // Keep the newest keep_handoffs handoffs and drop notes older than notes_days. Only touches the
 // group folder. The lead commits the result. Returns the removed paths.
@@ -861,35 +1020,38 @@ function pruneGroup(g, now = Date.now()) {
 const BRIEF_STALE_COMMITS = Number(process.env.DDASH_BRIEF_STALE_COMMITS) || 20;
 
 // Brief staleness for a team project's groups. When a brief.md changes (new mtime), remember the git HEAD
-// of its worktree; once HEAD is BRIEF_STALE_COMMITS or more commits past that, tell the lead once (until
-// the brief changes again). Called from the Stop hook and team.js spawn. Returns the groups reported.
+// of its worktree; once HEAD is BRIEF_STALE_COMMITS or more commits past that, tell that team's lead once
+// (until the brief changes again). Called from the Stop hook and team.js spawn. Returns the groups reported
+// (as <team>/<group>).
 function checkBriefs(key) {
-  const projects = readJson(paths.projects, {});
+  const projects = readProjects();
   const p = projects[key];
-  if (!p?.groups || p.mode !== 'team' || !p.lead) return [];
+  if (!hasTeams(p)) return [];
   let changed = false;
   const told = [];
-  for (const [name, g] of Object.entries(p.groups)) {
-    let mtime;
-    try { mtime = fs.statSync(path.join(g.dir, 'brief.md')).mtimeMs; } catch { continue; }
-    const head = gitIn(['rev-parse', 'HEAD'], g.dir);
-    if (!head) continue;
-    if (g.brief_mtime !== mtime || !g.brief_head) {
-      Object.assign(g, { brief_mtime: mtime, brief_head: head });
-      delete g.brief_stale_warned;
+  for (const [teamName, team] of Object.entries(p.teams)) {
+    for (const [name, g] of Object.entries(team.groups || {})) {
+      let mtime;
+      try { mtime = fs.statSync(path.join(g.dir, 'brief.md')).mtimeMs; } catch { continue; }
+      const head = gitIn(['rev-parse', 'HEAD'], g.dir);
+      if (!head) continue;
+      if (g.brief_mtime !== mtime || !g.brief_head) {
+        Object.assign(g, { brief_mtime: mtime, brief_head: head });
+        delete g.brief_stale_warned;
+        changed = true;
+        continue;
+      }
+      if (g.brief_stale_warned || g.brief_head === head || !team.lead) continue;
+      const n = Number(gitIn(['rev-list', '--count', `${g.brief_head}..HEAD`], g.dir));
+      if (!(n >= BRIEF_STALE_COMMITS)) continue;
+      deliver(team.lead, {
+        type: 'report', from: name, role: 'ddashboard', status: 'review',
+        title: `brief ${name} may be stale: ${n} commits since it was last updated (${slash(path.join(g.dir, 'brief.md'))})`,
+      });
+      g.brief_stale_warned = head;
       changed = true;
-      continue;
+      told.push(`${teamName}/${name}`);
     }
-    if (g.brief_stale_warned || g.brief_head === head) continue;
-    const n = Number(gitIn(['rev-list', '--count', `${g.brief_head}..HEAD`], g.dir));
-    if (!(n >= BRIEF_STALE_COMMITS)) continue;
-    deliver(p.lead, {
-      type: 'report', from: name, role: 'ddashboard', status: 'review',
-      title: `brief ${name} may be stale: ${n} commits since it was last updated (${slash(path.join(g.dir, 'brief.md'))})`,
-    });
-    g.brief_stale_warned = head;
-    changed = true;
-    told.push(name);
   }
   if (changed) writeJson(paths.projects, projects);
   return told;
@@ -915,11 +1077,11 @@ Latest handoff: ${last ? `${last} (read it before you start)` : 'none yet'}
 // If the brief had to be cut, the lead is told once per brief size.
 function memberStart(sid) {
   const sessions = readJson(paths.sessions, {});
-  const projects = readJson(paths.projects, {});
+  const projects = readProjects();
   const s = sessions[sid];
   if (!s) return rulesText(sid);
   const p = projects[s.project_key];
-  const g = s.group && p?.groups?.[s.group];
+  const g = s.group && teamOfSession(s, p)?.team.groups?.[s.group];
   let head = '';
   if (g) {
     const ctx = groupContext(s.group, g);
@@ -1012,4 +1174,6 @@ module.exports = {
   STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, leadContextNotice,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
   pruneGroup, groupContext, memberStart, BRIEF_STALE_COMMITS, checkBriefs, LANG_NAMES, readSettings, saveSettings,
+  TEAM_NAME, teamsOf, hasTeams, teamOfLead, teamOfSession, teamSlug, worktreeRoot, migrateProject, readProjects,
+  addTeam, removeTeams, teamMembers, ensureGroupDir, reserveHandoff,
 };

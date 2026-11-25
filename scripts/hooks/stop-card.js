@@ -12,7 +12,7 @@ const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole,
+  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -118,7 +118,7 @@ function parseCard(text) {
   const sid = safeId(input.session_id);
   const sessions = readJson(paths.sessions, {});
   if (!sessions[sid]) return; // not a dashboard session
-  const projects = readJson(paths.projects, {});
+  const projects = readProjects();
   const cwd = input.cwd || process.cwd();
   const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
 
@@ -167,8 +167,8 @@ function parseCard(text) {
     sessions[sid].last_title = card.title;
   }
 
-  // Group folder upkeep: keep the newest handoffs, drop old notes (only inside docs/groups/<name>/).
-  const group = sessions[sid].group && projects[sessions[sid].project_key]?.groups?.[sessions[sid].group];
+  // Group folder upkeep: keep the newest handoffs, drop old notes (only inside its own team's docs/teams/<team>/<group>/).
+  const group = sessions[sid].group && teamOfSession(sessions[sid], projects[sessions[sid].project_key])?.team.groups?.[sessions[sid].group];
   if (group) try { pruneGroup(group); } catch { /* best effort */ }
   // Brief staleness (lead and members only): the lead is told once when a brief falls behind HEAD.
   if (['lead', 'member'].includes(teamRole(sessions[sid], projects[sessions[sid].project_key]))) {

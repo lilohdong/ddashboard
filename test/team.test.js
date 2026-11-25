@@ -19,6 +19,19 @@ const team = require(path.join(ROOT, 'scripts', 'team.js'));
 const { paths, readJson, writeJson } = lib;
 
 const KEY = lib.projectKey(CWD);
+const slash = (p) => String(p).replace(/\\/g, '/');
+const project = () => readJson(paths.projects, {})[KEY];
+const teamConf = (name = 'Alpha') => project().teams[name];
+
+// Point the lead (and its team's worktree) at another folder, e.g. a git repo.
+function moveLead(dir, sid = 'L1', name = 'Alpha') {
+  const s = readJson(paths.sessions, {});
+  s[sid].cwd = dir;
+  writeJson(paths.sessions, s);
+  const all = readJson(paths.projects, {});
+  all[KEY].teams[name].worktree = slash(dir);
+  writeJson(paths.projects, all);
+}
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
@@ -31,10 +44,10 @@ function session(sid, extra = {}) {
 function reset({ mode = 'solo', lead, sessions = {} } = {}) {
   fs.rmSync(BOARD, { recursive: true, force: true });
   fs.mkdirSync(BOARD, { recursive: true });
-  // A solo project looks like a 0.2.0 one (no mode fields); team mode was switched on once.
+  // A solo project looks like a 0.2.0 one (no mode fields); team mode was switched on once (one team, Alpha).
   const p = { since: new Date().toISOString(), cwd: CWD };
-  if (mode === 'team') Object.assign(p, { name: 'proj', mode, mode_ver: 1 });
-  if (lead) Object.assign(p, { lead, lead_name: 'Alpha' });
+  if (mode === 'team') Object.assign(p, { name: 'proj', mode, mode_ver: 1, teams: {} });
+  if (lead) p.teams.Alpha = { lead, worktree: slash(CWD), groups: {} };
   writeJson(paths.projects, { [KEY]: p });
   writeJson(paths.sessions, sessions);
   writeJson(paths.serverPid, { pid: process.pid }); // hooks treat the server as running
@@ -106,18 +119,21 @@ test('routeCard: solo mode posts to the board', () => {
 
 test('routeCard: team mode sends member cards to the lead', () => {
   const sessions = { M1: session('M1', { kind: 'member', lead: 'L1' }), L1: session('L1'), O1: session('O1') };
-  const projects = { [KEY]: { mode: 'team', lead: 'L1' } };
+  const projects = { [KEY]: { mode: 'team', teams: { Alpha: { lead: 'L1' } } } };
   assert.deepEqual(lib.routeCard(sessions, projects, 'M1'), { to: 'lead', role: 'member', lead: 'L1' });
   assert.deepEqual(lib.routeCard(sessions, projects, 'L1'), { to: 'board', role: 'lead' });
   assert.deepEqual(lib.routeCard(sessions, projects, 'O1'), { to: 'board', role: 'outside' });
 });
 
 test('routeCard: lead missing falls back to the board', () => {
-  const projects = { [KEY]: { mode: 'team', lead: 'L1' } };
+  const projects = { [KEY]: { mode: 'team', teams: { Alpha: { lead: 'L1' } } } };
   const ended = { M1: session('M1', { kind: 'member', lead: 'L1' }), L1: session('L1', { state: 'ended', ended: 'x' }) };
   assert.deepEqual(lib.routeCard(ended, projects, 'M1'), { to: 'board', role: 'member', lead_missing: true });
-  const gone = { M1: session('M1', { kind: 'member', lead: 'L9' }) };
+  const gone = { M1: session('M1', { kind: 'member', lead: 'L1' }) }; // lead session forgotten
   assert.equal(lib.routeCard(gone, projects, 'M1').lead_missing, true);
+  // A member whose lead leads no team (its team was removed) is outside: straight to the board.
+  const stray = { M1: session('M1', { kind: 'member', lead: 'L9' }) };
+  assert.deepEqual(lib.routeCard(stray, projects, 'M1'), { to: 'board', role: 'outside' });
 });
 
 // --- message formatting ---
@@ -153,12 +169,13 @@ test('rules: solo text unchanged, team texts per role, re-injected once on mode 
   const sessions = readJson(paths.sessions, {});
   const p = readJson(paths.projects, {})[KEY];
   assert.equal(lib.rulesFor(sessions.O1, { mode: 'solo' }), lib.rulesText('O1'));
-  assert.match(lib.rulesFor(sessions.L1, p), /team lead "Alpha"/);
+  assert.match(lib.rulesFor(sessions.L1, p), /lead of team "Alpha"/);
+  assert.match(lib.rulesFor(sessions.L1, p), /docs\/teams\/Alpha\/<g>\//);
   assert.match(lib.rulesFor(sessions.L1, p), /bin\/team\.js" L1/);
   assert.match(lib.rulesFor(sessions.M1, p), /Role: frontend/);
   assert.match(lib.rulesFor(sessions.M1, p), /Don't start a wait command/);
   assert.match(lib.rulesFor({ ...sessions.M1, stay: true }, p), /bin\/wait\.js" M1/);
-  assert.match(lib.rulesFor(sessions.O1, p), /outside the team/);
+  assert.match(lib.rulesFor(sessions.O1, p), /teams: Alpha\). You are outside every team/);
   assert.equal(lib.pendingRules('M1'), ''); // rules_ver === mode_ver
   lib.setMode(KEY, 'solo');
   assert.match(lib.pendingRules('M1'), /mode changed \(now solo\)/);
@@ -168,33 +185,43 @@ test('rules: solo text unchanged, team texts per role, re-injected once on mode 
 test('rules: every role restarts the wait command in the same response; member reports stay short', () => {
   teamFixture();
   const sessions = readJson(paths.sessions, {});
-  const p = { ...readJson(paths.projects, {})[KEY], groups: { front: { dir: 'C:/x/docs/groups/front' } } };
+  const p0 = readJson(paths.projects, {})[KEY];
+  const p = { ...p0, teams: { Alpha: { ...p0.teams.Alpha, groups: { front: { dir: 'C:/x/docs/teams/Alpha/front' } } } } };
   const same = /same response, as parallel tool calls/;
   assert.match(lib.rulesFor(sessions.O1, { mode: 'solo' }), same);
   assert.match(lib.rulesFor(sessions.L1, p), same);
   assert.match(lib.rulesFor(sessions.O1, p), same);
   assert.match(lib.rulesFor({ ...sessions.M1, stay: true }, p), same);
   assert.match(lib.rulesFor(sessions.M1, p), /summary of at most 3 lines: put the evidence in a file/);
-  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /evidence in C:\/x\/docs\/groups\/front\/notes\/ and give the path/);
+  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /evidence in C:\/x\/docs\/teams\/Alpha\/front\/notes\/ and give the path/);
+  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /bin\/team\.js" M1 next-handoff: it creates the next handoff-NNN\.md/);
 });
 
-test('setMode: team with a new lead moves the members, solo clears the lead', () => {
+test('setMode: team adds a team next to the others (no replacing), solo removes teams', () => {
   teamFixture();
-  const r = lib.setMode(KEY, 'team', { lead: 'O1', leadName: 'Beta' });
-  assert.equal(r.ok, true);
+  const r = lib.setMode(KEY, 'team', { lead: 'O1', team: 'Beta' });
+  assert.equal(r.ok, true, r.error);
   const s = readJson(paths.sessions, {});
-  const p = readJson(paths.projects, {})[KEY];
-  assert.equal(p.lead, 'O1');
-  assert.equal(p.lead_name, 'Beta');
+  const p = project();
+  assert.deepEqual(Object.keys(p.teams).sort(), ['Alpha', 'Beta']);
+  assert.equal(p.teams.Alpha.lead, 'L1');
+  assert.equal(p.teams.Beta.lead, 'O1');
+  assert.equal(p.teams.Beta.worktree, slash(CWD));
   assert.equal(p.mode_ver, 2);
   assert.equal(s.O1.kind, 'lead');
-  assert.equal(s.L1.kind, undefined);
-  assert.equal(s.M1.lead, 'O1');
-  lib.setMode(KEY, 'solo');
-  const p2 = readJson(paths.projects, {})[KEY];
-  assert.equal(p2.mode, 'solo');
-  assert.equal(p2.lead, undefined);
+  assert.equal(s.L1.kind, 'lead');
+  assert.equal(s.M1.lead, 'L1'); // members stay with their own lead
+  // A name in use and a session that already leads a team are refused; free text becomes a folder-safe name.
+  assert.match(lib.addTeam(KEY, 'Alpha', 'M1').error, /team Alpha exists/);
+  assert.match(lib.addTeam(KEY, 'Gamma', 'O1').error, /already leads team Beta/);
+  assert.equal(lib.addTeam(KEY, 'my team!', 'M1').team, 'my-team');
+  assert.equal(lib.removeTeams(KEY, ['my-team']).ok, true);
   assert.equal(lib.setMode(KEY, 'team', { lead: 'nobody' }).ok, false);
+  lib.setMode(KEY, 'solo');
+  const p2 = project();
+  assert.equal(p2.mode, 'solo');
+  assert.deepEqual(p2.teams, {});
+  assert.equal(readJson(paths.sessions, {}).L1.kind, undefined);
 });
 
 // --- handoff ---
@@ -214,13 +241,12 @@ test('performHandoff: reassigns lead and members, moves inbox, stops the old lea
       kill: (pid) => { killed.push(pid); return true; },
       killClaude: (pid) => { killed.push(`claude:${pid}`); return true; },
     });
-    assert.deepEqual(r, { ok: true, members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
+    assert.deepEqual(r, { ok: true, team: 'Alpha', members: 1, moved: 1, wait_killed: true, claude_killed: true, claude_pid: 999999 });
   } finally { waiter.kill(); }
   assert.deepEqual(killed, [waiter.pid, 'claude:999999']);
   const s = readJson(paths.sessions, {});
-  const p = readJson(paths.projects, {})[KEY];
-  assert.equal(p.lead, 'L2');
-  assert.equal(p.lead_name, 'Alpha');
+  assert.equal(teamConf().lead, 'L2');
+  assert.equal(teamConf().last_handoff.from, 'L1');
   assert.equal(s.L2.kind, 'lead');
   assert.equal(s.M1.lead, 'L2');
   assert.equal(s.L1.state, 'ended');
@@ -312,7 +338,7 @@ test('UserPromptSubmit: member tag registers the member; replaced lead prompts a
   assert.equal(s.N1.stay, true);
   assert.equal(s.N1.state, 'working');
   // Untagged first prompt in team mode: outside the team.
-  assert.match(runHook('prompt-submit.js', { session_id: 'X1', cwd: CWD, prompt: 'hello' }), /outside the team/);
+  assert.match(runHook('prompt-submit.js', { session_id: 'X1', cwd: CWD, prompt: 'hello' }), /outside every team/);
   // Already registered, mode unchanged: nothing printed.
   assert.equal(runHook('prompt-submit.js', { session_id: 'N1', cwd: CWD, prompt: 'more' }), '');
   const s2 = readJson(paths.sessions, {});
@@ -324,10 +350,10 @@ test('UserPromptSubmit: member tag registers the member; replaced lead prompts a
 test('UserPromptSubmit: handoff tag takes over the team', () => {
   teamFixture(); // L1 has no claude_pid, so nothing real is killed
   const out = runHook('prompt-submit.js', { session_id: 'L2', cwd: CWD, prompt: '[ddash lead-handoff from=L1 doc=h.md] take over' });
-  assert.match(out, /took over as team lead from L1/);
-  assert.match(out, /team lead "Alpha"/);
+  assert.match(out, /took over as lead of team "Alpha" from L1/);
+  assert.match(out, /lead of team "Alpha"/);
   const s = readJson(paths.sessions, {});
-  assert.equal(readJson(paths.projects, {})[KEY].lead, 'L2');
+  assert.equal(teamConf().lead, 'L2');
   assert.equal(s.M1.lead, 'L2');
   assert.equal(s.L1.replaced_by, 'L2');
 });
@@ -414,7 +440,8 @@ test('team.js show and handoff', () => {
   const r = team.main(['L1', 'handoff', doc]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /\[ddash lead-handoff from=L1 doc=.*handoff\.md\]/);
-  assert.equal(readJson(paths.projects, {})[KEY].handoff.from, 'L1');
+  assert.equal(teamConf().handoff.from, 'L1');
+  assert.match(r.out, /members of team Alpha move to it/);
   assert.equal(team.main(['M1', 'handoff', doc]).code, 1); // not the lead
 });
 
@@ -652,7 +679,7 @@ test('server: unresponsive marker and lead context limit in /api/state', async (
 
 // --- groups ---
 
-const groupDir = (name) => path.join(CWD, 'docs', 'groups', name);
+const groupDir = (name, t = 'Alpha') => path.join(CWD, 'docs', 'teams', t, name);
 
 test('parseTag: group attribute', () => {
   assert.equal(lib.parseTag('[ddash role=fe lead=L1 group=front] x').group, 'front');
@@ -675,14 +702,14 @@ test('groups: create, rename (plain), delete to _archived, purge', () => {
   assert.ok(fs.existsSync(path.join(groupDir('web'), 'brief.md')));
   assert.ok(!fs.existsSync(groupDir('front')));
   assert.equal(readJson(paths.sessions, {}).M1.group, 'web');
-  assert.equal(readJson(paths.projects, {})[KEY].groups.web.dir, groupDir('web').replace(/\\/g, '/'));
+  assert.equal(teamConf().groups.web.dir, slash(groupDir('web')));
   assert.match(team.main(['L1', 'group', 'list']).out, /^web .* members 1\/1/);
   assert.equal(team.main(['L1', 'group', 'delete', 'web']).code, 0);
-  const archived = fs.readdirSync(path.join(CWD, 'docs', 'groups', '_archived'));
+  const archived = fs.readdirSync(path.join(CWD, 'docs', 'teams', 'Alpha', '_archived'));
   assert.equal(archived.length, 1);
   assert.match(archived[0], /^web-\d{8}$/);
   assert.equal(readJson(paths.sessions, {}).M1.group, undefined);
-  assert.deepEqual(readJson(paths.projects, {})[KEY].groups, {});
+  assert.deepEqual(teamConf().groups, {});
   team.main(['L1', 'group', 'create', 'tmp']);
   assert.equal(team.main(['L1', 'group', 'delete', 'tmp', '--purge']).code, 0);
   assert.ok(!fs.existsSync(groupDir('tmp')));
@@ -695,14 +722,12 @@ test('groups: rename uses git mv when the folder is tracked', () => {
   try {
     git('init', '-q');
     teamFixture();
-    const s = readJson(paths.sessions, {});
-    s.L1.cwd = repo;
-    writeJson(paths.sessions, s);
+    moveLead(repo);
     assert.equal(team.main(['L1', 'group', 'create', 'api']).code, 0);
     git('add', '.');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'groups');
     assert.match(team.main(['L1', 'group', 'rename', 'api', 'backend']).out, /git mv/);
-    assert.match(git('status', '--porcelain').stdout, /^R {2}docs\/groups\/api\/brief\.md -> docs\/groups\/backend\/brief\.md/m);
+    assert.match(git('status', '--porcelain').stdout, /^R {2}docs\/teams\/Alpha\/api\/brief\.md -> docs\/teams\/Alpha\/backend\/brief\.md/m);
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
@@ -717,12 +742,10 @@ test('groups: the lead is told once when a brief falls behind HEAD', () => {
     git('init', '-q');
     commit(1);
     teamFixture();
-    const s = readJson(paths.sessions, {});
-    s.L1.cwd = repo;
-    writeJson(paths.sessions, s);
+    moveLead(repo);
     team.main(['L1', 'group', 'create', 'api']);
     stop(); // records the brief's HEAD
-    const g = readJson(paths.projects, {})[KEY].groups.api;
+    const g = teamConf().groups.api;
     assert.equal(g.brief_head, git('rev-parse', 'HEAD').stdout.trim());
     commit(2);
     stop();
@@ -733,11 +756,11 @@ test('groups: the lead is told once when a brief falls behind HEAD', () => {
     assert.equal(notes().length, 1);
     assert.match(notes()[0].title, /^brief api may be stale: 3 commits since it was last updated \(.*brief\.md\)$/);
     // Editing the brief resets it.
-    const brief = path.join(repo, 'docs', 'groups', 'api', 'brief.md');
+    const brief = path.join(repo, 'docs', 'teams', 'Alpha', 'api', 'brief.md');
     fs.appendFileSync(brief, '\nupdated');
     fs.utimesSync(brief, new Date(), new Date(Date.now() + 5000));
     stop();
-    const g2 = readJson(paths.projects, {})[KEY].groups.api;
+    const g2 = teamConf().groups.api;
     assert.equal(g2.brief_stale_warned, undefined);
     assert.equal(g2.brief_head, git('rev-parse', 'HEAD').stdout.trim());
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
@@ -788,14 +811,14 @@ test('groups: a spawned member gets the brief at SessionStart, before its task; 
   assert.ok(start.startsWith('[ddashboard] Group "front" brief'), start);
   assert.ok(start.indexOf('Scope: the UI') < start.indexOf('You are a team member'));
   assert.match(start, /Latest handoff: .*handoff-001\.md/);
-  assert.match(start, /write the next handoff-NNN\.md/);
+  assert.match(start, /next-handoff: it creates the next handoff-NNN\.md/);
   // The tag prompt then registers it without repeating anything.
   assert.equal(runHook('prompt-submit.js', { session_id: sid, cwd: CWD, prompt: got.input }), '');
   const s = readJson(paths.sessions, {})[sid];
   assert.equal(s.pending, undefined);
   assert.equal(s.group, 'front');
   // Two members of the group get the same prefix (the part before their own instructions).
-  const ctx = lib.groupContext('front', readJson(paths.projects, {})[KEY].groups.front);
+  const ctx = lib.groupContext('front', teamConf().groups.front);
   assert.ok(start.startsWith(ctx.text));
   // Too long: cut, and the lead is told once.
   fs.writeFileSync(path.join(dir, 'brief.md'), 'x'.repeat(lib.BRIEF_MAX_CHARS + 50));
@@ -822,7 +845,9 @@ test('server: /api/groups and spawn with a group', async () => {
     assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'qa' })).status, 400);
     assert.equal((await post('/api/groups', { project: 'proj', action: 'rename', name: 'qa', new_name: 'test' })).status, 200);
     const st = await (await fetch(`${base}/api/state`)).json();
-    assert.deepEqual(Object.keys(st.teams.proj.groups), ['test']);
+    assert.deepEqual(Object.keys(st.teams.proj.teams.Alpha.groups), ['test']);
+    assert.equal(st.sessions.L1.team_name, 'Alpha');
+    assert.equal(st.sessions.M1.team_name, 'Alpha');
     const r = await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'check', group: 'test' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.match((await waitFor(process.env.FAKE_OUT)).input, / group=test\] check$/);
@@ -834,6 +859,235 @@ test('server: /api/groups and spawn with a group', async () => {
     writeJson(paths.sessions, s);
     assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'z' })).status, 409);
   });
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+// --- several teams per repo (M-1b) ---
+
+// Alpha (lead L1, member M1 frontend) and Beta (lead L2, member M2 backend); O1 is in no team.
+function twoTeams() {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.L2 = session('L2', { rules_ver: 1 });
+  s.M2 = session('M2', { kind: 'member', role: 'backend', lead: 'L2', rules_ver: 1 });
+  writeJson(paths.sessions, s);
+  assert.equal(lib.addTeam(KEY, 'Beta', 'L2').ok, true);
+}
+
+test('M-1b: two teams run side by side; members report only to their own lead', () => {
+  twoTeams();
+  const p = project();
+  const s = readJson(paths.sessions, {});
+  assert.equal(p.mode, 'team');
+  assert.equal(lib.teamRole(s.L1, p), 'lead');
+  assert.equal(lib.teamRole(s.L2, p), 'lead');
+  assert.equal(lib.teamRole(s.M2, p), 'member');
+  assert.equal(lib.teamRole(s.O1, p), 'outside');
+  assert.match(lib.rulesFor(s.L2, p), /lead of team "Beta"/);
+  assert.match(lib.rulesFor(s.O1, p), /teams: Alpha, Beta\)/);
+  runHook('stop-card.js', { session_id: 'M1', cwd: CWD, last_assistant_message: cardText({ title: 'from M1' }) });
+  runHook('stop-card.js', { session_id: 'M2', cwd: CWD, last_assistant_message: cardText({ title: 'from M2' }) });
+  runHook('stop-card.js', { session_id: 'O1', cwd: CWD, last_assistant_message: cardText({ title: 'from O1' }) });
+  assert.deepEqual(inbox('L1').map((m) => m.title), ['from M1']);
+  assert.deepEqual(inbox('L2').map((m) => m.title), ['from M2']);
+  const via = Object.fromEntries(allCards().map((c) => [c.title, c.via_lead]));
+  assert.deepEqual(via, { 'from M1': 'L1', 'from M2': 'L2', 'from O1': undefined });
+  // T list / send see only the lead's own members.
+  const list = team.main(['L1', 'list']).out;
+  assert.match(list, /^M1 /m);
+  assert.doesNotMatch(list, /M2/);
+  assert.equal(team.main(['L1', 'send', 'M2', 'hi']).code, 1);
+  assert.equal(team.main(['L1', 'send', 'backend', 'hi']).code, 1);
+  // "/ddashboard:dashboard team <name>" adds a team and refuses a name in use.
+  assert.match(runHook('prompt-submit.js', { session_id: 'O1', cwd: CWD, prompt: '/ddashboard:dashboard team Beta' }), /No team was added: team Beta exists/);
+  assert.equal(teamConf('Beta').lead, 'L2');
+  const out = runHook('prompt-submit.js', { session_id: 'O1', cwd: CWD, prompt: '/ddashboard:dashboard team Gamma' });
+  assert.match(out, /Team "Gamma" was added to this project; this session is its lead\. Other teams are unchanged/);
+  assert.match(out, /lead of team "Gamma"/);
+  assert.deepEqual(Object.keys(project().teams).sort(), ['Alpha', 'Beta', 'Gamma']);
+  assert.equal(teamConf('Alpha').lead, 'L1');
+  assert.equal(readJson(paths.sessions, {}).M1.lead, 'L1');
+});
+
+test('M-1b: two teams can use the same group name; upkeep stays inside each team', () => {
+  twoTeams();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  assert.equal(team.main(['L1', 'group', 'create', 'front']).code, 0);
+  assert.equal(team.main(['L2', 'group', 'create', 'front']).code, 0);
+  const a = groupDir('front', 'Alpha');
+  const b = groupDir('front', 'Beta');
+  assert.equal(teamConf('Alpha').groups.front.dir, slash(a));
+  assert.equal(teamConf('Beta').groups.front.dir, slash(b));
+  assert.ok(fs.existsSync(path.join(a, 'brief.md')) && fs.existsSync(path.join(b, 'brief.md')));
+  const s = readJson(paths.sessions, {});
+  s.M1.group = 'front';
+  s.M2.group = 'front';
+  writeJson(paths.sessions, s);
+  fs.writeFileSync(path.join(b, 'brief.md'), 'Beta brief');
+  assert.match(lib.memberStart('M2'), /Beta brief/);
+  for (const n of [1, 2, 3, 4, 5]) for (const d of [a, b]) fs.writeFileSync(path.join(d, `handoff-00${n}.md`), `h${n}`);
+  // An Alpha member's Stop hook prunes only Alpha's folder.
+  runHook('stop-card.js', { session_id: 'M1', cwd: CWD, last_assistant_message: '' });
+  assert.equal(lib.handoffs(a).length, 3);
+  assert.equal(lib.handoffs(b).length, 5);
+  assert.match(team.main(['L2', 'group', 'list']).out, /^front .*Beta\/front +members 1\/1/);
+  // Rename and delete --purge in Alpha leave Beta's group, folder and members alone.
+  assert.equal(team.main(['L1', 'group', 'rename', 'front', 'web']).code, 0);
+  const s2 = readJson(paths.sessions, {});
+  assert.equal(s2.M1.group, 'web');
+  assert.equal(s2.M2.group, 'front');
+  assert.equal(team.main(['L1', 'group', 'delete', 'web', '--purge']).code, 0);
+  assert.ok(!fs.existsSync(groupDir('web', 'Alpha')));
+  assert.equal(lib.handoffs(b).length, 5);
+  assert.ok(teamConf('Beta').groups.front);
+  assert.equal(readJson(paths.sessions, {}).M2.group, 'front');
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('M-1b: a handoff moves only its own team', () => {
+  twoTeams();
+  const s = readJson(paths.sessions, {});
+  s.L3 = session('L3');
+  writeJson(paths.sessions, s);
+  const worktree = teamConf('Alpha').worktree;
+  const r = lib.performHandoff('L1', 'L3', '', { kill: () => true, killClaude: () => false });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.team, 'Alpha');
+  assert.equal(r.members, 1);
+  const s2 = readJson(paths.sessions, {});
+  assert.equal(teamConf('Alpha').lead, 'L3');
+  assert.equal(teamConf('Alpha').worktree, worktree); // name, worktree and groups stay
+  assert.equal(teamConf('Beta').lead, 'L2');
+  assert.equal(s2.M1.lead, 'L3');
+  assert.equal(s2.M2.lead, 'L2');
+  assert.equal(s2.L2.kind, 'lead');
+  assert.equal(s2.L2.replaced_by, undefined);
+  // A session that leads a team cannot take over another one; a session that leads none cannot hand off.
+  assert.match(lib.performHandoff('L3', 'L2', '').error, /already leads team Beta/);
+  assert.match(lib.performHandoff('O1', 'M1', '').error, /leads no team/);
+});
+
+test('M-1b: removing a team leaves the others; the project is solo when no team is left', async () => {
+  twoTeams();
+  // "solo" from a lead removes only its team.
+  const out = runHook('prompt-submit.js', { session_id: 'L1', cwd: CWD, prompt: '/ddashboard:dashboard solo' });
+  assert.match(out, /Team "Alpha" was removed; this session posts its own cards\. Other teams are unchanged/);
+  assert.deepEqual(Object.keys(project().teams), ['Beta']);
+  assert.equal(project().mode, 'team');
+  // Its former members post straight to the dashboard; Beta still reports to its lead.
+  runHook('stop-card.js', { session_id: 'M1', cwd: CWD, last_assistant_message: cardText({ title: 'after' }) });
+  assert.equal(allCards()[0].via_lead, undefined);
+  assert.equal(inboxFiles('L1').length, 0);
+  assert.equal(lib.teamRole(readJson(paths.sessions, {}).M1, project()), 'outside');
+  // "solo" from a session that leads no team changes nothing.
+  assert.match(runHook('prompt-submit.js', { session_id: 'O1', cwd: CWD, prompt: '/ddashboard:dashboard solo' }), /leads no team, so nothing changed/);
+  assert.deepEqual(Object.keys(project().teams), ['Beta']);
+  // (Turning the dashboard on above renamed the project after its folder, so the API is called with its key.)
+  await withServer(async (post, base) => {
+    assert.equal((await post('/api/mode', { project: KEY, mode: 'solo', team: 'Nope' })).status, 404);
+    // The dashboard removes a team by name; the last one makes the project solo.
+    assert.equal((await post('/api/mode', { project: KEY, mode: 'solo', team: 'Beta' })).status, 200);
+    assert.equal(project().mode, 'solo');
+    assert.deepEqual(project().teams, {});
+    // It adds teams too, and refuses a name in use.
+    assert.equal((await post('/api/mode', { project: KEY, mode: 'team', lead: 'L1', team: 'Alpha' })).status, 200);
+    assert.equal((await post('/api/mode', { project: KEY, mode: 'team', lead: 'O1', team: 'Alpha' })).status, 409);
+    assert.equal((await post('/api/mode', { project: KEY, mode: 'team', lead: 'L2', team: 'Beta' })).status, 200);
+    const st = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(Object.keys(Object.values(st.teams)[0].teams).sort(), ['Alpha', 'Beta']);
+    assert.equal(Object.values(st.teams)[0].teams.Beta.lead, 'L2');
+    assert.equal(st.sessions.M2.team_name, 'Beta');
+    // With several teams, /api/groups needs the team.
+    assert.equal((await post('/api/groups', { project: KEY, action: 'create', name: 'g' })).status, 400);
+    assert.equal((await post('/api/groups', { project: KEY, team: 'Beta', action: 'create', name: 'g' })).status, 200);
+    assert.ok(teamConf('Beta').groups.g);
+    assert.equal(teamConf('Alpha').groups.g, undefined);
+  });
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('M-1b: settings and group folders from before teams move on first read (git mv when tracked)', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-repo-'));
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+  try {
+    git('init', '-q');
+    const old = path.join(repo, 'docs', 'groups', 'front');
+    fs.mkdirSync(path.join(old, 'notes'), { recursive: true });
+    fs.writeFileSync(path.join(old, 'brief.md'), 'old brief');
+    fs.writeFileSync(path.join(old, 'handoff-001.md'), 'h1');
+    git('add', '.');
+    git('commit', '-qm', 'groups');
+    reset({ sessions: { L1: session('L1', { kind: 'lead', cwd: repo }), M1: session('M1', { kind: 'member', lead: 'L1', group: 'front' }) } });
+    writeJson(paths.projects, {
+      [KEY]: {
+        since: 'x', cwd: CWD, name: 'proj', mode: 'team', mode_ver: 3, lead: 'L1', lead_name: 'Alpha Team',
+        groups: { front: { dir: slash(old), created: 'x', keep_handoffs: 5 } }, handoff: { from: 'L1', doc: 'd.md' },
+      },
+    });
+    const p = lib.readProjects()[KEY];
+    assert.deepEqual(Object.keys(p.teams), ['Alpha-Team']);
+    const t = p.teams['Alpha-Team'];
+    assert.equal(t.lead, 'L1');
+    assert.equal(t.worktree.toLowerCase(), slash(repo).toLowerCase());
+    assert.equal(t.groups.front.dir, slash(path.join(t.worktree, 'docs', 'teams', 'Alpha-Team', 'front')));
+    assert.equal(t.groups.front.keep_handoffs, 5);
+    assert.equal(t.handoff.from, 'L1');
+    for (const k of ['lead', 'lead_name', 'groups', 'handoff']) assert.equal(p[k], undefined, k);
+    assert.equal(p.mode, 'team');
+    assert.equal(p.mode_ver, 3);
+    // Saved once; the folder moved with git mv and the empty docs/groups/ is gone.
+    assert.ok(readJson(paths.projects, {})[KEY].teams['Alpha-Team']);
+    assert.equal(fs.readFileSync(path.join(t.groups.front.dir, 'brief.md'), 'utf8'), 'old brief');
+    assert.ok(!fs.existsSync(path.join(repo, 'docs', 'groups')));
+    assert.match(git('status', '--porcelain').stdout, /^R {2}docs\/groups\/front\/brief\.md -> docs\/teams\/Alpha-Team\/front\/brief\.md/m);
+    const s = readJson(paths.sessions, {});
+    assert.equal(lib.teamRole(s.M1, p), 'member');
+    assert.match(lib.memberStart('M1'), /old brief/);
+    // A second read changes nothing.
+    const before = fs.readFileSync(paths.projects, 'utf8');
+    lib.readProjects();
+    assert.equal(fs.readFileSync(paths.projects, 'utf8'), before);
+    // A solo project from 0.2.0 gets an empty team list and stays solo.
+    writeJson(paths.projects, { [KEY]: { since: 'x', cwd: CWD } });
+    const solo = lib.readProjects()[KEY];
+    assert.deepEqual(solo.teams, {});
+    assert.equal(solo.mode, undefined);
+    assert.equal(lib.teamRole(s.L1, solo), 'solo');
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('M-1b: handoff numbers never collide (exclusive create, next number on a clash)', async () => {
+  const dir = path.join(BOARD, 'hf');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'handoff-001.md'), 'h1');
+  fs.writeFileSync(path.join(dir, 'handoff-002.md'), 'h2');
+  assert.equal(path.basename(lib.reserveHandoff(dir)), 'handoff-003.md');
+  // Eight members finishing at once each get their own file.
+  const code = `const lib = require(${JSON.stringify(path.join(ROOT, 'scripts', 'lib.js'))}); console.log(lib.reserveHandoff(process.argv[1]));`;
+  const run = () => new Promise((resolve) => {
+    const c = spawn(process.execPath, ['-e', code, dir], { env: process.env });
+    let out = '';
+    c.stdout.on('data', (d) => (out += d));
+    c.on('close', () => resolve(out.trim()));
+  });
+  const got = await Promise.all(Array.from({ length: 8 }, run));
+  assert.equal(new Set(got).size, 8, got.join('\n'));
+  assert.ok(got.every((f) => /handoff-0(0[4-9]|1[01])\.md$/.test(f)), got.join('\n'));
+  assert.equal(lib.handoffs(dir).length, 11);
+  // next-handoff: a member gets a file in its own group, a lead names one of its groups.
+  teamFixture();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  team.main(['L1', 'group', 'create', 'front']);
+  const s = readJson(paths.sessions, {});
+  s.M1.group = 'front';
+  writeJson(paths.sessions, s);
+  const r = team.main(['M1', 'next-handoff']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.out, slash(path.join(groupDir('front'), 'handoff-001.md')));
+  assert.match(fs.readFileSync(r.out, 'utf8'), /^# front handoff/);
+  assert.match(team.main(['L1', 'next-handoff', 'front']).out, /handoff-002\.md$/);
+  assert.equal(team.main(['L1', 'next-handoff']).code, 1);
+  assert.equal(team.main(['O1', 'next-handoff']).code, 1);
   fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
 });
 

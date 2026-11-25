@@ -70,6 +70,9 @@
   .ghead .gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ghead .gname.unassigned { font-weight: 400; font-style: italic; }
   .ghead .sess-act { margin-top: 0; }
+  .thead { display: flex; align-items: center; gap: 4px; padding: 6px 8px 2px 14px; font-size: 12px; font-weight: 700; color: var(--accent); }
+  .thead .tname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thead .sess-act { margin-top: 0; }
   .side-act.depth2, .spawn-form.depth2 { padding-left: 46px; }
   .group-del { margin: 2px 8px 6px 30px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; display: grid; gap: 6px; }
   .group-del label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
@@ -215,7 +218,7 @@ let filter = store.get('filter', 'all');
 let showEnded = store.get('showEnded', false);
 let showReports = store.get('showReports', false); // team mode: also show member reports (dimmed)
 let spawnFor = null; // "<lead sid>|<group>" whose "+ member" form is open
-let groupDel = null; // { project, name } whose delete confirmation is open
+let groupDel = null; // { project, team, name } whose delete confirmation is open
 let spawnDraft = { role: '', model: '', stay: false, task: '' };
 let drafts = {};
 let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archived_count: 0 };
@@ -324,48 +327,58 @@ const teams = () => state.teams || {};
 // A member of a live lead stays listed under it even when its own run has ended.
 const underLead = (s) => s.team === 'member' && !s.lead_missing;
 
-// Sidebar order in team mode: each lead followed by its members (indented), then everyone else.
-// Rows: { s, depth } sessions, { ghead } group headers, { spawn } "+ member", { gtools } "+ group".
-// With groups: lead > group > members, then "unassigned" for members without a (known) group.
-function teamOrder(list, cmp, groupNames) {
+// Sidebar order in team mode: project > team > its lead > groups > members, then everyone else.
+// Rows: { thead } team headers, { s, depth } sessions, { ghead } group headers, { spawn } "+ member",
+// { gtools } "+ group". Groups and "+ member" belong to one team; "unassigned" holds members without a (known) group.
+function teamOrder(list, cmp, tm) {
   const byLead = {};
   for (const s of list) if (underLead(s)) (byLead[s.lead] ||= []).push(s);
   const out = [];
-  for (const l of list.filter((s) => s.team === 'lead').sort(cmp)) {
+  for (const team of Object.keys(tm.teams || {}).sort()) {
+    const conf = tm.teams[team];
+    const l = list.find((s) => s.session_id === conf.lead);
+    out.push({ thead: team, lead: conf.lead });
+    if (!l) continue; // lead hidden (ended) or forgotten
     const live = l.view !== 'ended';
     const members = (byLead[l.session_id] || []).sort(cmp);
     delete byLead[l.session_id];
+    const groupNames = Object.keys(conf.groups || {}).sort();
     out.push({ s: l, depth: 0 });
     if (!groupNames.length) {
       for (const m of members) out.push({ s: m, depth: 1 });
       if (live) out.push({ spawn: l.session_id, group: '', depth: 1 });
-      if (live) out.push({ gtools: l.session_id });
+      if (live) out.push({ gtools: team });
       continue;
     }
     for (const g of groupNames) {
       const ms = members.filter((m) => m.group === g);
-      out.push({ ghead: g, lead: l.session_id, count: ms.length, live });
+      out.push({ ghead: g, team, count: ms.length, live });
       for (const m of ms) out.push({ s: m, depth: 2 });
       if (live) out.push({ spawn: l.session_id, group: g, depth: 2 });
     }
     const rest = members.filter((m) => !groupNames.includes(m.group));
-    out.push({ ghead: '', lead: l.session_id, count: rest.length, live });
+    out.push({ ghead: '', team, count: rest.length, live });
     for (const m of rest) out.push({ s: m, depth: 2 });
     if (live) out.push({ spawn: l.session_id, group: '', depth: 2 });
-    if (live) out.push({ gtools: l.session_id });
+    if (live) out.push({ gtools: team });
   }
   for (const ms of Object.values(byLead)) for (const m of ms.sort(cmp)) out.push({ s: m, depth: 1 });
   for (const s of list.filter((x) => x.team !== 'lead' && !underLead(x)).sort(cmp)) out.push({ s, depth: 0 });
   return out;
 }
 
+// Team header: its name and "remove team" (members of a removed team post to the dashboard themselves).
+function teamHeadHtml(r, p) {
+  return `<div class="thead"><span class="tname">${esc(t('team.label', { name: r.thead }))}</span><button class="sess-act" data-team-remove="${esc(r.thead)}" data-project="${esc(p)}" title="${esc(t('team.removeTitle'))}">${esc(t('team.remove'))}</button></div>`;
+}
+
 function groupHeadHtml(r, p) {
   if (!r.ghead) return `<div class="ghead"><span class="gname unassigned">${esc(t('group.unassigned'))}</span><span>${r.count}</span></div>`;
-  const acts = r.live ? `<button class="sess-act" data-group-rename="${esc(r.ghead)}" data-project="${esc(p)}" title="${esc(t('group.renameTitle'))}">${esc(t('group.rename'))}</button><button class="sess-act" data-group-del="${esc(r.ghead)}" data-project="${esc(p)}" title="${esc(t('group.deleteTitle'))}">${esc(t('group.delete'))}</button>` : '';
-  const dir = teams()[p]?.groups?.[r.ghead]?.dir || '';
+  const acts = r.live ? `<button class="sess-act" data-group-rename="${esc(r.ghead)}" data-team="${esc(r.team)}" data-project="${esc(p)}" title="${esc(t('group.renameTitle'))}">${esc(t('group.rename'))}</button><button class="sess-act" data-group-del="${esc(r.ghead)}" data-team="${esc(r.team)}" data-project="${esc(p)}" title="${esc(t('group.deleteTitle'))}">${esc(t('group.delete'))}</button>` : '';
+  const dir = teams()[p]?.teams?.[r.team]?.groups?.[r.ghead]?.dir || '';
   let html = `<div class="ghead" title="${esc(dir)}"><span class="gname">${esc(r.ghead)}</span><span>${r.count}</span>${acts}</div>`;
-  if (groupDel && groupDel.project === p && groupDel.name === r.ghead) {
-    html += `<div class="group-del">${esc(t('group.deleteAsk', { name: r.ghead }))}
+  if (groupDel && groupDel.project === p && groupDel.team === r.team && groupDel.name === r.ghead) {
+    html += `<div class="group-del">${esc(t('group.deleteAsk', { name: r.ghead, team: r.team }))}
       <label><input type="checkbox" data-group-purge> ${esc(t('group.purge'))}</label>
       <div class="row"><button class="danger" data-group-del-ok>${esc(t('btn.delete'))}</button><button data-group-del-cancel>${esc(t('btn.cancel'))}</button></div>
     </div>`;
@@ -400,21 +413,24 @@ function sessAct(s) {
   return '';
 }
 
+// The project's mode (solo, or how many teams), "+ team" with each live session that leads no team, and
+// "solo" to remove every team. Teams are added, never replaced; one team is removed from its header.
 function modeSelect(p) {
   const tm = teams()[p];
   if (!tm) return '';
+  const leads = new Set(Object.values(tm.teams || {}).map((x) => x.lead));
   // Lead candidates: live sessions, newest first, labelled so same-named sessions can be told apart.
-  // Sessions not seen for stale_min minutes go into a "stale" group. Only the current lead is ever preselected.
-  const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended')
+  // Sessions not seen for stale_min minutes go into a "stale" group.
+  const live = Object.values(state.sessions).filter((s) => s.project === p && s.view !== 'ended' && !leads.has(s.session_id) && s.team !== 'member')
     .sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen)));
-  const value = tm.mode === 'team' ? `team:${tm.lead}` : 'solo';
-  const opt = (v, label) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`;
-  const label = (s) => `${t('mode.team')} · ${s.name} · ${shortId(s.session_id)} · ${ago(s.last_seen)}`;
+  const n = Object.keys(tm.teams || {}).length;
+  const opt = (v, label, selected = false) => `<option value="${esc(v)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
+  const label = (s) => `${t('mode.addTeam')} · ${s.name} · ${shortId(s.session_id)} · ${ago(s.last_seen)}`;
   const fresh = live.filter((s) => !stale(s));
   const old = live.filter(stale);
-  let html = opt('solo', t('mode.solo')) + fresh.map((s) => opt(`team:${s.session_id}`, label(s))).join('');
+  let html = opt('', n ? t('mode.teams', { n }) : t('mode.solo'), true) + fresh.map((s) => opt(`team:${s.session_id}`, label(s))).join('');
   if (old.length) html += `<optgroup label="${esc(t('mode.stale', { n: staleMin() }))}">${old.map((s) => opt(`team:${s.session_id}`, label(s))).join('')}</optgroup>`;
-  if (tm.mode === 'team' && !live.some((s) => s.session_id === tm.lead)) html += opt(value, `${t('mode.team')} · ${tm.lead_name || t('tag.lead')} · ${shortId(tm.lead || '')} ${t('mode.ended')}`);
+  if (n) html += opt('solo', t('mode.soloAll'));
   return `<select class="mode-sel" data-mode-key="${esc(tm.key)}" data-project="${esc(p)}" title="${esc(t('mode.title'))}">${html}</select>`;
 }
 
@@ -423,7 +439,7 @@ function sessTags(s, tm) {
   if (s.team === 'lead') {
     const limit = num(state.lead_context_limit) || 150000;
     const over = num(s.last_context) > limit ? ` <span class="tag warn" title="${esc(t('tag.handoffTitle', { n: fullTok(limit) }))}">${esc(t('tag.handoff'))}</span>` : '';
-    return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${tm.lead_name ? ` · ${esc(tm.lead_name)}` : ''}</span>${over}`;
+    return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${s.team_name ? ` · ${esc(s.team_name)}` : ''}</span>${over}`;
   }
   if (s.team === 'member') return ` <span class="tag" title="${esc(t('tag.roleTitle'))}">${esc(s.role || t('tag.member'))}</span>${s.lead_missing ? ` <span class="tag warn" title="${esc(t('tag.leadMissingTitle'))}">${esc(t('tag.leadMissing'))}</span>` : ''}`;
   return ` <span class="tag" title="${esc(t('tag.outsideTitle'))}">${esc(t('tag.outside'))}</span>`;
@@ -450,8 +466,7 @@ function renderSide() {
   for (const p of names) {
     const cmp = (a, b) => order[a.view] - order[b.view] || String(a.name).localeCompare(String(b.name));
     const tm = teams()[p];
-    const groupNames = Object.keys(tm?.groups || {}).sort();
-    const list = tm?.mode === 'team' ? teamOrder(groups[p], cmp, groupNames) : groups[p].sort(cmp).map((s) => ({ s, depth: 0 }));
+    const list = tm?.mode === 'team' ? teamOrder(groups[p], cmp, tm) : groups[p].sort(cmp).map((s) => ({ s, depth: 0 }));
     const sessRows = list.filter((r) => r.s);
     const pu = sessRows.filter((r) => urgent[r.s.session_id]).length;
     const nameCount = {};
@@ -463,9 +478,10 @@ function renderSide() {
         ${modeSelect(p)}
       </div>
       ${list.map((r) => {
+        if (r.thead != null) return teamHeadHtml(r, p);
         if (r.ghead != null) return groupHeadHtml(r, p);
         if (r.spawn) return spawnHtml(r.spawn, r.group, r.depth);
-        if (r.gtools) return `<button class="nav side-act" data-group-add="${esc(p)}" title="${esc(t('group.addTitle'))}">${esc(t('group.add'))}</button>`;
+        if (r.gtools) return `<button class="nav side-act" data-group-add="${esc(p)}" data-team="${esc(r.gtools)}" title="${esc(t('group.addTitle', { team: r.gtools }))}">${esc(t('group.add'))}</button>`;
         const s = r.s;
         return `
         <div class="sess-row">
@@ -676,28 +692,34 @@ async function sideAction(e) {
     await post('/api/sessions/forget', { project: clear, ended: true });
     return true;
   }
-  const add = el.closest('[data-group-add]')?.dataset.groupAdd;
-  if (add) {
-    const name = prompt(t('group.newPrompt'));
+  const rm = el.closest('[data-team-remove]');
+  if (rm) {
+    if (!confirm(t('team.confirmRemove', { team: rm.dataset.teamRemove, project: rm.dataset.project }))) return false;
+    await post('/api/mode', { project: rm.dataset.project, mode: 'solo', team: rm.dataset.teamRemove });
+    return true;
+  }
+  const addEl = el.closest('[data-group-add]');
+  if (addEl) {
+    const name = prompt(t('group.newPrompt', { team: addEl.dataset.team }));
     if (!name) return false;
-    await post('/api/groups', { project: add, action: 'create', name: name.trim() });
+    await post('/api/groups', { project: addEl.dataset.groupAdd, team: addEl.dataset.team, action: 'create', name: name.trim() });
     return true;
   }
   const ren = el.closest('[data-group-rename]');
   if (ren) {
     const next = prompt(t('group.renamePrompt', { name: ren.dataset.groupRename }), ren.dataset.groupRename);
     if (!next || next.trim() === ren.dataset.groupRename) return false;
-    await post('/api/groups', { project: ren.dataset.project, action: 'rename', name: ren.dataset.groupRename, new_name: next.trim() });
+    await post('/api/groups', { project: ren.dataset.project, team: ren.dataset.team, action: 'rename', name: ren.dataset.groupRename, new_name: next.trim() });
     return true;
   }
   const del = el.closest('[data-group-del]');
-  if (del) { groupDel = { project: del.dataset.project, name: del.dataset.groupDel }; renderSide(); return false; }
+  if (del) { groupDel = { project: del.dataset.project, team: del.dataset.team, name: del.dataset.groupDel }; renderSide(); return false; }
   if (el.closest('[data-group-del-cancel]')) { groupDel = null; renderSide(); return false; }
   if (el.closest('[data-group-del-ok]') && groupDel) {
     const purge = Boolean(el.closest('.group-del')?.querySelector('[data-group-purge]')?.checked);
     const g = groupDel;
     groupDel = null;
-    await post('/api/groups', { project: g.project, action: 'delete', name: g.name, purge });
+    await post('/api/groups', { project: g.project, team: g.team, action: 'delete', name: g.name, purge });
     return true;
   }
   const spawn = el.closest('[data-spawn-for]')?.dataset.spawnFor;
@@ -707,7 +729,7 @@ async function sideAction(e) {
 }
 
 document.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
+  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-team-remove], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
     try { if (await sideAction(e)) load(); } catch (err) { alert(t('err.generic', { e: err.message })); }
     return;
   }
@@ -759,7 +781,6 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '[' && !typing && plain) toggleSide();
 });
 
-// solo / team switch (team: the chosen session becomes the lead)
 // Language picker: saved for the dashboard and for new cards (settings.json), applied at once.
 document.getElementById('lang').addEventListener('change', async (e) => {
   const prev = lang;
@@ -774,19 +795,24 @@ document.getElementById('lang').addEventListener('change', async (e) => {
   }
 });
 
+// "+ team" adds a team led by the chosen session (its name is asked; a name in use is refused by the server).
+// "solo" removes every team of the project.
+const nextTeamName = (p) => { const used = teams()[p]?.teams || {}; for (let i = 1; ; i++) if (!used[`team${i}`]) return `team${i}`; };
 document.addEventListener('change', async (e) => {
   const sel = e.target.closest('select[data-mode-key]');
-  if (!sel) return;
+  if (!sel || !sel.value) return;
   const [mode, lead] = sel.value.split(':');
-  const who = mode === 'team' ? state.sessions[lead]?.name || lead : '';
-  const ask = mode === 'team'
-    ? t('mode.confirmTeam', { project: sel.dataset.project, who })
-    : t('mode.confirmSolo', { project: sel.dataset.project });
-  if (!confirm(ask)) { sel.blur(); renderSide(); return; }
+  const body = { project: sel.dataset.modeKey, mode };
+  if (mode === 'team') {
+    const who = state.sessions[lead]?.name || lead;
+    const team = prompt(t('mode.confirmTeam', { project: sel.dataset.project, who }), nextTeamName(sel.dataset.project));
+    if (!team || !team.trim()) { sel.blur(); renderSide(); return; }
+    Object.assign(body, { lead, team: team.trim() });
+  } else if (!confirm(t('mode.confirmSolo', { project: sel.dataset.project }))) { sel.blur(); renderSide(); return; }
   const res = await fetch('/api/mode', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project: sel.dataset.modeKey, mode, lead }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) alert(t('err.switch', { e: await res.text() }));
   sel.blur();

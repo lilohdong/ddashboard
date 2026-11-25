@@ -4,13 +4,16 @@
 //   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
 //                     token usage (usage_total for connected sessions, usage_today), context_warn, lead_context_limit,
-//                     teams (mode, lead and groups per project). ?reports=1 also returns member reports (via_lead cards).
-//   POST /api/mode    {project, mode: solo|team, lead?, lead_name?} -> switch a project's mode
+//                     teams (mode and teams per project: lead, worktree, groups). ?reports=1 also returns member
+//                     reports (via_lead cards).
+//   POST /api/mode    {project, mode: team, lead, team?} -> add a team led by that session (a name in use is refused)
+//                     {project, mode: solo, team?} -> remove that team (no team: every team); solo when none is left
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
 //   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
 //   POST /api/team/spawn      {lead, role, model?, stay?, task, group?, runner?: orca|headless} -> start a member for a
 //                             live lead (visible in an Orca terminal when Orca runs, else headless)
-//   POST /api/groups          {project, action: create|rename|delete, name, new_name?, purge?} -> manage team groups
+//   POST /api/groups          {project, team, action: create|rename|delete, name, new_name?, purge?} -> manage a team's
+//                             groups (team may be left out when the project has one team)
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
@@ -20,6 +23,7 @@ const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
+  readProjects, teamOfSession, teamsOf,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -60,18 +64,24 @@ function pendingCount(sid) {
   try { return fs.readdirSync(paths.inbox(sid)).filter((f) => f.endsWith('.json')).length; } catch { return 0; }
 }
 
-// Mode and lead per connected project, keyed by the project name the dashboard groups sessions by.
+// Mode and teams per connected project, keyed by the project name the dashboard groups sessions by.
 function teams(projects, sessions) {
   const nameOf = {};
   for (const s of Object.values(sessions)) if (s.project_key && s.project) nameOf[s.project_key] ||= s.project;
   const out = {};
   for (const [key, p] of Object.entries(projects)) {
     const name = p.name || nameOf[key] || path.basename(p.cwd || key);
-    const groups = Object.fromEntries(Object.entries(p.groups || {}).map(([n, g]) => [n, { dir: g.dir, created: g.created }]));
-    out[name] = { key, mode: p.mode === 'team' ? 'team' : 'solo', lead: p.lead || null, lead_name: p.lead_name || null, mode_ver: Number(p.mode_ver) || 0, groups };
+    const list = {};
+    for (const [tn, t] of Object.entries(teamsOf(p))) {
+      const groups = Object.fromEntries(Object.entries(t.groups || {}).map(([n, g]) => [n, { dir: g.dir, created: g.created }]));
+      list[tn] = { lead: t.lead || null, worktree: t.worktree || null, groups };
+    }
+    out[name] = { key, mode: Object.keys(list).length ? 'team' : 'solo', mode_ver: Number(p.mode_ver) || 0, teams: list };
   }
   return out;
 }
+
+const projectKeyOf = (projects, sessions, name) => (projects[name] ? name : teams(projects, sessions)[name]?.key);
 
 function waiting(sid) {
   try {
@@ -107,7 +117,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const sessions = readJson(paths.sessions, {});
-    const projects = readJson(paths.projects, {});
+    const projects = readProjects();
     for (const s of Object.values(sessions)) {
       s.pending = pendingCount(s.session_id);
       s.waiting = waiting(s.session_id);
@@ -118,6 +128,8 @@ const server = http.createServer((req, res) => {
       s.unresponsive = s.view === 'idle' && isStale(s);
       // Place in the team: solo | lead | member | outside (team mode, untagged)
       s.team = teamRole(s, projects[s.project_key]);
+      const own = s.team === 'lead' || s.team === 'member' ? teamOfSession(s, projects[s.project_key]) : null;
+      if (own) s.team_name = own.name;
       if (s.team === 'member' && routeCard(sessions, projects, s.session_id).lead_missing) s.lead_missing = true;
     }
     const { cards: recent, last_by_session, archived_count } = cards.state(300, { reports: url.searchParams.get('reports') === '1' });
@@ -160,10 +172,9 @@ const server = http.createServer((req, res) => {
     if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     return readBody(req, res, (msg) => {
       // project: its key in projects.json, or its name as shown on the dashboard
-      const projects = readJson(paths.projects, {});
+      const projects = readProjects();
       const sessions = readJson(paths.sessions, {});
-      const name = String(msg.project || '');
-      const key = projects[name] ? name : teams(projects, sessions)[name]?.key;
+      const key = projectKeyOf(projects, sessions, String(msg.project || ''));
       if (!key || !projects[key]) return send(res, 404, { error: 'unknown project' });
       if (msg.mode !== 'team' && msg.mode !== 'solo') return send(res, 400, { error: 'mode must be solo or team' });
       let lead;
@@ -173,8 +184,9 @@ const server = http.createServer((req, res) => {
         if (!s || s.project_key !== key) return send(res, 400, { error: 'lead must be a session of this project' });
         if (s.ended || s.state === 'ended') return send(res, 409, { error: 'lead session has ended' });
       }
-      const r = setMode(key, msg.mode, { lead, leadName: msg.lead_name ? String(msg.lead_name) : undefined });
-      if (!r.ok) return send(res, 400, { error: r.error });
+      const team = msg.team ? String(msg.team) : msg.lead_name ? String(msg.lead_name) : undefined;
+      const r = setMode(key, msg.mode, { lead, team });
+      if (!r.ok) return send(res, r.code || 400, { error: r.error });
       send(res, 200, r);
     });
   }
@@ -191,9 +203,9 @@ const server = http.createServer((req, res) => {
         if (!isEnded(sessions[sid])) return send(res, 409, { error: 'session has not ended' });
         ids = [sid];
       } else if (msg.project && msg.ended === true) {
-        const projects = readJson(paths.projects, {});
+        const projects = readProjects();
         const name = String(msg.project);
-        const key = projects[name] ? name : teams(projects, sessions)[name]?.key;
+        const key = projectKeyOf(projects, sessions, name);
         ids = Object.values(sessions).filter((s) => isEnded(s) && (key ? s.project_key === key : s.project === name)).map((s) => s.session_id);
       } else return send(res, 400, { error: 'session_id, or project with ended: true, required' });
       const r = forgetSessions(ids);
@@ -217,7 +229,7 @@ const server = http.createServer((req, res) => {
     if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     return readBody(req, res, (msg) => {
       const sessions = readJson(paths.sessions, {});
-      const projects = readJson(paths.projects, {});
+      const projects = readProjects();
       const leadSid = safeId(msg.lead);
       const lead = sessions[leadSid];
       if (!lead) return send(res, 404, { error: 'unknown lead session' });
@@ -242,17 +254,20 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/groups') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     return readBody(req, res, (msg) => {
-      const projects = readJson(paths.projects, {});
+      const projects = readProjects();
       const sessions = readJson(paths.sessions, {});
-      const name = String(msg.project || '');
-      const key = projects[name] ? name : teams(projects, sessions)[name]?.key;
+      const key = projectKeyOf(projects, sessions, String(msg.project || ''));
       if (!key || !projects[key]) return send(res, 404, { error: 'unknown project' });
-      const p = projects[key];
-      const lead = sessions[p.lead];
-      if (p.mode !== 'team' || !lead || isEnded(lead)) return send(res, 409, { error: 'groups need team mode with a live lead' });
+      const list = teamsOf(projects[key]);
+      const names = Object.keys(list);
+      const tn = msg.team ? String(msg.team) : names.length === 1 ? names[0] : '';
+      if (!names.length) return send(res, 409, { error: 'groups need team mode with a live lead' });
+      if (!list[tn]) return send(res, tn ? 404 : 400, { error: tn ? `no team ${tn}` : 'team required: this project has several teams' });
+      const lead = sessions[list[tn].lead];
+      if (!lead || isEnded(lead)) return send(res, 409, { error: 'groups need team mode with a live lead' });
       if (!['create', 'rename', 'delete'].includes(msg.action)) return send(res, 400, { error: 'action must be create, rename or delete' });
       try {
-        const r = team.groupAction(p.lead, msg.action, { name: String(msg.name || ''), newName: String(msg.new_name || ''), purge: msg.purge === true });
+        const r = team.groupAction(list[tn].lead, msg.action, { name: String(msg.name || ''), newName: String(msg.new_name || ''), purge: msg.purge === true });
         send(res, 200, r);
       } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });

@@ -12,8 +12,11 @@
 //   node team.js <lead sid> handoff <doc> [--spawn] [--model <m>]
 //       prepare a lead handoff; prints the first prompt for the new lead (--spawn starts it headless)
 //   node team.js <lead sid> group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
-//       groups keep shared memory in docs/groups/<g>/ of the lead's worktree (brief.md, handoff-NNN.md, notes/).
-//       Nothing is committed; the lead commits the docs.
+//       groups of the lead's team keep shared memory in docs/teams/<team>/<g>/ of the team's worktree
+//       (brief.md, handoff-NNN.md, notes/). Nothing is committed; the lead commits the docs.
+//   node team.js <member sid> next-handoff        (a lead: next-handoff <g>)
+//       create the next handoff-NNN.md in the group folder (exclusively: never a number in use) and print its path
+// Each command works on the caller's own team only; other teams in the repo are never touched.
 // Headless permissions come from projects.json[<project>].spawn = { permission_mode, allowed_tools },
 // default: auto (the auto-mode classifier) + Bash(git *), Bash(node *), Bash(npm *). DDASH_CLAUDE_BIN overrides the claude command.
 const fs = require('fs');
@@ -33,7 +36,8 @@ function usage() {
   list
   show <card-id>
   handoff <doc-path> [--spawn] [--model <m>]
-  group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]`;
+  group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
+  next-handoff [<g>]`;
 }
 
 // Split argv into flags (--name value / --flag) and positional words.
@@ -102,10 +106,17 @@ function context(leadSid) {
   const sessions = readJson(paths.sessions, {});
   const lead = sessions[leadSid];
   if (!lead) throw new Error(`unknown session ${leadSid}. Pass your own session ID (it is in your [ddashboard] instructions).`);
-  const projects = readJson(paths.projects, {});
+  const projects = lib.readProjects();
   const project = projects[lead.project_key];
   if (!project) throw new Error('this project is not connected to the dashboard.');
   return { sessions, projects, lead, project };
+}
+
+// The team this session leads: { name, team }. Throws if it leads none.
+function ownTeam(project, leadSid) {
+  const t = lib.teamOfLead(project, leadSid);
+  if (!t) throw new Error('you are not the lead of a team in this project.');
+  return t;
 }
 
 function spawnOptions(project, flags) {
@@ -159,8 +170,9 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   group = group ? String(group).trim() : '';
   if (!role || !task) throw new Error('spawn needs a role and a task.');
   const { lead, project } = context(leadSid);
-  const g = group ? project.groups?.[group] : null;
-  if (group && !g) throw new Error(`no group ${group}. Create it with: group create ${group}`);
+  const own = ownTeam(project, leadSid);
+  const g = group ? own.team.groups?.[group] : null;
+  if (group && !g) throw new Error(`no group ${group} in team ${own.name}. Create it with: group create ${group}`);
   if (g) {
     lib.pruneGroup(g);
     try { lib.checkBriefs(lead.project_key); } catch { /* best effort */ }
@@ -335,10 +347,10 @@ function cmdHandoff(leadSid, argv) {
   const doc = path.resolve(words.join(' ')).replace(/\\/g, '/');
   if (!fs.existsSync(doc)) throw new Error(`handoff doc not found: ${doc}`);
   const { lead, project, projects } = context(leadSid);
-  if (project.lead !== leadSid) throw new Error('you are not the team lead of this project.');
+  const own = ownTeam(project, leadSid);
   // This command runs under the lead's own Claude process: remember its pid so the takeover can stop it.
   const claudePid = lib.recordClaudePid(leadSid, process.ppid);
-  project.handoff = { from: leadSid, doc, ts: new Date().toISOString() };
+  own.team.handoff = { from: leadSid, doc, ts: new Date().toISOString() };
   writeJson(paths.projects, projects);
   const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read the handoff doc and take over as team lead. Start the wait command from your instructions.`;
   const stop = claudePid ? `this session (Claude pid ${claudePid}) is stopped` : 'this session is told to stop (its Claude process was not found)';
@@ -348,18 +360,20 @@ function cmdHandoff(leadSid, argv) {
     const pid = runClaude(sid, ['-p', '--session-id', sid, ...claudeArgs(opts)], prompt, lead.cwd || process.cwd());
     return `Started the new lead headless: ${sid} (pid ${pid || '?'}). When it registers, ${stop}. Log: ${paths.log(sid).replace(/\\/g, '/')}`;
   }
-  return `Handoff ready. Start the new lead (terminal, Orca, or headless with --spawn) with this first prompt:\n${prompt}\nWhen it registers, the members move to it and ${stop}.`;
+  return `Handoff ready. Start the new lead (terminal, Orca, or headless with --spawn) with this first prompt:\n${prompt}\nWhen it registers, the members of team ${own.name} move to it and ${stop}.`;
 }
 
 // group create|rename|delete|list|prune. Shared by the dashboard (POST /api/groups) through groupAction.
+// Works on the caller's own team only.
 function groupAction(leadSid, action, { name, newName, purge } = {}) {
   const { lead, project } = context(leadSid);
   const key = lead.project_key;
-  if (project.mode !== 'team' || project.lead !== leadSid) throw new Error('groups need team mode with you as the lead.');
-  const done = (r) => { if (!r.ok) throw new Error(r.error); return r; };
-  if (action === 'create') return done(lib.createGroup(key, name, lead.cwd || process.cwd()));
-  if (action === 'rename') return done(lib.renameGroup(key, name, newName));
-  if (action === 'delete') return done(lib.deleteGroup(key, name, { purge }));
+  const t = lib.teamOfLead(project, leadSid);
+  if (!t) throw new Error('groups need team mode with you as a team lead.');
+  const done = (r) => { if (!r.ok) throw new Error(r.error); return { ...r, team: t.name }; };
+  if (action === 'create') return done(lib.createGroup(key, t.name, name));
+  if (action === 'rename') return done(lib.renameGroup(key, t.name, name, newName));
+  if (action === 'delete') return done(lib.deleteGroup(key, t.name, name, { purge }));
   throw new Error(`unknown group action ${action}`);
 }
 
@@ -367,18 +381,21 @@ function cmdGroup(leadSid, argv) {
   const { flags, words } = parseArgs(argv, ['purge']);
   const [action, name, next] = words;
   const { lead, project, sessions } = context(leadSid);
-  const groups = project.groups || {};
+  const own = lib.teamOfLead(project, leadSid);
+  const groups = own?.team.groups || {};
   if (action === 'list' || !action) {
+    if (!own) throw new Error('groups need team mode with you as a team lead.');
     const names = Object.keys(groups).sort();
-    if (!names.length) return 'No groups. Create one with: group create <name>';
+    if (!names.length) return `No groups in team ${own.name}. Create one with: group create <name>`;
     return names.map((n) => {
-      const members = Object.values(sessions).filter((s) => s.project_key === lead.project_key && s.kind === 'member' && s.group === n);
+      const members = lib.teamMembers(sessions, lead.project_key, own.team).filter((s) => s.group === n);
       const live = members.filter((s) => !lib.isEnded(s)).length;
       const last = lib.latestHandoff(groups[n].dir);
       return `${n}  ${groups[n].dir}  members ${live}/${members.length}${last ? `  latest ${path.basename(last)}` : ''}`;
     }).join('\n');
   }
   if (action === 'prune') {
+    if (!own) throw new Error('groups need team mode with you as a team lead.');
     const names = name ? [name] : Object.keys(groups);
     if (name && !groups[name]) throw new Error(`no group ${name}`);
     const removed = names.flatMap((n) => lib.pruneGroup(groups[n]));
@@ -401,7 +418,22 @@ function cmdGroup(leadSid, argv) {
   throw new Error(`unknown group command ${action}`);
 }
 
-const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, show: cmdShow, handoff: cmdHandoff, group: cmdGroup };
+// A member reserves the next handoff file of its own group; a lead names one of its team's groups.
+function cmdNextHandoff(sid, argv) {
+  const { sessions, project } = context(sid);
+  const me = sessions[sid];
+  const t = lib.teamOfSession(me, project);
+  if (!t) throw new Error('next-handoff is for team leads and members.');
+  const name = lib.teamOfLead(project, sid) ? argv[0] : me.group;
+  if (!name) throw new Error(lib.teamOfLead(project, sid) ? 'next-handoff needs a group name.' : 'you are in no group; report to your lead instead.');
+  const g = t.team.groups?.[name];
+  if (!g) throw new Error(`no group ${name} in team ${t.name}`);
+  return lib.reserveHandoff(g.dir, `# ${name} handoff
+
+`);
+}
+
+const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, show: cmdShow, handoff: cmdHandoff, group: cmdGroup, 'next-handoff': cmdNextHandoff };
 
 function main(argv) {
   const [leadArg, cmd, ...rest] = argv;

@@ -76,16 +76,17 @@ A session's name defaults to its folder name; override it with the `DDASH_NAME` 
 
 ## Solo and team mode
 
-Each project runs in one of two modes. You can switch at any time, with a command or from the dashboard (the `solo`/`team` switch next to the project name in the sidebar).
+Each project runs in one of two modes. A project is in team mode while it has at least one team; a repository can have several teams, each with its own lead and members. You can add and remove teams at any time, with a command or from the dashboard (the switch next to the project name in the sidebar adds a team; `remove` on a team's header removes it).
 
 | | solo (default) | team |
 |---|---|---|
-| Turn on | `/ddashboard:dashboard` (or `... solo`) | `/ddashboard:dashboard team <lead name>` in the lead session |
-| Who posts to the dashboard | every connected session | the lead only; member cards go to the lead |
-| Your replies go to | the session that posted the card | the lead |
-| Members | — | started by the lead with a tag that sets their role |
+| Turn on | `/ddashboard:dashboard` | `/ddashboard:dashboard team <team name>` in the session that will lead it: **adds** a team (other teams stay; a name in use is refused) |
+| Turn off | — | `/ddashboard:dashboard solo` in a lead session removes its team; the project is solo when no team is left |
+| Who posts to the dashboard | every connected session | each team's lead; member cards go to the lead that spawned them. Sessions in no team post directly |
+| Your replies go to | the session that posted the card | the session that posted the card (a lead) |
+| Members | — | started by a lead with a tag that sets their role; they belong to that lead's team only |
 
-**Team mode** is for one lead session that you talk to, and member sessions (planner, frontend, backend, QA…) that do parts of the work and report to the lead. Delivery between them uses the same file inbox and wait command as dashboard replies, so it costs no tokens.
+**Team mode** is for a lead session that you talk to, and member sessions (planner, frontend, backend, QA…) that do parts of the work and report to that lead. Teams don't share members: a handoff, a group or a cleanup in one team never touches another. Delivery between them uses the same file inbox and wait command as dashboard replies, so it costs no tokens. In `~/.ddashboard/projects.json` a project keeps `teams: { <name>: { lead, worktree, groups } }`; settings from before (`lead`, `lead_name`, `groups`) are moved there automatically on first read.
 
 - **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead starts them with `team.js`: if Orca is running, as a visible interactive `claude` in a new Orca terminal in the lead's worktree; otherwise headless (`claude -p` in the background, no terminal needed). You can also paste the tagged prompt into any terminal.
 - **The lead** gets these commands (the exact command line is in its instructions; it runs from the fixed path `~/.ddashboard/bin/team.js`):
@@ -96,13 +97,14 @@ Each project runs in one of two modes. You can switch at any time, with a comman
   | `list` | Members with role, state, waiting, and last card |
   | `show <card id>` | A card in full (long report details are not copied into the report) |
   | `handoff <doc>` | Hands the lead over to a new session (see the guide) |
-  | `group create\|rename\|delete [--purge]\|list\|prune <name>` | Manages groups (below) |
+  | `group create\|rename\|delete [--purge]\|list\|prune <name>` | Manages the team's groups (below) |
+  | `next-handoff [<group>]` | Creates the next `handoff-NNN.md` in a group folder and prints its path (members use it for their own group) |
 - **Member reports** reach the lead as `[Team report]`, lead instructions reach members as `[Lead instruction]`, and your replies stay `[Dashboard reply]`. Reports are kept as cards but hidden from the feed; the `Member reports` button shows them, dimmed.
 - **Headless permissions** default to `--permission-mode auto` (auto mode: a classifier approves safe actions) plus `Bash(git *)`, `Bash(node *)` and `Bash(npm *)`. Change them per project in `~/.ddashboard/projects.json`: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
-- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`. `+ member` under the lead starts a member from the dashboard (role, optional model, stay, task); the lead is told about it. The lead picker lists sessions newest first with a short id and when they were last seen; sessions not seen for `DDASH_STALE_MIN` minutes (60) are grouped as stale. An idle session with no wait command that has not been seen for that long is marked `unresponsive`.
+- **Sidebar:** project → team → its lead → groups → members, with a role badge on each member. Sessions in no team are marked `outside team` and still post directly. If a lead ends, its members post directly and are marked `lead missing`. `+ member` and `+ group` sit under each team's lead; `+ member` starts a member from the dashboard (role, optional model, stay, task) and the lead is told about it. `remove` on a team's header removes that team. The `+ team` picker lists sessions newest first with a short id and when they were last seen; sessions not seen for `DDASH_STALE_MIN` minutes (60) are grouped as stale. An idle session with no wait command that has not been seen for that long is marked `unresponsive`.
 - **Cleaning up:** `×` removes an ended session from the sidebar and `Clear N ended` removes all of a project's ended sessions (their cards and token counts stay). An idle session not seen for `DDASH_STALE_MIN` minutes offers `Mark ended` first.
-- **Groups (optional):** a group (e.g. `front`) is a team's shared memory: `docs/groups/<name>/` in the lead's worktree with `brief.md` (scope, key files, rules, current state), `handoff-NNN.md` and `notes/`. `spawn --group <name>` gives a new member the brief (up to about 4000 tokens; the lead is told when it needs trimming) and the latest handoff before its task, and the member writes the next handoff when it finishes. Only the newest 3 handoffs and 30 days of notes are kept (`keep_handoffs` and `notes_days` in the group's entry in `projects.json`). Renaming moves the folder (`git mv` when tracked); deleting moves it to `docs/groups/_archived/` (`--purge` deletes it) and unassigns the members. Nothing is committed for you: the lead commits the docs. The sidebar shows lead → group → members, with `unassigned` for members without a group.
-- **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead, takes over the members and pending messages, and the old lead is ended and stopped. When the lead's context passes `DDASH_LEAD_CONTEXT_LIMIT` (150k), the Stop hook tells it once to do this, and the sidebar marks it `handoff due`.
+- **Groups (optional):** a group (e.g. `front`) is a team's shared memory: `docs/teams/<team>/<group>/` in the team lead's worktree with `brief.md` (scope, key files, rules, current state), `handoff-NNN.md` and `notes/`. Two teams can use the same group name. `spawn --group <name>` gives a new member the brief (up to about 4000 tokens; the lead is told when it needs trimming) and the latest handoff before its task, and the member writes the next handoff when it finishes (`next-handoff` creates the file exclusively, so two members finishing together never get the same number). Only the newest 3 handoffs and 30 days of notes are kept (`keep_handoffs` and `notes_days` in the group's entry in `projects.json`). Renaming moves the folder (`git mv` when tracked); deleting moves it to `docs/teams/<team>/_archived/` (`--purge` deletes it) and unassigns the members. Old `docs/groups/<group>/` folders move to `docs/teams/<team>/<group>/` (`git mv`) on first read. Nothing is committed for you: the lead commits the docs. The sidebar shows team → group → members, with `unassigned` for members without a group.
+- **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead of that team (name, worktree and groups stay), takes over its members and pending messages, and the old lead is ended and stopped. Other teams are not affected. When the lead's context passes `DDASH_LEAD_CONTEXT_LIMIT` (150k), the Stop hook tells it once to do this, and the sidebar marks it `handoff due`.
 - **Cost guards:** every session is told to restart the wait command in the same response that handles its output (one model call per reply, not two). Member reports are at most 3 summary lines with the evidence in the group's `notes/` and its path. When git HEAD gets `DDASH_BRIEF_STALE_COMMITS` (20) commits past the last change of a group's `brief.md`, the lead is told once that the brief may be stale.
 
 Recommended workflow: [Team mode guide](docs/team-mode-guide.md).
@@ -128,7 +130,7 @@ Recommended workflow: [Team mode guide](docs/team-mode-guide.md).
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Registers new sessions in connected projects and gives them the card rules (team mode: on the first prompt instead, to read the member tag) |
-| `UserPromptSubmit` | Turns the dashboard on/off, switches solo/team mode, registers members and lead handoffs from their tag, connects sessions that started earlier, marks the session "Working" |
+| `UserPromptSubmit` | Turns the dashboard on/off, adds or removes a team, registers members and lead handoffs from their tag, connects sessions that started earlier, marks the session "Working" |
 | `Stop` | Records cards and the turn's token usage (`usage/YYYY-MM.jsonl`), sends member cards to their lead (team mode), delivers waiting messages, marks the session "Idle" |
 | `SessionEnd` | Marks the session "Ended" |
 

@@ -1,6 +1,6 @@
 ---
 name: dashboard
-description: Report this project's Claude session results as cards on a local dashboard (http://127.0.0.1:7357) and take instructions from dashboard replies. Use when the user turns the dashboard on (/ddashboard:dashboard), switches team or solo mode (/ddashboard:dashboard team <name>, /ddashboard:dashboard solo), or turns it off (/ddashboard:dashboard off).
+description: Report this project's Claude session results as cards on a local dashboard (http://127.0.0.1:7357) and take instructions from dashboard replies. Use when the user turns the dashboard on (/ddashboard:dashboard), adds a team with this session as its lead (/ddashboard:dashboard team <name>) or removes its team (/ddashboard:dashboard solo), or turns it off (/ddashboard:dashboard off).
 ---
 
 # ddashboard

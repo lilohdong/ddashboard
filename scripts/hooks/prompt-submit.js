@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook
 // - "/ddashboard:dashboard" (or "/dashboard"): start the server, connect this project, register this session.
-//   "... team <name>": team mode with this session as the lead. "... solo": back to solo mode.
+//   "... team <name>": add a team named <name> with this session as its lead (other teams stay; a name in use
+//   is refused). "... solo": remove the team this session leads; the project is solo when no team is left.
 // - "... off": disconnect this project; stop the server when no project is left.
 // - A first prompt starting with a tag registers a team member or a new lead taking over:
 //   [ddash role=<role> lead=<lead sid> stay=0|1] / [ddash lead-handoff from=<old lead sid> doc=<path>]
@@ -10,8 +11,8 @@
 // - Connected sessions are marked "working". Anything else prints nothing (zero tokens).
 const {
   paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, setState,
-  isRegistered, injectRules, pendingRules, setMode, parseTag, setMember, performHandoff, recordClaudePid, replacedText,
-  memberStart,
+  isRegistered, injectRules, pendingRules, parseTag, setMember, performHandoff, recordClaudePid, replacedText,
+  memberStart, addTeam, removeTeams, teamOfLead, readProjects,
 } = require('../lib');
 const control = require('../control');
 
@@ -21,7 +22,7 @@ function handoffNote(tag, res) {
   if (!res.ok) return `[ddashboard] Lead handoff failed: ${res.error}. You are registered as an ordinary session.\n`;
   const stopped = res.claude_killed ? 'its Claude process was stopped'
     : 'its Claude process could not be stopped, so it gets a stop notice on its next turn';
-  return `[ddashboard] You took over as team lead from ${tag.from}${tag.doc ? `. Read the handoff doc first: ${tag.doc}` : ''}.
+  return `[ddashboard] You took over as lead of team "${res.team}" from ${tag.from}${tag.doc ? `. Read the handoff doc first: ${tag.doc}` : ''}.
 The members (${res.members}) now report to you; ${res.moved} pending message(s) moved to your inbox; the old lead is ended and ${stopped}.
 `;
 }
@@ -55,14 +56,22 @@ The members (${res.members}) now report to you; ${res.moved} pending message(s) 
     registerSession(sid, cwd);
     setState(sid, 'working');
     let note = '';
+    const key = projectKey(cwd);
     if (team) {
       const name = team[1].trim().replace(/^["']|["']$/g, '');
-      setMode(projectKey(cwd), 'team', { lead: sid, leadName: name || undefined });
-      recordClaudePid(sid);
-      note = 'Team mode is on for this project; this session is the lead.\n';
+      const r = addTeam(key, name || undefined, sid);
+      if (r.ok) {
+        recordClaudePid(sid);
+        note = `Team "${r.team}" was added to this project; this session is its lead. Other teams are unchanged.\n`;
+      } else note = `No team was added: ${r.error}.\n`;
     } else if (solo) {
-      setMode(projectKey(cwd), 'solo');
-      note = 'Solo mode is on for this project: every connected session posts its own cards.\n';
+      const own = teamOfLead(readProjects()[key], sid);
+      if (own) {
+        const r = removeTeams(key, [own.name]);
+        note = r.mode === 'team'
+          ? `Team "${own.name}" was removed; this session posts its own cards. Other teams are unchanged.\n`
+          : `Team "${own.name}" was removed; no team is left, so the project is solo: every connected session posts its own cards.\n`;
+      } else note = 'This session leads no team, so nothing changed. Remove other teams from the dashboard.\n';
     }
     process.stdout.write(`${started}\n${note}${injectRules(sid)}`);
     return;

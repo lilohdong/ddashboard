@@ -21,7 +21,7 @@ What a team costs is roughly **how often a session wakes up × how big its conte
 
 ## Setting up
 
-1. In the session that will lead, type `/ddashboard:dashboard team <lead name>`. Open http://127.0.0.1:7357.
+1. In the session that will lead, type `/ddashboard:dashboard team <team name>`. Open http://127.0.0.1:7357. This adds a team; a repository can have several (e.g. one per feature or per experiment), each with its own lead, members and groups. A name already in use is refused, and a session can lead one team.
 2. Let the lead write a **project brief** first (structure, one line per important file, rules, current state) to a file such as `docs/brief.md`. Members read the brief instead of exploring the repository. When every member prompt starts with the same brief text, the prompt cache is shared across members, so from the second member on the brief costs about a tenth.
 3. The lead starts members for the big pieces:
    ```
@@ -34,11 +34,13 @@ What a team costs is roughly **how often a session wakes up × how big its conte
 
 Members are cheapest when they are short-lived (small context) but then each new one starts from zero. A **group** gives them a memory instead:
 
-1. `team.js <lead id> group create front` makes `docs/groups/front/` in the lead's worktree with a `brief.md` template. Fill in the scope, the key files, the rules and the current state. Keep it under about 4000 tokens: it is put into every new member, and the lead is told when it has to be cut.
+1. `team.js <lead id> group create front` makes `docs/teams/<team>/front/` in the lead's worktree with a `brief.md` template. Groups belong to one team, so two teams can each have a `front` group without sharing anything. Fill in the scope, the key files, the rules and the current state. Keep it under about 4000 tokens: it is put into every new member, and the lead is told when it has to be cut.
 2. `team.js <lead id> spawn --group front --role ui "..."` starts a member that gets the brief and the latest handoff before its task. The hook puts them in at session start, ahead of the task, so every member of the group starts with the same text and can share the prompt cache (this only works for members started in the same worktree and commit).
-3. When a member finishes, it writes the next `handoff-NNN.md` (what was done, open items, where things are), updates `brief.md` if the facts changed, and keeps evidence in `notes/`. The next member continues from there.
-4. Old files are cleaned up as new ones are written: the newest 3 handoffs and 30 days of notes stay (`keep_handoffs`, `notes_days`; `group prune` to run it by hand). Git still has the history.
-5. The lead commits `docs/groups/` with its other docs. Members never commit these files.
+3. When a member finishes, it runs `team.js <its id> next-handoff`, which creates the next `handoff-NNN.md` exclusively (two members finishing together never get the same number) and prints its path, and writes there what was done, open items and where things are. It updates `brief.md` if the facts changed, and keeps evidence in `notes/`. The next member continues from there.
+4. Old files are cleaned up as new ones are written: the newest 3 handoffs and 30 days of notes stay (`keep_handoffs`, `notes_days`; `group prune` to run it by hand). Cleanup only touches the own team's folders. Git still has the history.
+5. The lead commits `docs/teams/<team>/` with its other docs. Members never commit these files.
+
+Folders from before teams (`docs/groups/<group>/`) move to `docs/teams/<team>/<group>/` (`git mv` when tracked) the first time the settings are read.
 
 Groups are optional; members without one are listed as `unassigned`. `role` stays as a sub-role inside a group.
 
@@ -60,14 +62,15 @@ A lead's context grows with every report. When its context passes `DDASH_LEAD_CO
    ```
    claude "[ddash lead-handoff from=<old id> doc=<path>] Read the handoff doc and take over as team lead. Start the wait command from your instructions."
    ```
-4. When the new lead's first prompt is submitted, the hook makes it the project lead, moves the members and any pending messages to it, marks the old lead ended, and stops the old lead's wait command and Claude process. If the old process cannot be stopped, the old session is told to stop on its next turn and its prompts are refused.
+4. When the new lead's first prompt is submitted, the hook makes it the lead of the old lead's team (name, worktree and groups stay), moves that team's members and any pending messages to it, marks the old lead ended, and stops the old lead's wait command and Claude process. If the old process cannot be stopped, the old session is told to stop on its next turn and its prompts are refused.
 
 ## Tips
 
 - **Small things:** the lead does them itself. Spawning costs a fresh read of the brief and the files.
 - **Member to member:** route questions through the lead for now. Direct member talk tends to ping-pong and re-reads both contexts on every message.
-- **Untagged sessions** in a team project are marked `outside team` and still post directly, so you can always open a side session for something unrelated.
+- **Untagged sessions** in a team project are in no team: they are marked `outside team` and still post directly, so you can always open a side session for something unrelated.
+- **Several teams:** each lead sees and commands only its own members (`list`, `send`, `group`, `handoff`). A member reports only to the lead that spawned it.
 - **Stale briefs:** when git HEAD is `DDASH_BRIEF_STALE_COMMITS` (20) commits past the last change of a group's `brief.md`, the lead is told once. Update the brief and the warning resets.
 - **Unresponsive sessions:** an idle session with no wait command, not seen for `DDASH_STALE_MIN` minutes, is marked `unresponsive` in the sidebar. Check its terminal, or `Mark ended` it.
-- **If the lead ends** without a handoff, members post straight to the dashboard and are marked `lead missing`. Pick a new lead with the switch next to the project name.
-- **Back to solo:** `/ddashboard:dashboard solo` or the switch. Every session gets the solo instructions once on its next turn.
+- **If a lead ends** without a handoff, its members post straight to the dashboard and are marked `lead missing`. Start a new lead with a lead handoff, or remove the team and add a new one.
+- **Removing a team:** `/ddashboard:dashboard solo` in its lead session, or `remove` on the team's header in the sidebar. Its members then post directly; other teams stay. When no team is left the project is solo (the `solo` choice in the switch removes every team at once). Every session gets the new instructions once on its next turn.
