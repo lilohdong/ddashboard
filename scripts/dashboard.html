@@ -509,7 +509,7 @@ function renderSide() {
   html += `<button class="nav archive-link ${archivedView ? 'sel' : ''}" data-archived><span class="grow">${esc(t('side.archived', { n: state.archived_count || 0 }))}</span></button>`;
   html += todayHtml();
   html += `<div class="legend">${VIEW_KEYS.map((k) => `<span><span class="dot ${k}"></span>${esc(viewName(k))}</span>`).join('')}</div>`;
-  document.getElementById('side').innerHTML = html;
+  setHtml(document.getElementById('side'), html);
 }
 
 // Cards for the current view, newest first.
@@ -535,7 +535,7 @@ function cardHtml(c, byCard) {
         <button>${esc(t('card.send'))}</button>
       </form>` : `<div class="closed">${esc(t('card.closed'))}</div>`;
   return `
-    <article class="card${c.via_lead ? ' report' : ''}">
+    <article class="card${c.via_lead ? ' report' : ''}" data-id="${esc(c.id)}">
       <div class="card-head">
         <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(statusName(c.status))}</span>${c.answered ? `<span class="badge replied">${esc(t('card.replied'))}</span>` : ''}
         ${c.archived ? `<span class="badge archived">${esc(t('card.archived'))}</span>` : ''}
@@ -565,8 +565,8 @@ function renderMain() {
   const replied = repliedIds();
   for (const c of scoped) c.answered = answered(c, replied);
   for (const c of scoped) if (!c.answered) counts[c.status] = (counts[c.status] || 0) + 1;
-  document.getElementById('filters').innerHTML = [['all', t('all'), scoped.length], ...STATUS_KEYS.map((k) => [k, statusName(k), counts[k] || 0])]
-    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${esc(v)} ${n}</button>`).join('');
+  setHtml(document.getElementById('filters'), [['all', t('all'), scoped.length], ...STATUS_KEYS.map((k) => [k, statusName(k), counts[k] || 0])]
+    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${esc(v)} ${n}</button>`).join(''));
 
   const s = scope.kind === 'session' ? state.sessions[scope.id] : null;
   const scopeName = scope.kind === 'all' ? t('all') : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : t('scope.session');
@@ -588,7 +588,7 @@ function renderMain() {
     const runnerSel = (k, label) => `<label class="runner">${esc(t(label))} <select class="mode-sel" data-runner="${k}" data-project="${esc(scope.id)}" title="${esc(t('runner.title'))}">${['headless', 'orca', 'window'].map((v) => `<option value="${v}"${tp[k] === v ? ' selected' : ''}>${esc(t(`runner.${v}`))}</option>`).join('')}</select></label>`;
     mode = runnerSel('runner_lead', 'runner.lead') + runnerSel('runner_member', 'runner.member');
   }
-  document.getElementById('mode').innerHTML = mode;
+  setHtml(document.getElementById('mode'), mode);
 
   const rep = document.getElementById('reports');
   rep.hidden = !Object.values(teams()).some((t) => t.mode === 'team');
@@ -598,7 +598,38 @@ function renderMain() {
   const byCard = {};
   for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
   const empty = searching() ? (all ? (label ? t('empty.noMatch') : t('empty.noArchived')) : '') : t('empty.none');
-  document.getElementById('cards').innerHTML = list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${esc(empty)}</div>` : '';
+  renderCards(list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${esc(empty)}</div>` : '');
+}
+
+// Replace an element's HTML only when it changed: an unchanged poll leaves the DOM (selection, scroll) alone.
+function setHtml(el, html) {
+  if (el._html === html) return false;
+  el._html = html;
+  el.innerHTML = html;
+  return true;
+}
+
+// The card list, keeping scroll positions when it does change: each open Details body keeps its scrollTop,
+// and the card at the top of the window stays where it was (new cards are added above it).
+function renderCards(html) {
+  const box = document.getElementById('cards');
+  if (box._html === html) return;
+  const scrolls = {};
+  box.querySelectorAll('details[data-details] .details-body').forEach((el) => {
+    if (el.scrollTop) scrolls[el.parentElement.dataset.details] = el.scrollTop;
+  });
+  const anchor = [...box.querySelectorAll('article[data-id]')].find((a) => a.getBoundingClientRect().bottom > 0);
+  const anchorId = anchor?.dataset.id;
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  setHtml(box, html);
+  for (const [id, top] of Object.entries(scrolls)) {
+    const body = box.querySelector(`details[data-details="${CSS.escape(id)}"] .details-body`);
+    if (body) body.scrollTop = top;
+  }
+  if (anchorId && window.scrollY > 0) {
+    const again = box.querySelector(`article[data-id="${CSS.escape(anchorId)}"]`);
+    if (again) window.scrollBy(0, again.getBoundingClientRect().top - anchorTop);
+  }
 }
 
 function saveDrafts() {
@@ -907,8 +938,27 @@ document.addEventListener('submit', async (e) => {
 applySide();
 applyStatic();
 load();
-// Don't re-render while a reply is being typed.
-setInterval(() => { if (!spawnFor && !groupDel && !document.activeElement?.matches('textarea, select, input')) load(); }, 3000);
+// Don't re-render while a reply is being typed, nor while text is being selected or dragged
+// (a re-render would drop the selection); the skipped poll runs once the pointer is up / the selection is gone.
+let pointerDown = false;
+let pendingLoad = false;
+const selecting = () => {
+  const sel = getSelection();
+  return Boolean(sel && !sel.isCollapsed && ['cards', 'side'].some((id) => document.getElementById(id).contains(sel.anchorNode)));
+};
+const busy = () => pointerDown || selecting();
+function runPending() {
+  if (pendingLoad && !busy()) { pendingLoad = false; load(); }
+}
+document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+document.addEventListener('pointerup', () => { pointerDown = false; setTimeout(runPending, 0); }, true);
+document.addEventListener('pointercancel', () => { pointerDown = false; runPending(); }, true);
+document.addEventListener('selectionchange', runPending);
+setInterval(() => {
+  if (spawnFor || groupDel || document.activeElement?.matches('textarea, select, input')) return;
+  if (busy()) { pendingLoad = true; return; }
+  load();
+}, 3000);
 </script>
 </body>
 </html>

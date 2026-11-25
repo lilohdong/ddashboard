@@ -2052,6 +2052,28 @@ test('dashboard: key tag carries the project and its click uses the exact key fi
   assert.equal((i18n.match(/'card\.keyPrev'/g) || []).length, 3);
 });
 
+// BUG-004: polling must not drop a text selection or reset scroll positions.
+test('dashboard: polls leave unchanged DOM alone, keep scroll, and wait while text is selected', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
+  // Every polled region goes through setHtml (no direct innerHTML on them).
+  for (const id of ['side', 'filters', 'mode', 'cards']) {
+    assert.doesNotMatch(html, new RegExp(`getElementById\('${id}'\)\.innerHTML\s*=`), id);
+  }
+  assert.ok(html.includes('data-id="${esc(c.id)}"'), 'article data-id');
+  assert.match(html, /if \(busy\(\)\) \{ pendingLoad = true; return; \}/);
+  assert.match(html, /addEventListener\('selectionchange', runPending\)/);
+  assert.match(html, /scrolls\[el\.parentElement\.dataset\.details\] = el\.scrollTop/);
+  // setHtml itself: the same HTML twice touches the DOM once.
+  const src = html.match(/function setHtml\(el, html\) \{[\s\S]*?\n\}/)[0];
+  const setHtml = new Function(`${src}; return setHtml;`)();
+  let writes = 0;
+  const el = { set innerHTML(v) { writes++; this._v = v; }, get innerHTML() { return this._v; } };
+  assert.equal(setHtml(el, '<b>a</b>'), true);
+  assert.equal(setHtml(el, '<b>a</b>'), false);
+  assert.equal(setHtml(el, '<b>b</b>'), true);
+  assert.equal(writes, 2);
+});
+
 // --- run ---
 
 (async () => {
