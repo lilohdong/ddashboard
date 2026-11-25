@@ -28,7 +28,7 @@ What a team costs is roughly **how often a session wakes up × how big its conte
    node ~/.ddashboard/bin/team.js <lead id> spawn --role backend "Read docs/brief.md. Add the /api/mode endpoint ..."
    ```
    Use `--model` for a lighter model on simple roles (QA, docs). Use `--stay` only for a member that should keep waiting for instructions; by default a member finishes and exits, and `send` resumes it later.
-   If Orca is running, the member opens as a visible interactive `claude` in a new Orca terminal in the lead's worktree, so you can watch it and step in; otherwise it runs headless. `--headless` or `--orca` picks one (`DDASH_ORCA=0` turns Orca off).
+   How it starts is the project's member runner (dashboard: select the project, then the bar above the cards; or `spawn.runner_member` in `projects.json`): `headless` (default), `orca` (a visible interactive `claude` in a new Orca terminal in the lead's worktree, so you can watch it and step in) or `window` (a new OS terminal window). A runner that is not available falls back to headless, and the output says so. `--headless`, `--orca` or `--window` overrides the setting (refused when that runner cannot run). `DDASH_ORCA=0` / `DDASH_WINDOW=0` turn Orca / windows off.
 
 ## Groups
 
@@ -47,7 +47,7 @@ Groups are optional; members without one are listed as `unassigned`. `role` stay
 ## Working
 
 - **Reports** arrive at the lead as `[Team report]` through its wait command. A report has the status, title, up to 3 summary lines and what to check. Long details stay on the card; the lead reads them with `team.js <lead id> show <card id>` only when needed.
-- **Instructions** go out with `team.js <lead id> send <role or id> "<text>"`. A waiting or running member gets it from its inbox; an Orca member idle at its prompt gets it typed into its terminal; a finished member is resumed with the same options (in a new Orca terminal when Orca runs).
+- **Instructions** go out with `team.js <lead id> send <role or id> "<text>"`. A waiting or running member gets it from its inbox; an Orca member idle at its prompt gets it typed into its terminal; a finished member is resumed with the same options (in a new Orca terminal or terminal window when it ran in one and that is still available, else headless).
 - **Blocked members** use the `blocked` status with the question in the summary. The lead answers with `send`, or asks you on the dashboard if it is your call.
 - **What reaches you:** decisions, review requests, problems, and finished milestones. Turn on `Member reports` on the dashboard when you want to look over the lead's shoulder.
 - **Permissions:** members run in auto mode (`--permission-mode auto`): a classifier approves safe actions, and `git`, `node` and `npm` commands are always allowed. A denied action is reported as blocked. Adjust per project in `~/.ddashboard/projects.json` (`"spawn": { "permission_mode", "allowed_tools", "model" }`). Avoid `bypassPermissions` unless the work is sandboxed.
@@ -67,7 +67,7 @@ Handoff docs stay the same size however many handoffs there were:
 Steps:
 
 1. The lead writes a new handoff doc with the current state (see above).
-2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead instead, like a member: in a visible Orca terminal titled `lead <team>` when Orca runs, else headless (`--orca` / `--headless` force one).
+2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead instead, with the project's lead runner (`spawn.runner_lead`, default headless; terminal title `lead <team>`). `--headless` / `--orca` / `--window` override it and imply `--spawn`.
 3. Start the new lead with that prompt, e.g. in a new terminal:
    ```
    claude "[ddash lead-handoff from=<old id> doc=<path>] Read only this handoff doc and the team rules <team dir>/lead-rules.md (not older handoff docs), then take over as team lead. Start the wait command from your instructions."

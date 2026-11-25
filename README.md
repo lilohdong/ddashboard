@@ -88,12 +88,12 @@ Each project runs in one of two modes. A project is in team mode while it has at
 
 **Team mode** is for a lead session that you talk to, and member sessions (planner, frontend, backend, QA…) that do parts of the work and report to that lead. Teams don't share members: a handoff, a group or a cleanup in one team never touches another. Delivery between them uses the same file inbox and wait command as dashboard replies, so it costs no tokens. In `~/.ddashboard/projects.json` a project keeps `teams: { <name>: { lead, worktree, groups } }`; settings from before (`lead`, `lead_name`, `groups`) are moved there automatically on first read.
 
-- **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead starts them with `team.js`: if Orca is running, as a visible interactive `claude` in a new Orca terminal in the lead's worktree; otherwise headless (`claude -p` in the background, no terminal needed). You can also paste the tagged prompt into any terminal.
+- **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead starts them with `team.js`, in the way the project's **member runner** says: `headless` (default: `claude -p` in the background, no terminal needed), `orca` (a visible interactive `claude` in a new Orca terminal in the lead's worktree) or `window` (a new OS terminal window: `start cmd /k` on Windows, Terminal via `osascript` on macOS, `x-terminal-emulator` on Linux). The **lead runner** does the same for a new lead started with `handoff --spawn`. Pick both on the dashboard (select the project; the bar above the cards) or set `spawn.runner_member` / `spawn.runner_lead` in `~/.ddashboard/projects.json`. When the chosen runner is not available, the session starts headless and the output says so. You can also paste the tagged prompt into any terminal.
 - **The lead** gets these commands (the exact command line is in its instructions; it runs from the fixed path `~/.ddashboard/bin/team.js`):
   | Command | What it does |
   |---|---|
-  | `spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless\|--orca] "<task>"` | Starts a member: in an Orca terminal when Orca runs, else headless (output in `~/.ddashboard/logs/<session id>.log`). `--headless` / `--orca` force one |
-  | `send <session id\|role> "<text>"` | Sends an instruction: into the inbox if the member is waiting or running; typed into its Orca terminal if it sits idle there; otherwise resumes it (`claude --resume` in a new Orca terminal, or `claude -p --resume`) |
+  | `spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless\|--orca\|--window] "<task>"` | Starts a member with the member runner (headless output in `~/.ddashboard/logs/<session id>.log`). `--headless` / `--orca` / `--window` override it and are refused when that runner cannot run |
+  | `send <session id\|role> "<text>"` | Sends an instruction: into the inbox if the member is waiting or running; typed into its Orca terminal if it sits idle there; otherwise resumes it (`claude --resume` in a new Orca terminal or terminal window, the way it ran before, or `claude -p --resume`) |
   | `list` | Members with role, state, waiting, and last card |
   | `show <card id>` | A card in full (long report details are not copied into the report) |
   | `handoff <doc>` | Hands the lead over to a new session (see the guide) |
@@ -152,7 +152,8 @@ No hook calls the model, and none of them print anything in sessions that aren't
 | `DDASH_LEAD_CONTEXT_LIMIT` | unset | Absolute handoff point (tokens) instead of start + budget; still cut to 80% of the window |
 | `DDASH_HANDOFF_MAX_TOKENS` | `6000` | Largest lead handoff doc `T handoff` accepts (estimated tokens); `0` = no cap |
 | `DDASH_BRIEF_STALE_COMMITS` | `20` | Commits past a group brief's last change before the lead is told it may be stale |
-| `DDASH_ORCA` | on | `0` never starts members in Orca terminals (always headless) |
+| `DDASH_ORCA` | on | `0` turns Orca off (the `orca` runner falls back to headless) |
+| `DDASH_WINDOW` | on | `0` turns terminal windows off (the `window` runner falls back to headless) |
 
 To manage the server directly:
 

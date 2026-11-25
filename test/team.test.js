@@ -13,6 +13,7 @@ process.env.DDASH_BOARD_DIR = BOARD;
 delete process.env.DDASH_NAME;
 process.env.CLAUDE_CONFIG_DIR = BOARD; // no real Claude settings (model hints for the context window)
 for (const k of ['ANTHROPIC_MODEL', 'DDASH_CONTEXT_WINDOW', 'DDASH_LEAD_WORK_BUDGET', 'DDASH_LEAD_CONTEXT_LIMIT', 'DDASH_HANDOFF_MAX_TOKENS']) delete process.env[k];
+process.env.DDASH_WINDOW = '0'; // never open real terminal windows; the window tests use a fake launcher
 process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests use a fake orca command
 
 const ROOT = path.join(__dirname, '..');
@@ -638,6 +639,7 @@ const flagOf = (argv, name) => argv[argv.indexOf(name) + 1];
 
 test('team.js spawn: visible in Orca when it runs, with the same pre-registration', () => {
   teamFixture();
+  lib.setRunners(KEY, { runner_member: 'orca' });
   orcaEnv();
   try {
     const r = team.main(['L1', 'spawn', '--role', 'fe', '--model', 'sonnet', 'build\nthe page']);
@@ -666,6 +668,7 @@ test('team.js spawn: visible in Orca when it runs, with the same pre-registratio
 
 test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed terminal falls back to headless', async () => {
   teamFixture();
+  lib.setRunners(KEY, { runner_member: 'orca' });
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
   try {
     orcaEnv();
@@ -695,6 +698,7 @@ test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed te
 
 test('M-1c: team.js handoff --spawn: visible Orca terminal when Orca runs, --headless/--orca like spawn', async () => {
   teamFixture();
+  lib.setRunners(KEY, { runner_lead: 'orca' });
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
@@ -734,17 +738,165 @@ test('M-1c: team.js handoff --spawn: visible Orca terminal when Orca runs, --hea
     assert.equal(o.code, 1);
     assert.match(o.out, /Orca is not running/);
     assert.equal(teamConf().handoff, undefined);
-    assert.match(team.main(['L1', 'handoff', doc, '--orca', '--headless']).out, /either --headless or --orca/);
+    assert.match(team.main(['L1', 'handoff', doc, '--orca', '--headless']).out, /use only one of --headless, --orca, --window/);
 
-    // Orca down, no flag: headless. A failed terminal falls back to headless with a note.
+    // Orca down, runner_lead orca: headless with a note. A failed terminal falls back to headless with a note.
     process.env.FAKE_OUT = path.join(BOARD, 'lead-h2.json');
-    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /^Started the new lead headless/);
+    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /^The configured runner orca is not available \(Orca is not running.*\); started headless instead\.\nStarted the new lead headless/);
     assert.equal((await waitFor(process.env.FAKE_OUT)).argv[0], '-p');
     orcaEnv({ fail: true });
     process.env.FAKE_OUT = path.join(BOARD, 'lead-h3.json');
     assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /could not open a terminal \(.*no worktree\); started headless instead\.\nStarted the new lead headless/);
     await waitFor(process.env.FAKE_OUT);
   } finally { orcaOff(); }
+});
+
+// --- M-1d: runner settings (headless | orca | window) ---
+
+// A fake window launcher: records <title> <cwd> <command> to FAKE_WINDOW_OUT.
+function windowEnv(on = true) {
+  const file = path.join(BOARD, 'fake-window.js');
+  fs.writeFileSync(file, `require('fs').writeFileSync(process.env.FAKE_WINDOW_OUT, JSON.stringify(process.argv.slice(2)));\n`);
+  process.env.DDASH_WINDOW = on ? '' : '0';
+  process.env.DDASH_WINDOW_BIN = file;
+  process.env.FAKE_WINDOW_OUT = path.join(BOARD, `window-${Date.now()}-${Math.random()}.json`);
+}
+const windowOff = () => { process.env.DDASH_WINDOW = '0'; delete process.env.DDASH_WINDOW_BIN; };
+const windowSpec = async () => {
+  const [title, cwd, command] = await waitFor(process.env.FAKE_WINDOW_OUT);
+  const spec = JSON.parse(fs.readFileSync(command.match(/"([^"]+\.json)"$/)[1], 'utf8'));
+  return { title, cwd, command, spec };
+};
+
+test('M-1d: runners default to headless even when Orca runs', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  assert.deepEqual(lib.runnersOf(project()), { runner_lead: 'headless', runner_member: 'headless' });
+  try {
+    orcaEnv();
+    process.env.FAKE_OUT = path.join(BOARD, 'd1.json');
+    assert.match(team.main(['L1', 'spawn', '--role', 'be', 'api']).out, /headless \(pid/);
+    assert.equal((await waitFor(process.env.FAKE_OUT)).argv[0], '-p');
+    const doc = path.join(BOARD, 'handoff.md');
+    fs.writeFileSync(doc, '# handoff');
+    process.env.FAKE_OUT = path.join(BOARD, 'd2.json');
+    const r = team.main(['L1', 'handoff', doc, '--spawn']);
+    assert.match(r.out, /^Started the new lead headless/);
+    await waitFor(process.env.FAKE_OUT);
+    assert.ok(!orcaCalls().some((c) => c[1] === 'create'));
+    assert.match(team.main(['L1', 'handoff', doc]).out, /--spawn with this project's runner_lead: headless/);
+  } finally { orcaOff(); }
+});
+
+test('M-1d: runner window opens a terminal window (members, leads, resume)', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  assert.equal(lib.setRunners(KEY, { runner_lead: 'window', runner_member: 'window' }).ok, true);
+  try {
+    windowEnv();
+    const r = team.main(['L1', 'spawn', '--role', 'fe', 'build']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /in a new terminal window/);
+    const w = await windowSpec();
+    assert.equal(w.title, 'fe');
+    assert.equal(slash(w.cwd), slash(CWD));
+    assert.match(w.command, /^node ".*\/orca-launch\.js" ".*\.window-\d+\.json"$/);
+    assert.ok(!w.spec.args.includes('-p'));
+    const sid = flagOf(w.spec.args, '--session-id');
+    const s = readJson(paths.sessions, {})[sid];
+    assert.equal(s.runner, 'window');
+    assert.equal(s.headless, false);
+    assert.match(team.main(['L1', 'list']).out, / window/);
+    // An ended window member is resumed in a new window.
+    const all = readJson(paths.sessions, {});
+    Object.assign(all[sid], { state: 'ended', ended: 'x' });
+    writeJson(paths.sessions, all);
+    windowEnv();
+    assert.match(team.main(['L1', 'send', sid, 'next']).out, /Resumed fe .*in a new terminal window/);
+    const w2 = await windowSpec();
+    assert.deepEqual(w2.spec.args.slice(0, 2), ['--resume', sid]);
+    assert.equal(fs.readFileSync(w2.spec.prompt_file, 'utf8'), '[Lead instruction]\nnext');
+    assert.equal(readJson(paths.sessions, {})[sid].ended, undefined);
+    // A new lead on handoff --spawn.
+    windowEnv();
+    const doc = path.join(BOARD, 'handoff.md');
+    fs.writeFileSync(doc, '# handoff');
+    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /^Started the new lead in a new terminal window/);
+    const w3 = await windowSpec();
+    assert.equal(w3.title, 'lead Alpha');
+    assert.match(fs.readFileSync(w3.spec.prompt_file, 'utf8'), /^\[ddash lead-handoff from=L1/);
+  } finally { windowOff(); }
+});
+
+test('M-1d: an unavailable configured runner falls back to headless with a note; flags override and are strict', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  lib.setRunners(KEY, { runner_member: 'window', runner_lead: 'orca' });
+  try {
+    windowOff(); // DDASH_WINDOW=0
+    process.env.FAKE_OUT = path.join(BOARD, 'f1.json');
+    const r = team.main(['L1', 'spawn', '--role', 'be', 'api']);
+    assert.match(r.out, /^The configured runner window is not available \(terminal windows are turned off.*\); started headless instead\.\nSpawned be: .* headless/);
+    await waitFor(process.env.FAKE_OUT);
+    // Orca down: the lead runner falls back too.
+    orcaEnv({ up: false });
+    const doc = path.join(BOARD, 'handoff.md');
+    fs.writeFileSync(doc, '# handoff');
+    process.env.FAKE_OUT = path.join(BOARD, 'f2.json');
+    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /^The configured runner orca is not available \(Orca is not running.*\); started headless instead\.\nStarted the new lead headless/);
+    await waitFor(process.env.FAKE_OUT);
+    // Flags win over the setting: --headless runs headless without a note; --window is refused when no window can open.
+    process.env.FAKE_OUT = path.join(BOARD, 'f3.json');
+    assert.match(team.main(['L1', 'spawn', '--headless', '--role', 'be', 'api']).out, /^Spawned be: .* headless/);
+    await waitFor(process.env.FAKE_OUT);
+    const before = Object.keys(readJson(paths.sessions, {})).length;
+    const w = team.main(['L1', 'spawn', '--window', '--role', 'be', 'api']);
+    assert.equal(w.code, 1);
+    assert.match(w.out, /terminal windows are turned off .*Use --headless, or leave out --window/);
+    assert.equal(Object.keys(readJson(paths.sessions, {})).length, before);
+    assert.match(team.main(['L1', 'spawn', '--window', '--orca', '--role', 'be', 'api']).out, /use only one of --headless, --orca, --window/);
+    // --window works when a window can open, whatever the setting.
+    windowEnv();
+    lib.setRunners(KEY, { runner_member: 'orca' });
+    assert.match(team.main(['L1', 'spawn', '--window', '--role', 'qa', 'test']).out, /in a new terminal window/);
+    await windowSpec();
+  } finally { orcaOff(); windowOff(); }
+});
+
+test('M-1d: setRunners validates; /api/settings with a project saves runners, /api/state shows them', async () => {
+  teamFixture();
+  assert.match(lib.setRunners(KEY, { runner_lead: 'tmux' }).error, /runner_lead must be one of headless, orca, window/);
+  assert.match(lib.setRunners(KEY, {}).error, /required/);
+  assert.equal(lib.setRunners('nope', { runner_lead: 'orca' }).code, 404);
+  await withServer(async (post, base) => {
+    const r = await post('/api/settings', { project: KEY, runner_member: 'orca' }, { Origin: base });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body, { ok: true, runner_lead: 'headless', runner_member: 'orca' });
+    assert.equal((await post('/api/settings', { project: KEY, runner_lead: 'bad' }, { Origin: base })).status, 400);
+    const st = await (await fetch(`${base}/api/state`)).json();
+    const tp = Object.values(st.teams).find((x) => x.key === KEY);
+    assert.equal(tp.runner_member, 'orca');
+    assert.equal(tp.runner_lead, 'headless');
+  });
+  assert.equal(project().spawn.runner_member, 'orca');
+});
+
+test('M-1d: window launcher per platform', () => {
+  const save = process.env.DDASH_WINDOW_BIN;
+  delete process.env.DDASH_WINDOW_BIN;
+  try {
+    const l = require(path.join(ROOT, 'scripts', 'terminal.js')).launcher({ title: 'lead "A"', cwd: 'C:/w', command: 'node "a.js" "b.json"' });
+    if (process.platform === 'win32') {
+      assert.deepEqual(l.args.slice(0, 3), ['/d', '/s', '/c']);
+      assert.equal(l.args[3], '"start "lead A" /D "C:/w" cmd /k "node "a.js" "b.json"""');
+      assert.equal(l.verbatim, true);
+    } else if (process.platform === 'darwin') {
+      assert.equal(l.file, 'osascript');
+      assert.match(l.args[1], /do script "cd 'C:\/w' && node \\"a\.js\\" \\"b\.json\\""/);
+    } else {
+      assert.deepEqual(l.args.slice(0, 2), ['-T', 'lead A']);
+    }
+  } finally { if (save !== undefined) process.env.DDASH_WINDOW_BIN = save; }
 });
 
 test('team.js send to an Orca member: inbox, typed into its terminal, or resumed', async () => {

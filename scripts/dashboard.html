@@ -149,6 +149,8 @@
   .mode-bar { max-width: 860px; margin: 0 auto; padding: 12px 20px 0; color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; }
   .mode-bar button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
   .mode-bar:empty { display: none; }
+  .mode-bar .runner { display: inline-flex; gap: 4px; align-items: center; }
+  .mode-bar .runner .mode-sel { max-width: 160px; }
   .archive-link { margin-top: 16px; color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); text-align: center; padding: 48px 0; }
 
@@ -574,6 +576,12 @@ function renderMain() {
       ${query ? `<button data-clear-search>${esc(t('search.clear'))}</button>` : ''}
       ${archivedView ? `<button data-archived>${esc(t('search.back'))}</button>` : ''}`;
   }
+  // Project scope: how its new leads and members start (projects.json spawn.runner_lead / runner_member).
+  const tp = scope.kind === 'project' && !searching() ? teams()[scope.id] : null;
+  if (tp) {
+    const runnerSel = (k, label) => `<label class="runner">${esc(t(label))} <select class="mode-sel" data-runner="${k}" data-project="${esc(scope.id)}" title="${esc(t('runner.title'))}">${['headless', 'orca', 'window'].map((v) => `<option value="${v}"${tp[k] === v ? ' selected' : ''}>${esc(t(`runner.${v}`))}</option>`).join('')}</select></label>`;
+    mode = runnerSel('runner_lead', 'runner.lead') + runnerSel('runner_member', 'runner.member');
+  }
   document.getElementById('mode').innerHTML = mode;
 
   const rep = document.getElementById('reports');
@@ -799,6 +807,16 @@ document.getElementById('lang').addEventListener('change', async (e) => {
 // "+ team" adds a team led by the chosen session (its name is asked; a name in use is refused by the server).
 // "solo" removes every team of the project.
 const nextTeamName = (p) => { const used = teams()[p]?.teams || {}; for (let i = 1; ; i++) if (!used[`team${i}`]) return `team${i}`; };
+// Runner pickers (project scope): saved through the settings API.
+document.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-runner]');
+  if (!sel) return;
+  try {
+    await post('/api/settings', { project: sel.dataset.project, [sel.dataset.runner]: sel.value });
+  } catch (err) { alert(t('err.runner', { e: err.message })); }
+  load();
+});
+
 document.addEventListener('change', async (e) => {
   const sel = e.target.closest('select[data-mode-key]');
   if (!sel || !sel.value) return;

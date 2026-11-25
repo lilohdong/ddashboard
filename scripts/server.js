@@ -2,6 +2,8 @@
 // Local dashboard server (no model calls)
 //   GET  /            dashboard page (GET /i18n.js: its text in en, ko, zh-CN)
 //   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
+//                     POST /api/settings {project, runner_lead?, runner_member?: headless|orca|window} -> how a
+//                     project's new leads (handoff --spawn) and members start (projects.json spawn)
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
 //                     token usage (usage_total for connected sessions, usage_today), context_warn, lead sessions' lead_baseline, lead_handoff_at,
 //                     context_window and baseline_big (start over half the window),
@@ -11,8 +13,8 @@
 //                     {project, mode: solo, team?} -> remove that team (no team: every team); solo when none is left
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
 //   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
-//   POST /api/team/spawn      {lead, role, model?, stay?, task, group?, runner?: orca|headless} -> start a member for a
-//                             live lead (visible in an Orca terminal when Orca runs, else headless)
+//   POST /api/team/spawn      {lead, role, model?, stay?, task, group?, runner?: headless|orca|window} -> start a member
+//                             for a live lead (runner left out: the project's runner_member)
 //   POST /api/groups          {project, team, action: create|rename|delete, name, new_name?, purge?} -> manage a team's
 //                             groups (team may be left out when the project has one team)
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
@@ -24,7 +26,7 @@ const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
-  readProjects, teamOfSession, teamsOf, own,
+  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -77,7 +79,7 @@ function teams(projects, sessions) {
       const groups = Object.fromEntries(Object.entries(t.groups || {}).map(([n, g]) => [n, { dir: g.dir, created: g.created }]));
       list[tn] = { lead: t.lead || null, worktree: t.worktree || null, groups };
     }
-    out[name] = { key, mode: Object.keys(list).length ? 'team' : 'solo', mode_ver: Number(p.mode_ver) || 0, teams: list };
+    out[name] = { key, mode: Object.keys(list).length ? 'team' : 'solo', mode_ver: Number(p.mode_ver) || 0, teams: list, ...runnersOf(p) };
   }
   return out;
 }
@@ -110,6 +112,11 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/settings') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     return readBody(req, res, (msg) => {
+      if (msg.project !== undefined) {
+        const key = projectKeyOf(readProjects(), readJson(paths.sessions, {}), String(msg.project));
+        const r = setRunners(key, { runner_lead: msg.runner_lead, runner_member: msg.runner_member });
+        return r.ok ? send(res, 200, r) : send(res, r.code || 400, { error: r.error });
+      }
       const r = saveSettings({ lang: msg.lang || null });
       if (!r.ok) return send(res, 400, { error: r.error });
       send(res, 200, { ok: true, lang: r.settings.lang || null });
@@ -243,7 +250,7 @@ const server = http.createServer((req, res) => {
       if (!role || !task) return send(res, 400, { error: 'role and task required' });
       let r;
       try {
-        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: ['orca', 'headless'].includes(msg.runner) ? msg.runner : undefined });
+        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: team.RUNNERS.includes(msg.runner) ? msg.runner : undefined });
       } catch (err) { return send(res, 400, { error: String(err.message || err) }); }
       const first = task.split(/\r?\n/)[0].slice(0, 200);
       deliver(leadSid, {

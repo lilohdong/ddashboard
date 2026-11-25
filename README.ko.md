@@ -90,12 +90,12 @@ Claude Code 안에서 실행합니다.
 
 **team 모드**는 내가 대화하는 팀장 세션과, 일을 나눠 맡고 그 팀장에게 보고하는 팀원 세션(기획, 프론트, 백엔드, QA 등)으로 일하는 방식입니다. 팀끼리 팀원을 공유하지 않고, 한 팀의 교대·그룹·정리는 다른 팀에 영향을 주지 않습니다. 둘 사이의 전달은 대시보드 답글과 같은 파일 인박스와 대기 명령을 쓰므로 토큰이 들지 않습니다. `~/.ddashboard/projects.json`에는 프로젝트마다 `teams: { <이름>: { lead, worktree, groups } }`가 저장되고, 이전 설정(`lead`, `lead_name`, `groups`)은 처음 읽을 때 자동으로 옮겨집니다.
 
-- **팀원**은 첫 입력의 태그로 시작합니다: `[ddash role=<역할> lead=<팀장 세션 ID> stay=0|1]`. 팀장이 `team.js`로 띄웁니다. Orca가 실행 중이면 팀장 worktree의 새 Orca 터미널에 보이는 대화형 `claude`로, 아니면 헤드리스(`claude -p`를 백그라운드로 실행, 터미널 불필요)로 띄웁니다. 태그를 붙인 지시문을 아무 터미널에 붙여 넣어도 됩니다.
+- **팀원**은 첫 입력의 태그로 시작합니다: `[ddash role=<역할> lead=<팀장 세션 ID> stay=0|1]`. 팀장이 `team.js`로 띄우며, 방식은 프로젝트의 **팀원 실행 방식**을 따릅니다: `headless`(기본값, `claude -p`를 백그라운드로 실행, 터미널 불필요), `orca`(팀장 worktree의 새 Orca 터미널에 보이는 대화형 `claude`), `window`(OS 새 터미널 창: Windows는 `start cmd /k`, macOS는 `osascript`로 Terminal, Linux는 `x-terminal-emulator`). **팀장 실행 방식**은 `handoff --spawn`으로 띄우는 새 팀장에 같은 방식으로 쓰입니다. 둘 다 대시보드(프로젝트를 고르면 카드 위 막대)나 `~/.ddashboard/projects.json`의 `spawn.runner_member` / `spawn.runner_lead`에서 고릅니다. 고른 방식을 쓸 수 없으면 헤드리스로 띄우고 출력에 그 사실을 남깁니다. 태그를 붙인 지시문을 아무 터미널에 붙여 넣어도 됩니다.
 - **팀장**은 다음 명령을 씁니다(정확한 명령줄은 팀장 안내문에 있고, 고정 경로 `~/.ddashboard/bin/team.js`로 실행됩니다):
   | 명령 | 하는 일 |
   |---|---|
-  | `spawn --role <역할> [--group <g>] [--model <m>] [--stay] [--headless\|--orca] "<과제>"` | 팀원 실행. Orca가 실행 중이면 Orca 터미널, 아니면 헤드리스(출력은 `~/.ddashboard/logs/<세션 ID>.log`). `--headless` / `--orca`로 고정 |
-  | `send <세션 ID\|역할> "<내용>"` | 지시 전달. 팀원이 대기 중이거나 실행 중이면 인박스로, Orca 터미널에서 쉬는 중이면 그 터미널에 입력, 아니면 이어 실행(새 Orca 터미널의 `claude --resume` 또는 `claude -p --resume`) |
+  | `spawn --role <역할> [--group <g>] [--model <m>] [--stay] [--headless\|--orca\|--window] "<과제>"` | 팀원 실행. 팀원 실행 방식을 따름(헤드리스 출력은 `~/.ddashboard/logs/<세션 ID>.log`). `--headless` / `--orca` / `--window`가 설정보다 우선하며, 그 방식을 쓸 수 없으면 거부 |
+  | `send <세션 ID\|역할> "<내용>"` | 지시 전달. 팀원이 대기 중이거나 실행 중이면 인박스로, Orca 터미널에서 쉬는 중이면 그 터미널에 입력, 아니면 이어 실행(전에 돌던 방식대로 새 Orca 터미널이나 터미널 창의 `claude --resume`, 또는 `claude -p --resume`) |
   | `list` | 팀원 목록(역할, 상태, 대기 여부, 최근 카드) |
   | `show <카드 ID>` | 카드 전체 보기(긴 details는 보고에 복사되지 않음) |
   | `handoff <문서>` | 새 세션에게 팀장 넘기기(가이드 참고) |
@@ -154,7 +154,8 @@ Claude Code 안에서 실행합니다.
 | `DDASH_LEAD_CONTEXT_LIMIT` | 없음 | 시작 맥락 + 예산 대신 쓰는 절대 교대 지점(토큰). 창의 80% 상한은 그대로 |
 | `DDASH_HANDOFF_MAX_TOKENS` | `6000` | `T handoff`가 받는 팀장 인수인계 문서의 최대 크기(추정 토큰). `0`은 상한 없음 |
 | `DDASH_BRIEF_STALE_COMMITS` | `20` | 그룹 brief를 마지막으로 고친 뒤 이만큼 커밋이 쌓이면 팀장에게 낡았을 수 있다고 알림 |
-| `DDASH_ORCA` | 켜짐 | `0`이면 팀원을 Orca 터미널로 띄우지 않음(항상 헤드리스) |
+| `DDASH_ORCA` | 켜짐 | `0`이면 Orca를 쓰지 않음(`orca` 방식은 헤드리스로 대체) |
+| `DDASH_WINDOW` | 켜짐 | `0`이면 터미널 창을 쓰지 않음(`window` 방식은 헤드리스로 대체) |
 
 서버만 따로 다룰 때:
 

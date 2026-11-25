@@ -366,6 +366,25 @@ ${group}${tail}
 // --- Team mode ---
 
 const DEFAULT_SPAWN = { permission_mode: 'auto', allowed_tools: ['Bash(git *)', 'Bash(node *)', 'Bash(npm *)'] };
+
+// How new sessions start (plan M-1d): projects.json spawn.runner_lead (a new lead on handoff --spawn) and
+// spawn.runner_member (members). headless | orca | window; default headless.
+const RUNNER_VALUES = ['headless', 'orca', 'window'];
+const runnersOf = (p) => Object.fromEntries(['runner_lead', 'runner_member'].map((k) => [k, RUNNER_VALUES.includes(p?.spawn?.[k]) ? p.spawn[k] : 'headless']));
+
+// Save a project's runners (either or both). Returns { ok, runner_lead, runner_member } or { ok: false, code, error }.
+function setRunners(key, values = {}) {
+  const projects = readProjects();
+  const p = own(projects, key);
+  if (!p) return { ok: false, code: 404, error: 'project is not connected' };
+  const keys = ['runner_lead', 'runner_member'].filter((k) => values[k] !== undefined);
+  if (!keys.length) return { ok: false, code: 400, error: 'runner_lead or runner_member required' };
+  for (const k of keys) if (!RUNNER_VALUES.includes(values[k])) return { ok: false, code: 400, error: `${k} must be one of ${RUNNER_VALUES.join(', ')}` };
+  p.spawn = { ...(p.spawn || {}) };
+  for (const k of keys) p.spawn[k] = values[k];
+  writeJson(paths.projects, projects);
+  return { ok: true, ...runnersOf(p) };
+}
 const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
 const isEnded = (s) => Boolean(s && (s.ended || s.state === 'ended'));
@@ -1369,7 +1388,7 @@ module.exports = {
   safeId, ensureDir, readJson, writeJson, appendJsonl, readJsonl,
   readHookInput, alive, serverPid, git, projectKey, projectName, projectActive, setProject,
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
-  DEFAULT_SPAWN, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
+  DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,

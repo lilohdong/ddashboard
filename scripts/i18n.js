@@ -134,6 +134,13 @@
     'err.spawn': 'Could not spawn: {e}',
     'err.send': 'Could not send: {e}',
     'err.lang': 'Could not save the language: {e}',
+    'err.runner': 'Could not save the runner: {e}',
+    'runner.lead': 'Lead runner',
+    'runner.member': 'Member runner',
+    'runner.title': 'How new sessions of this project start: headless in the background, in an Orca terminal, or in a new terminal window. When Orca or a window is not available, headless is used.',
+    'runner.headless': 'headless (background)',
+    'runner.orca': 'Orca terminal',
+    'runner.window': 'terminal window',
   };
 
   const ko = {
@@ -266,6 +273,13 @@
     'err.spawn': '팀원을 띄우지 못했습니다: {e}',
     'err.send': '보내지 못했습니다: {e}',
     'err.lang': '언어를 저장하지 못했습니다: {e}',
+    'err.runner': '실행 방식을 저장하지 못했습니다: {e}',
+    'runner.lead': '팀장 실행 방식',
+    'runner.member': '팀원 실행 방식',
+    'runner.title': '이 프로젝트의 새 세션을 띄우는 방식: 백그라운드(headless), Orca 터미널, 새 터미널 창. Orca나 창을 쓸 수 없으면 headless로 띄웁니다.',
+    'runner.headless': 'headless (백그라운드)',
+    'runner.orca': 'Orca 터미널',
+    'runner.window': '터미널 창',
   };
 
   const zh = {
@@ -398,6 +412,13 @@
     'err.spawn': '无法启动：{e}',
     'err.send': '无法发送：{e}',
     'err.lang': '无法保存语言：{e}',
+    'err.runner': '无法保存启动方式：{e}',
+    'runner.lead': '组长启动方式',
+    'runner.member': '成员启动方式',
+    'runner.title': '本项目新会话的启动方式：后台（headless）、Orca 终端或新的终端窗口。无法使用 Orca 或窗口时改用 headless。',
+    'runner.headless': 'headless（后台）',
+    'runner.orca': 'Orca 终端',
+    'runner.window': '终端窗口',
   };
 
   const DICT = { en, ko, 'zh-CN': zh };

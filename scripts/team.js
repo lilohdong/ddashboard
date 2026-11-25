@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 // Team commands for a team lead (run through the fixed path BOARD_DIR/bin/team.js).
-//   node team.js <lead sid> spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca] "<task>"
-//       start a member: if Orca runs, a visible interactive claude in an Orca terminal in the lead's worktree
-//       (runner orca, see orca.js); else headless (claude -p) in the background (runner headless).
+//   node team.js <lead sid> spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca|--window] "<task>"
+//       start a member with the project's runner_member (projects.json spawn; default headless): headless (claude -p in
+//       the background), orca (a visible interactive claude in an Orca terminal, see orca.js) or window (a new OS
+//       terminal window, see terminal.js). A configured runner that cannot run here falls back to headless (noted);
+//       a runner flag overrides the setting and is refused when it cannot run here.
 //       Log: BOARD_DIR/logs/<sid>.log. With --group it gets the group's brief and latest handoff before its task.
 //   node team.js <lead sid> send <sid|role> "<text>"
 //       instruction to a member: into its inbox if it is waiting or still running; an idle Orca member gets it
 //       typed into its terminal; else resume it (in a new Orca terminal, or claude -p --resume)
 //   node team.js <lead sid> list                 members: role, state, waiting, last card
 //   node team.js <lead sid> show <card-id>       a card in full (long report details)
-//   node team.js <lead sid> handoff <doc> [--spawn] [--headless|--orca] [--model <m>]
-//       prepare a lead handoff; prints the first prompt for the new lead. --spawn starts it like a member:
-//       in a visible Orca terminal titled 'lead <team>' when Orca runs, else headless. --headless/--orca force one
-//       (and imply --spawn). The doc must be under DDASH_HANDOFF_MAX_TOKENS (6000) estimated tokens.
+//   node team.js <lead sid> handoff <doc> [--spawn] [--headless|--orca|--window] [--model <m>]
+//       prepare a lead handoff; prints the first prompt for the new lead. --spawn starts it with the project's
+//       runner_lead (same rules as members; terminal title 'lead <team>'). A runner flag forces one and implies --spawn. The doc must be under DDASH_HANDOFF_MAX_TOKENS (6000) estimated tokens.
 //   node team.js <lead sid> group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
 //       groups of the lead's team keep shared memory in docs/teams/<team>/<g>/ of the team's worktree
 //       (brief.md, handoff-NNN.md, notes/). Nothing is committed; the lead commits the docs.
@@ -27,17 +28,18 @@ const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const lib = require('./lib');
 const orca = require('./orca');
+const terminal = require('./terminal');
 
 const { paths, readJson, writeJson, ensureDir, safeId, alive, DEFAULT_SPAWN } = lib;
 const slash = (p) => String(p).replace(/\\/g, '/');
 
 function usage() {
   return `Usage: node team.js <lead session id> <command>
-  spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca] "<task>"
+  spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca|--window] "<task>"
   send <sid|role> "<text>"
   list
   show <card-id>
-  handoff <doc-path> [--spawn] [--headless|--orca] [--model <m>]
+  handoff <doc-path> [--spawn] [--headless|--orca|--window] [--model <m>]
   group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
   next-handoff [<g>]`;
 }
@@ -132,27 +134,63 @@ function spawnOptions(project, flags) {
 
 const tagValue = (v) => (/^[^\s\]"]+$/.test(v) ? v : `"${String(v).replace(/["\]]/g, '')}"`);
 
-// Where a new member runs: a visible Orca terminal when Orca is up, else headless (claude -p).
-// runner 'orca' / 'headless' forces one.
-function pickRunner(runner) {
-  if (runner === 'headless') return 'headless';
-  if (runner === 'orca') {
-    if (!orca.available()) throw new Error('Orca is not running (see: orca status). Use --headless, or leave out --orca.');
-    return 'orca';
-  }
-  return orca.available() ? 'orca' : 'headless';
+// Runners: headless (claude -p in the background), orca (Orca terminal), window (new OS terminal window).
+const RUNNERS = ['headless', 'orca', 'window'];
+
+// The project's runner for new leads ('lead') or members ('member'): projects.json spawn.runner_<kind>, default headless.
+function configuredRunner(project, kind) {
+  const r = project?.spawn?.[`runner_${kind}`];
+  return RUNNERS.includes(r) ? r : 'headless';
 }
 
-// Start an interactive claude in a new, visible Orca terminal in the worktree of cwd. The prompt becomes
-// its first message. Returns { handle, pane }.
-function runOrca(sid, args, prompt, cwd, title) {
+// Why a runner cannot run here ('' when it can).
+function runnerProblem(r) {
+  if (r === 'orca') return orca.available() ? '' : 'Orca is not running (see: orca status)';
+  if (r === 'window') return terminal.unavailableReason();
+  return '';
+}
+
+// Where a new session runs. forced (a runner flag) must work here or it is refused; the configured runner
+// falls back to headless with a note. Returns { how, note }.
+function pickRunner(forced, configured = 'headless') {
+  if (forced) {
+    const why = runnerProblem(forced);
+    if (why) throw new Error(`${why}. Use --headless, or leave out --${forced}.`);
+    return { how: forced, note: '' };
+  }
+  const want = RUNNERS.includes(configured) ? configured : 'headless';
+  const why = runnerProblem(want);
+  return why ? { how: 'headless', note: `The configured runner ${want} is not available (${why}); started headless instead.` } : { how: want, note: '' };
+}
+
+// The runner flag (--headless | --orca | --window) or undefined.
+function runnerFlag(flags) {
+  const set = RUNNERS.filter((r) => flags[r]);
+  if (set.length > 1) throw new Error('use only one of --headless, --orca, --window.');
+  return set[0];
+}
+
+const runnerLabel = (r) => (r === 'orca' ? 'Orca' : 'The terminal window');
+
+// Spec file for orca-launch.js (starts an interactive claude with the prompt as its first message) and the
+// short command that runs it. Going through a file keeps long or multi-line prompts free of shell quoting.
+function launchCommand(sid, args, prompt, cwd, kind) {
   ensureDir(paths.logsDir);
-  const base = path.join(paths.logsDir, `${safeId(sid)}.orca-${Date.now()}`);
+  const base = path.join(paths.logsDir, `${safeId(sid)}.${kind}-${Date.now()}`);
   fs.writeFileSync(`${base}.prompt.txt`, prompt);
   fs.writeFileSync(`${base}.json`, JSON.stringify({ args, prompt_file: `${base}.prompt.txt`, cwd }));
-  fs.appendFileSync(paths.log(sid), `\n--- ${new Date().toISOString()} orca terminal: claude ${args.join(' ')}\n`);
-  const command = `node "${slash(path.join(__dirname, 'orca-launch.js'))}" "${slash(base)}.json"`;
-  return orca.openTerminal({ cwd, title, command });
+  fs.appendFileSync(paths.log(sid), `\n--- ${new Date().toISOString()} ${kind} terminal: claude ${args.join(' ')}\n`);
+  return `node "${slash(path.join(__dirname, 'orca-launch.js'))}" "${slash(base)}.json"`;
+}
+
+// Start an interactive claude in a new, visible Orca terminal in the worktree of cwd. Returns { handle, pane }.
+function runOrca(sid, args, prompt, cwd, title) {
+  return orca.openTerminal({ cwd, title, command: launchCommand(sid, args, prompt, cwd, 'orca') });
+}
+
+// Start an interactive claude in a new OS terminal window in cwd. Returns { pid } of the launcher.
+function runWindow(sid, args, prompt, cwd, title) {
+  return terminal.openWindow({ cwd, title, command: launchCommand(sid, args, prompt, cwd, 'window') });
 }
 
 function updateSession(sid, fields, drop = []) {
@@ -163,8 +201,8 @@ function updateSession(sid, fields, drop = []) {
   writeJson(paths.sessions, sessions);
 }
 
-// Start a member of this lead: visible in Orca when it runs (runner 'orca'), else headless (runner 'headless').
-// Used by `team.js spawn` and the dashboard (POST /api/team/spawn). runner forces one ('orca' | 'headless').
+// Start a member of this lead with the project's runner_member (see pickRunner). Used by `team.js spawn` and the
+// dashboard (POST /api/team/spawn). runner forces one ('headless' | 'orca' | 'window').
 // Returns { sid, runner, pid, terminal, log, note }.
 function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   role = String(role || '').trim().slice(0, 40);
@@ -179,7 +217,8 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
     lib.pruneGroup(g);
     try { lib.checkBriefs(lead.project_key); } catch { /* best effort */ }
   }
-  let how = pickRunner(runner);
+  const picked = pickRunner(runner, configuredRunner(project, 'member'));
+  let how = picked.how;
   const sid = crypto.randomUUID();
   const flags = { role, model: model ? String(model).trim() : undefined, stay: Boolean(stay) };
   const opts = spawnOptions(project, flags);
@@ -199,20 +238,26 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   if (group) sessions[sid].group = group;
   writeJson(paths.sessions, sessions);
   const log = slash(paths.log(sid));
-  let note = '';
-  if (how === 'orca') {
+  let note = picked.note;
+  if (how !== 'headless') {
     try {
-      const t = runOrca(sid, ['--session-id', sid, ...claudeArgs(opts)], prompt, cwd, `${flags.role}${group ? ` · ${group}` : ''}`);
+      const args = ['--session-id', sid, ...claudeArgs(opts)];
+      const title = `${flags.role}${group ? ` · ${group}` : ''}`;
+      if (how === 'window') {
+        runWindow(sid, args, prompt, cwd, title);
+        return { sid, runner: how, pid: 0, terminal: '', log, note };
+      }
+      const t = runOrca(sid, args, prompt, cwd, title);
       updateSession(sid, { orca: t });
       return { sid, runner: how, pid: 0, terminal: t.handle, log, note };
     } catch (err) {
-      if (runner === 'orca') {
+      if (runner === how) {
         const all = readJson(paths.sessions, {});
         delete all[sid];
         writeJson(paths.sessions, all);
         throw err;
       }
-      note = `Orca could not open a terminal (${err.message}); started headless instead.`;
+      note = `${runnerLabel(how)} could not open a terminal (${err.message}); started headless instead.`;
       how = 'headless';
       updateSession(sid, { runner: how, headless: true });
     }
@@ -223,12 +268,11 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
 }
 
 function cmdSpawn(leadSid, argv) {
-  const { flags, words } = parseArgs(argv, ['stay', 'headless', 'orca']);
+  const { flags, words } = parseArgs(argv, ['stay', ...RUNNERS]);
   if (!flags.role || !words.length) throw new Error('spawn needs --role <role> and a task.');
-  if (flags.headless && flags.orca) throw new Error('use either --headless or --orca.');
-  const runner = flags.headless ? 'headless' : flags.orca ? 'orca' : undefined;
+  const runner = runnerFlag(flags);
   const r = spawnMember(leadSid, { role: flags.role, model: flags.model, stay: flags.stay, task: words.join(' '), group: flags.group, runner });
-  const where = r.runner === 'orca' ? `in a visible Orca terminal (${r.terminal})` : `headless (pid ${r.pid || '?'}). Log: ${r.log}`;
+  const where = r.runner === 'orca' ? `in a visible Orca terminal (${r.terminal})` : r.runner === 'window' ? 'in a new terminal window' : `headless (pid ${r.pid || '?'}). Log: ${r.log}`;
   return `${r.note ? `${r.note}\n` : ''}Spawned ${flags.role}${flags.group ? ` in ${flags.group}` : ''}: ${r.sid} ${where}\nIts cards come to you as [Team report].`;
 }
 
@@ -258,6 +302,7 @@ function cmdSend(leadSid, argv) {
   if (!m) throw new Error(`no member "${target}" of this lead. See: list`);
   const sid = m.session_id;
   if (m.runner === 'orca') return sendOrca(leadSid, m, text);
+  if (m.runner === 'window' && lib.isEnded(m)) return resumeWindow(m, text);
   const running = m.headless && alive(m.pid);
   if (lib.waitPid(sid) || running || !m.headless) {
     lib.deliver(sid, { type: 'order', from: leadSid, text: text.slice(0, 8000) });
@@ -308,6 +353,26 @@ function sendOrca(leadSid, m, text) {
   return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}) headless: Orca is not available. Log: ${slash(paths.log(sid))}`;
 }
 
+// A member that ran in a terminal window and has ended: resumed in a new window (headless when none can open).
+function resumeWindow(m, text) {
+  const sid = m.session_id;
+  const opts = m.spawn || {};
+  const cwd = opts.cwd || m.cwd || process.cwd();
+  const prompt = `[Lead instruction]\n${text}`;
+  const now = new Date().toISOString();
+  let why = terminal.unavailableReason();
+  if (!why) {
+    try {
+      runWindow(sid, ['--resume', sid, ...claudeArgs(opts)], prompt, cwd, `${m.role}${m.group ? ` · ${m.group}` : ''}`);
+      updateSession(sid, { state: 'working', last_seen: now }, ['ended', 'end_reason']);
+      return `Resumed ${m.role} (${sid.slice(0, 8)}) in a new terminal window.`;
+    } catch (err) { why = err.message; }
+  }
+  const pid = runClaude(sid, ['-p', '--resume', sid, ...claudeArgs(opts)], prompt, cwd);
+  updateSession(sid, { pid, runner: 'headless', headless: true, state: 'working', last_seen: now }, ['ended', 'end_reason']);
+  return `Resumed ${m.role} (${sid.slice(0, 8)}, pid ${pid || '?'}) headless: no terminal window (${why}). Log: ${slash(paths.log(sid))}`;
+}
+
 function cmdList(leadSid) {
   const { sessions } = context(leadSid);
   const members = Object.values(sessions).filter((s) => s.kind === 'member' && s.lead === leadSid);
@@ -318,7 +383,7 @@ function cmdList(leadSid) {
     let pending = 0;
     try { pending = fs.readdirSync(paths.inbox(s.session_id)).filter((f) => f.endsWith('.json')).length; } catch {}
     const last = s.last_title ? ` | last: ${s.last_status} "${s.last_title}"` : '';
-    return `${s.session_id}  ${s.role}${s.group ? ` [${s.group}]` : ''}  ${state}${waiting ? ' (waiting)' : ''}${pending ? ` ${pending} queued` : ''}${s.headless ? ' headless' : s.runner === 'orca' ? ' orca' : ''}${s.stay ? ' stay' : ''}${last}`;
+    return `${s.session_id}  ${s.role}${s.group ? ` [${s.group}]` : ''}  ${state}${waiting ? ' (waiting)' : ''}${pending ? ` ${pending} queued` : ''}${s.headless ? ' headless' : s.runner === 'orca' || s.runner === 'window' ? ` ${s.runner}` : ''}${s.stay ? ' stay' : ''}${last}`;
   }).join('\n');
 }
 
@@ -344,17 +409,16 @@ function cmdShow(_leadSid, argv) {
 }
 
 function cmdHandoff(leadSid, argv) {
-  const { flags, words } = parseArgs(argv, ['spawn', 'headless', 'orca']);
+  const { flags, words } = parseArgs(argv, ['spawn', ...RUNNERS]);
   if (!words[0]) throw new Error('handoff needs the path of your handoff doc.');
-  if (flags.headless && flags.orca) throw new Error('use either --headless or --orca.');
-  const runner = flags.headless ? 'headless' : flags.orca ? 'orca' : undefined;
-  // --orca / --headless imply --spawn. Check Orca before anything is written.
-  const how = flags.spawn || runner ? pickRunner(runner) : '';
+  const runner = runnerFlag(flags);
+  const { lead, project, projects } = context(leadSid);
+  // A runner flag implies --spawn. Check it before anything is written.
+  const picked = flags.spawn || runner ? pickRunner(runner, configuredRunner(project, 'lead')) : null;
   const doc = path.resolve(words.join(' ')).replace(/\\/g, '/');
   if (!fs.existsSync(doc)) throw new Error(`handoff doc not found: ${doc}`);
   const tokens = lib.estimateTokens(fs.readFileSync(doc, 'utf8'));
   if (lib.HANDOFF_MAX_TOKENS && tokens > lib.HANDOFF_MAX_TOKENS) throw new Error(`handoff doc is too long: about ${tokens} tokens (limit ${lib.HANDOFF_MAX_TOKENS}). Shorten it to the current state only (open items, members and tasks, changed decisions, next steps); move finished work to the plan/commits and fixed rules to the team's lead-rules.md. Then run handoff again.`);
-  const { lead, project, projects } = context(leadSid);
   const own = ownTeam(project, leadSid);
   // This command runs under the lead's own Claude process: remember its pid so the takeover can stop it.
   const claudePid = lib.recordClaudePid(leadSid, process.ppid);
@@ -364,24 +428,30 @@ function cmdHandoff(leadSid, argv) {
   writeJson(paths.projects, projects);
   const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read only this handoff doc${rules ? ` and the team rules ${rules}` : ''} (not older handoff docs), then take over as team lead. Start the wait command from your instructions.`;
   const stop = claudePid ? `this session (Claude pid ${claudePid}) is stopped` : 'this session is told to stop (its Claude process was not found)';
-  if (how) {
+  if (picked) {
     const sid = crypto.randomUUID();
     const opts = spawnOptions(project, flags);
-    let note = '';
-    if (how === 'orca') {
-      // Interactive in a visible Orca terminal (no -p), at the worktree root like members.
+    const cwd = lead.cwd || process.cwd();
+    const args = ['--session-id', sid, ...claudeArgs(opts)];
+    let note = picked.note ? `${picked.note}\n` : '';
+    if (picked.how !== 'headless') {
+      // Interactive (no -p) in a visible terminal; Orca at the worktree root like members.
       try {
-        const t = runOrca(sid, ['--session-id', sid, ...claudeArgs(opts)], prompt, orca.worktreeRoot(lead.cwd || process.cwd()), `lead ${own.name}`);
-        return `Started the new lead in a visible Orca terminal (${t.handle}): ${sid}. When it registers, ${stop}.`;
+        if (picked.how === 'window') {
+          runWindow(sid, args, prompt, cwd, `lead ${own.name}`);
+          return `${note}Started the new lead in a new terminal window: ${sid}. When it registers, ${stop}.`;
+        }
+        const t = runOrca(sid, args, prompt, orca.worktreeRoot(cwd), `lead ${own.name}`);
+        return `${note}Started the new lead in a visible Orca terminal (${t.handle}): ${sid}. When it registers, ${stop}.`;
       } catch (err) {
-        if (runner === 'orca') throw err;
-        note = `Orca could not open a terminal (${err.message}); started headless instead.\n`;
+        if (runner === picked.how) throw err;
+        note += `${runnerLabel(picked.how)} could not open a terminal (${err.message}); started headless instead.\n`;
       }
     }
-    const pid = runClaude(sid, ['-p', '--session-id', sid, ...claudeArgs(opts)], prompt, lead.cwd || process.cwd());
+    const pid = runClaude(sid, ['-p', ...args], prompt, cwd);
     return `${note}Started the new lead headless: ${sid} (pid ${pid || '?'}). When it registers, ${stop}. Log: ${paths.log(sid).replace(/\\/g, '/')}`;
   }
-  return `Handoff ready. Start the new lead (terminal, Orca, or with --spawn: Orca when it runs, else headless) with this first prompt:\n${prompt}\nWhen it registers, the members of team ${own.name} move to it and ${stop}.`;
+  return `Handoff ready. Start the new lead (a terminal, Orca, or --spawn with this project's runner_lead: ${configuredRunner(project, 'lead')}) with this first prompt:\n${prompt}\nWhen it registers, the members of team ${own.name} move to it and ${stop}.`;
 }
 
 // group create|rename|delete|list|prune. Shared by the dashboard (POST /api/groups) through groupAction.
@@ -467,7 +537,7 @@ function main(argv) {
   }
 }
 
-module.exports = { main, spawnMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, quoteCmd, pickRunner };
+module.exports = { main, spawnMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions, claudeCommand, quoteCmd, pickRunner, configuredRunner, RUNNERS };
 
 // Run directly, or through the fixed bin path (which requires this file).
 const viaBin = String(require.main?.filename || '').toLowerCase() === path.resolve(paths.teamBin).toLowerCase();
