@@ -52,7 +52,7 @@ To turn it off, type `/ddashboard:dashboard off`. The server stops once no proje
   | Green dot | Listening — a reply is delivered immediately |
   | Gray dot | Idle — a reply is delivered when the next turn ends |
   | Hollow dot | Ended (hidden by default) |
-  | `needs you` | The session's latest card is "Needs review" or "Blocked" |
+  | `needs you` | The session's latest card is "Needs review" or "Blocked" and you haven't replied yet |
 - **Search:** the search box at the top (`/` to focus, `Esc` to clear) searches every card, archived ones included.
 - **Filters:** narrow cards by status, with a count for each.
 - **Archive:** each card has an Archive button. Cards older than 14 days, and cards replaced by a newer version, are archived automatically. `Archived (N)` at the bottom of the sidebar opens the archive, where you can unarchive.

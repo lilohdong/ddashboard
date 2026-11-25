@@ -30,7 +30,7 @@ function add(card) {
   if (card.replaces) replaced.add(String(card.replaces));
   const sid = card.session_id;
   if (sid && (!lastBySession[sid] || card.ts >= lastBySession[sid].ts)) {
-    lastBySession[sid] = { status: card.status, title: card.title, ts: card.ts };
+    lastBySession[sid] = { id: card.id, status: card.status, title: card.title, ts: card.ts };
   }
 }
 

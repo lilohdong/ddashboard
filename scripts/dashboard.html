@@ -86,6 +86,8 @@
   .card-act { border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 6px; padding: 0 8px; font-size: 12px; cursor: pointer; }
   .card-act:hover { color: var(--text); border-color: var(--muted); }
   .badge.archived { color: var(--muted); }
+  .badge.answered { opacity: 0.55; }
+  .badge.replied { color: var(--done); }
   details { margin-top: 8px; }
   details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
   .details-body { margin-top: 6px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 420px; overflow-y: auto; }
@@ -179,14 +181,19 @@ function toggleSide(open) {
 
 // A session needs you when its latest card is "needs review" or "blocked".
 // last_by_session covers archived and older cards too; fall back to cards for 0.1.0 servers.
+// A "Needs review" or "Blocked" card counts as answered once you have replied to it.
+const repliedIds = () => new Set(state.replies.map((r) => r.card_id));
+const answered = (c, replied) => URGENT.has(c.status) && replied.has(c.id);
+
 function urgentBySession() {
   let last = state.last_by_session;
   if (!last) {
     last = {};
     for (const c of state.cards) last[c.session_id] = c;
   }
+  const replied = repliedIds();
   const out = {};
-  for (const [sid, c] of Object.entries(last)) if (URGENT.has(c.status)) out[sid] = 1;
+  for (const [sid, c] of Object.entries(last)) if (URGENT.has(c.status) && !answered(c, replied)) out[sid] = 1;
   return out;
 }
 
@@ -252,7 +259,7 @@ function cardHtml(c, byCard) {
   return `
     <article class="card">
       <div class="card-head">
-        <span class="badge s-${esc(c.status)}">${esc(STATUS[c.status] || c.status)}</span>
+        <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(STATUS[c.status] || c.status)}</span>${c.answered ? '<span class="badge replied">Replied</span>' : ''}
         ${c.archived ? '<span class="badge archived">Archived</span>' : ''}
         <span class="title">${esc(c.title)}</span>
         ${c.archived
@@ -276,7 +283,9 @@ function renderMain() {
   const all = viewCards();
   const scoped = (all || []).filter(inScope);
   const counts = {};
-  for (const c of scoped) counts[c.status] = (counts[c.status] || 0) + 1;
+  const replied = repliedIds();
+  for (const c of scoped) c.answered = answered(c, replied);
+  for (const c of scoped) if (!c.answered) counts[c.status] = (counts[c.status] || 0) + 1;
   document.getElementById('filters').innerHTML = [['all', 'All', scoped.length], ...Object.entries(STATUS).map(([k, v]) => [k, v, counts[k] || 0])]
     .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${v} ${n}</button>`).join('');
 
@@ -284,7 +293,7 @@ function renderMain() {
   const scopeName = scope.kind === 'all' ? 'All' : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : 'Session';
   document.getElementById('scope').textContent = archivedView ? `${scopeName} · Archived` : scopeName;
 
-  const list = scoped.filter((c) => filter === 'all' || c.status === filter);
+  const list = scoped.filter((c) => filter === 'all' || (c.status === filter && !c.answered));
   let mode = '';
   if (searching()) {
     const what = archivedView ? 'archived cards' : 'all cards';
