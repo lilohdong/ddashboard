@@ -7,11 +7,12 @@
 //    (if the lead has ended, it goes to the dashboard marked lead_missing).
 // 3) If messages are waiting in the inbox (dashboard replies, team reports, lead instructions),
 //    keep the session going and hand them over as the next instruction.
+// 4) A team lead whose context is over the limit is told once to write a handoff doc and run T handoff.
 const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText, pruneGroup,
+  rulesUpdate, replacedText, pruneGroup, leadContextNotice,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -173,6 +174,9 @@ function parseCard(text) {
   // 2) Token usage of this turn (never blocks the rest of the hook).
   try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }
 
+  // 4) Lead context limit (once per lead session).
+  const notice = leadContextNotice(sessions[sid], projects[sessions[sid].project_key]);
+
   // 3) Hand over waiting messages (the session then stays "working").
   //    After a mode switch, the new instructions ride along once.
   const msgs = takeInbox(sid);
@@ -182,11 +186,12 @@ function parseCard(text) {
     rules = rulesUpdate(sessions[sid], projects[sessions[sid].project_key]);
   }
   if (branch) sessions[sid].branch = branch;
-  sessions[sid].state = msgs.length ? 'working' : 'idle';
+  sessions[sid].state = msgs.length || notice ? 'working' : 'idle';
   sessions[sid].last_seen = new Date().toISOString();
   writeJson(paths.sessions, sessions);
 
-  if (msgs.length) {
-    process.stdout.write(JSON.stringify({ decision: 'block', reason: `${formatMessages(msgs)}${rules ? `\n\n${rules}` : ''}` }));
-  }
+  const parts = [];
+  if (msgs.length) parts.push(`${formatMessages(msgs)}${rules ? `\n\n${rules}` : ''}`);
+  if (notice) parts.push(notice);
+  if (parts.length) process.stdout.write(JSON.stringify({ decision: 'block', reason: parts.join('\n\n') }));
 })();

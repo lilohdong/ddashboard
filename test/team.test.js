@@ -282,6 +282,25 @@ test('Stop hook: a replaced lead is told to stop once', () => {
   assert.equal(allCards().length, 0);
 });
 
+test('Stop hook: a lead over the context limit is told once to hand off', () => {
+  teamFixture();
+  const transcript = path.join(BOARD, 't.jsonl');
+  const rows = [
+    { type: 'user', uuid: 'u1', message: { content: 'go' } },
+    { type: 'assistant', message: { id: 'a1', usage: { input_tokens: 10, cache_read_input_tokens: 500, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+  ];
+  fs.writeFileSync(transcript, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const env = { DDASH_LEAD_CONTEXT_LIMIT: '400' };
+  const out = JSON.parse(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env));
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /context \(510 tokens\) is over the team lead limit \(400\).*bin\/team\.js" L1 handoff <doc-path>/);
+  assert.equal(readJson(paths.sessions, {}).L1.context_handoff_told, true);
+  fs.appendFileSync(transcript, JSON.stringify({ type: 'assistant', message: { id: 'a2', usage: { input_tokens: 20, cache_read_input_tokens: 600 } } }) + '\n');
+  assert.equal(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }, env), ''); // once
+  // Members and solo sessions are never told.
+  assert.equal(runHook('stop-card.js', { session_id: 'O1', cwd: CWD, transcript_path: transcript }, env), '');
+});
+
 test('UserPromptSubmit: member tag registers the member; replaced lead prompts are blocked', () => {
   teamFixture();
   const out = runHook('prompt-submit.js', { session_id: 'N1', cwd: CWD, prompt: '[ddash role=qa lead=L1 stay=1] test it' });

@@ -948,6 +948,19 @@ function markEnded(sid) {
   return { ok: true };
 }
 
+// Lead context limit: over it, the lead is told once (Stop hook) to hand off.
+const LEAD_CONTEXT_LIMIT = Number(process.env.DDASH_LEAD_CONTEXT_LIMIT) || 150000;
+const leadContextText = (sid, ctx) => `[ddashboard] Your context (${ctx} tokens) is over the team lead limit (${LEAD_CONTEXT_LIMIT}). Finish the current step, write a handoff doc (state, open items, members and their tasks, decisions, next steps), then run: node "${slash(ensureTeamBin())}" ${sid} handoff <doc-path>`;
+
+// Once per lead session: the handoff notice when its last turn's context is over the limit ('' otherwise).
+// Works on the given objects; the caller saves the session.
+function leadContextNotice(s, p) {
+  if (!s || teamRole(s, p) !== 'lead' || s.context_handoff_told) return '';
+  if (!(Number(s.last_context) > LEAD_CONTEXT_LIMIT)) return '';
+  s.context_handoff_told = true;
+  return leadContextText(s.session_id, Number(s.last_context));
+}
+
 const replacedText = (s) => `[ddashboard] This session was replaced as team lead by ${s.replaced_by} (handoff). Stop working now: no more tool calls or file changes. Start a new session for other work.`;
 
 module.exports = {
@@ -959,7 +972,7 @@ module.exports = {
   DEFAULT_SPAWN, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
-  STALE_MIN, isStale, forgetSessions, markEnded,
+  STALE_MIN, isStale, forgetSessions, markEnded, LEAD_CONTEXT_LIMIT, leadContextNotice,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
   pruneGroup, groupContext, memberStart, LANG_NAMES, readSettings, saveSettings,
 };

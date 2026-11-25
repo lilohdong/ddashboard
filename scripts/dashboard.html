@@ -420,7 +420,11 @@ function modeSelect(p) {
 
 function sessTags(s, tm) {
   if (tm?.mode !== 'team') return '';
-  if (s.team === 'lead') return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${tm.lead_name ? ` · ${esc(tm.lead_name)}` : ''}</span>`;
+  if (s.team === 'lead') {
+    const limit = num(state.lead_context_limit) || 150000;
+    const over = num(s.last_context) > limit ? ` <span class="tag warn" title="${esc(t('tag.handoffTitle', { n: fullTok(limit) }))}">${esc(t('tag.handoff'))}</span>` : '';
+    return ` <span class="tag lead" title="${esc(t('tag.leadTitle'))}">${esc(t('tag.lead'))}${tm.lead_name ? ` · ${esc(tm.lead_name)}` : ''}</span>${over}`;
+  }
   if (s.team === 'member') return ` <span class="tag" title="${esc(t('tag.roleTitle'))}">${esc(s.role || t('tag.member'))}</span>${s.lead_missing ? ` <span class="tag warn" title="${esc(t('tag.leadMissingTitle'))}">${esc(t('tag.leadMissing'))}</span>` : ''}`;
   return ` <span class="tag" title="${esc(t('tag.outsideTitle'))}">${esc(t('tag.outside'))}</span>`;
 }

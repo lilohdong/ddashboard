@@ -3,7 +3,7 @@
 //   GET  /            dashboard page (GET /i18n.js: its text in en, ko, zh-CN)
 //   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
-//                     token usage (usage_total for connected sessions, usage_today), context_warn,
+//                     token usage (usage_total for connected sessions, usage_today), context_warn, lead_context_limit,
 //                     teams (mode, lead and groups per project). ?reports=1 also returns member reports (via_lead cards).
 //   POST /api/mode    {project, mode: solo|team, lead?, lead_name?} -> switch a project's mode
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
-  isEnded, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings,
+  isEnded, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -129,6 +129,7 @@ const server = http.createServer((req, res) => {
       usage_total,
       usage_today,
       context_warn: CONTEXT_WARN,
+      lead_context_limit: LEAD_CONTEXT_LIMIT,
       stale_min: STALE_MIN,
       settings: { lang: readSettings().lang || null },
     });
