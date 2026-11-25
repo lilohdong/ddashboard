@@ -11,6 +11,7 @@
 const {
   paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, setState,
   isRegistered, injectRules, pendingRules, setMode, parseTag, setMember, performHandoff, recordClaudePid, replacedText,
+  memberStart,
 } = require('../lib');
 const control = require('../control');
 
@@ -71,8 +72,9 @@ The members (${res.members}) now report to you; ${res.moved} pending message(s) 
   if (tag && serverPid() && projectActive(cwd)) {
     registerSession(sid, cwd);
     if (tag.type === 'member') {
+      // A spawned member already got its brief and instructions at SessionStart.
       setMember(sid, tag);
-      process.stdout.write(injectRules(sid));
+      if (!me?.start_rules) process.stdout.write(memberStart(sid));
     } else {
       recordClaudePid(sid);
       const res = performHandoff(tag.from, sid, tag.doc);

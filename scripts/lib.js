@@ -310,22 +310,25 @@ function rulesText(sid) {
 function leadRulesText(sid, name) {
   const t = `node "${slash(ensureTeamBin())}" ${sid}`;
   return `${rulesText(sid)}- Team mode: you are the team lead "${name || 'lead'}". The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
-- Team commands (T = ${t}): T spawn --role <role> [--model <m>] [--stay] "<task>" | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
+- Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] "<task>" | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
+- Groups (shared memory in docs/groups/<g>/: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
 `;
 }
 
-function memberRulesText(sid, s) {
+function memberRulesText(sid, s, g) {
   const wait = `node "${slash(ensureWaitBin())}" ${sid}`;
   const tail = s.stay
     ? `- To receive instructions, run this in the background now, and again each time it prints and exits: ${wait}`
     : `- Don't start a wait command. Finish the task and stop; your lead resumes you if more is needed.`;
-  return `[ddashboard] You are a team member. Role: ${s.role || 'member'}. Session ID: ${sid}. Your lead assigns the work; messages from the lead arrive as [Lead instruction].
+  const group = g ? `- Group "${s.group}" folder: ${g.dir}. When you finish (or near your context limit), write the next handoff-NNN.md there (highest number + 1, 3 digits): what was done, open items, where things are. Update brief.md if its facts changed. Keep evidence in notes/. Don't commit; the lead does.
+` : '';
+  return `[ddashboard] You are a team member. Role: ${s.role || 'member'}${s.group ? `, group: ${s.group}` : ''}. Session ID: ${sid}. Your lead assigns the work; messages from the lead arrive as [Lead instruction].
 - End each turn that finishes, blocks or changes your task with this block (JSON, at most 3 short summary lines). It goes to your lead, not the user:
 \`\`\`card
 {"status":"done|review|blocked|wip","title":"one-line title","summary":["..."],"review":["what the lead should check"],"details":"optional and short"}
 \`\`\`
 - Keep terminal replies to a line or two. Put long evidence in files and give the paths. If blocked, use "blocked" and write the question in the summary.
-${tail}
+${group}${tail}
 `;
 }
 
@@ -360,7 +363,7 @@ function rulesFor(s, p) {
   const sid = s.session_id;
   const role = teamRole(s, p);
   if (role === 'lead') return leadRulesText(sid, p.lead_name);
-  if (role === 'member') return memberRulesText(sid, s);
+  if (role === 'member') return memberRulesText(sid, s, s.group && p.groups?.[s.group]);
   if (role === 'outside') return `${rulesText(sid)}- This project is in team mode (lead: ${p.lead_name || 'lead'}). You are outside the team, so your cards still go straight to the dashboard.\n`;
   return rulesText(sid);
 }
@@ -443,7 +446,8 @@ function parseTag(prompt) {
   if (typeof attrs.lead !== 'string') return null;
   const stay = attrs.stay === true || ['1', 'true', 'yes'].includes(String(attrs.stay).toLowerCase());
   const role = typeof attrs.role === 'string' && attrs.role.trim() ? attrs.role.trim().slice(0, 40) : 'member';
-  return { type: 'member', role, lead: safeId(attrs.lead), stay, rest };
+  const group = typeof attrs.group === 'string' && GROUP_NAME.test(attrs.group) ? attrs.group : undefined;
+  return { type: 'member', role, lead: safeId(attrs.lead), stay, ...(group ? { group } : {}), rest };
 }
 
 // Register a session as a member (from its tag). The session must be registered already.
@@ -452,6 +456,7 @@ function setMember(sid, tag) {
   const s = sessions[sid];
   if (!s) return false;
   Object.assign(s, { kind: 'member', role: tag.role, lead: tag.lead, stay: Boolean(tag.stay) });
+  if (tag.group) s.group = tag.group;
   if (!process.env.DDASH_NAME) s.name = tag.role;
   delete s.pending;
   writeJson(paths.sessions, sessions);
@@ -671,6 +676,196 @@ function performHandoff(from, to, doc, opts = {}) {
   return { ok: true, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
 }
 
+// --- Groups (team mode): docs/groups/<name>/ in the lead's worktree holds a group's memory ---
+// brief.md (injected into every new member before its task), handoff-NNN.md, notes/.
+
+const GROUP_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+const BRIEF_MAX_CHARS = 16000; // about 4000 tokens
+const GROUP_DEFAULTS = { keep_handoffs: 3, notes_days: 30 };
+
+const briefTemplate = (name) => `# ${name} brief
+
+<!-- Injected into every new member of this group before its task. Keep it short (under ~4000 tokens).
+     Update it when the facts change. History goes in handoff-NNN.md, evidence in notes/. -->
+
+## Scope
+
+## Key files
+
+## Rules
+
+## Current state
+`;
+
+function gitIn(args, cwd) {
+  try { return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().trim(); } catch { return null; }
+}
+
+// True if git tracks any file under dir.
+const gitTracked = (dir) => Boolean(gitIn(['ls-files', '--', '.'], dir));
+
+function groupSettings(g) {
+  return { ...GROUP_DEFAULTS, ...(g || {}) };
+}
+
+function groupsOf(key) {
+  return readJson(paths.projects, {})[key]?.groups || {};
+}
+
+function createGroup(key, name, leadCwd) {
+  if (!GROUP_NAME.test(String(name || '')) || name.startsWith('_')) return { ok: false, error: 'group names use letters, digits, - and _ (up to 40)' };
+  const projects = readJson(paths.projects, {});
+  const p = projects[key];
+  if (!p) return { ok: false, error: 'project is not connected' };
+  p.groups ||= {};
+  if (p.groups[name]) return { ok: false, error: `group ${name} exists` };
+  const dir = slash(path.join(leadCwd, 'docs', 'groups', name));
+  ensureDir(path.join(dir, 'notes'));
+  const brief = path.join(dir, 'brief.md');
+  if (!fs.existsSync(brief)) fs.writeFileSync(brief, briefTemplate(name));
+  p.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
+  writeJson(paths.projects, projects);
+  return { ok: true, dir };
+}
+
+// Move a folder: git mv when tracked (the lead commits it), a plain rename otherwise.
+function moveDir(from, to) {
+  ensureDir(path.dirname(to));
+  if (gitTracked(from) && gitIn(['mv', from, to], path.dirname(from)) !== null) return 'git mv';
+  fs.renameSync(from, to);
+  return 'rename';
+}
+
+function renameGroup(key, name, next) {
+  if (!GROUP_NAME.test(String(next || '')) || next.startsWith('_')) return { ok: false, error: 'group names use letters, digits, - and _ (up to 40)' };
+  const projects = readJson(paths.projects, {});
+  const g = projects[key]?.groups?.[name];
+  if (!g) return { ok: false, error: `no group ${name}` };
+  if (projects[key].groups[next]) return { ok: false, error: `group ${next} exists` };
+  const dir = slash(path.join(path.dirname(g.dir), next));
+  if (fs.existsSync(dir)) return { ok: false, error: `folder exists: ${dir}` };
+  let how = 'none';
+  if (fs.existsSync(g.dir)) how = moveDir(g.dir, dir);
+  delete projects[key].groups[name];
+  projects[key].groups[next] = { ...g, dir };
+  writeJson(paths.projects, projects);
+  const sessions = readJson(paths.sessions, {});
+  for (const s of Object.values(sessions)) if (s.project_key === key && s.group === name) s.group = next;
+  writeJson(paths.sessions, sessions);
+  return { ok: true, dir, moved: how };
+}
+
+const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+// Remove a group: its members become unassigned; the folder moves to docs/groups/_archived/<name>-<date>/
+// (purge: deleted instead).
+function deleteGroup(key, name, { purge = false } = {}) {
+  const projects = readJson(paths.projects, {});
+  const g = projects[key]?.groups?.[name];
+  if (!g) return { ok: false, error: `no group ${name}` };
+  let folder = null;
+  if (fs.existsSync(g.dir)) {
+    if (purge) {
+      fs.rmSync(g.dir, { recursive: true, force: true });
+      folder = 'deleted';
+    } else {
+      const base = path.join(path.dirname(g.dir), '_archived', `${name}-${stamp()}`);
+      let to = base;
+      for (let i = 2; fs.existsSync(to); i++) to = `${base}-${i}`;
+      moveDir(g.dir, to);
+      folder = slash(to);
+    }
+  }
+  delete projects[key].groups[name];
+  writeJson(paths.projects, projects);
+  const sessions = readJson(paths.sessions, {});
+  for (const s of Object.values(sessions)) if (s.project_key === key && s.group === name) delete s.group;
+  writeJson(paths.sessions, sessions);
+  return { ok: true, folder };
+}
+
+const HANDOFF = /^handoff-(\d+)\.md$/;
+
+function handoffs(dir) {
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((f) => HANDOFF.test(f)); } catch {}
+  return files.sort((a, b) => Number(a.match(HANDOFF)[1]) - Number(b.match(HANDOFF)[1]));
+}
+
+const latestHandoff = (dir) => {
+  const list = handoffs(dir);
+  return list.length ? slash(path.join(dir, list[list.length - 1])) : '';
+};
+
+// Keep the newest keep_handoffs handoffs and drop notes older than notes_days. Only touches the
+// group folder. The lead commits the result. Returns the removed paths.
+function pruneGroup(g, now = Date.now()) {
+  const conf = groupSettings(g);
+  const removed = [];
+  const list = handoffs(g.dir);
+  for (const f of list.slice(0, Math.max(0, list.length - Math.max(1, Number(conf.keep_handoffs) || 3)))) {
+    try { fs.unlinkSync(path.join(g.dir, f)); removed.push(slash(path.join(g.dir, f))); } catch {}
+  }
+  const cutoff = now - (Number(conf.notes_days) || 30) * 86400000;
+  const walk = (d) => {
+    let entries = [];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const f = path.join(d, e.name);
+      if (e.isDirectory()) walk(f);
+      else {
+        try { if (fs.statSync(f).mtimeMs < cutoff) { fs.unlinkSync(f); removed.push(slash(f)); } } catch {}
+      }
+    }
+  };
+  walk(path.join(g.dir, 'notes'));
+  return removed;
+}
+
+// Group memory for a new member, put before its task: the brief (capped) and the latest handoff.
+// Returns { text, truncated, chars }.
+function groupContext(name, g) {
+  let brief = '';
+  try { brief = fs.readFileSync(path.join(g.dir, 'brief.md'), 'utf8'); } catch {}
+  const truncated = brief.length > BRIEF_MAX_CHARS;
+  const body = truncated ? `${brief.slice(0, BRIEF_MAX_CHARS)}\n[... brief cut at ${BRIEF_MAX_CHARS} characters ...]` : brief;
+  const last = latestHandoff(g.dir);
+  const text = `[ddashboard] Group "${name}" brief (${slash(path.join(g.dir, 'brief.md'))}):
+${body.trim() || '(empty)'}
+Latest handoff: ${last ? `${last} (read it before you start)` : 'none yet'}
+`;
+  return { text, truncated, chars: brief.length };
+}
+
+// What a member gets when it starts: its group's memory first (same text for every member of the
+// group, so it can share the prompt cache), then its own instructions. Marks the instructions as given.
+// If the brief had to be cut, the lead is told once per brief size.
+function memberStart(sid) {
+  const sessions = readJson(paths.sessions, {});
+  const projects = readJson(paths.projects, {});
+  const s = sessions[sid];
+  if (!s) return rulesText(sid);
+  const p = projects[s.project_key];
+  const g = s.group && p?.groups?.[s.group];
+  let head = '';
+  if (g) {
+    const ctx = groupContext(s.group, g);
+    head = `${ctx.text}\n`;
+    if (ctx.truncated && g.brief_warned !== ctx.chars && s.lead) {
+      deliver(s.lead, {
+        type: 'report', from: sid, role: s.role || 'member', status: 'review',
+        title: `brief ${s.group} needs trimming (${ctx.chars} characters; members get the first ${BRIEF_MAX_CHARS})`,
+      });
+      g.brief_warned = ctx.chars;
+      writeJson(paths.projects, projects);
+    }
+  }
+  s.rules_ver = Number(p?.mode_ver) || 0;
+  s.start_rules = true;
+  writeJson(paths.sessions, sessions);
+  return head + rulesFor(s, p);
+}
+
 // --- Sidebar housekeeping ---
 
 const STALE_MIN = Number(process.env.DDASH_STALE_MIN) || 60;
@@ -728,4 +923,6 @@ module.exports = {
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded,
+  GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
+  pruneGroup, groupContext, memberStart,
 };

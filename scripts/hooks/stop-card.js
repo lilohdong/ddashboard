@@ -11,7 +11,7 @@ const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText,
+  rulesUpdate, replacedText, pruneGroup,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -165,6 +165,10 @@ function parseCard(text) {
     sessions[sid].last_status = card.status;
     sessions[sid].last_title = card.title;
   }
+
+  // Group folder upkeep: keep the newest handoffs, drop old notes (only inside docs/groups/<name>/).
+  const group = sessions[sid].group && projects[sessions[sid].project_key]?.groups?.[sessions[sid].group];
+  if (group) try { pruneGroup(group); } catch { /* best effort */ }
 
   // 2) Token usage of this turn (never blocks the rest of the hook).
   try { recordUsage(sessions[sid], sid, rows); } catch { /* usage is best effort */ }

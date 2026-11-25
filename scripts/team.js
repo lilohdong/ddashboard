@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // Team commands for a team lead (run through the fixed path BOARD_DIR/bin/team.js).
-//   node team.js <lead sid> spawn --role <role> [--model <m>] [--stay] "<task>"
+//   node team.js <lead sid> spawn --role <role> [--group <g>] [--model <m>] [--stay] "<task>"
 //       start a headless member (claude -p) in the background; log: BOARD_DIR/logs/<sid>.log
+//       With --group it gets the group's brief and latest handoff before its task.
 //   node team.js <lead sid> send <sid|role> "<text>"
 //       instruction to a member: into its inbox if it is waiting or still running, else resume it (claude -p --resume)
 //   node team.js <lead sid> list                 members: role, state, waiting, last card
 //   node team.js <lead sid> show <card-id>       a card in full (long report details)
 //   node team.js <lead sid> handoff <doc> [--spawn] [--model <m>]
 //       prepare a lead handoff; prints the first prompt for the new lead (--spawn starts it headless)
+//   node team.js <lead sid> group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
+//       groups keep shared memory in docs/groups/<g>/ of the lead's worktree (brief.md, handoff-NNN.md, notes/).
+//       Nothing is committed; the lead commits the docs.
 // Headless permissions come from projects.json[<project>].spawn = { permission_mode, allowed_tools },
 // default: acceptEdits + Bash(git *), Bash(node *), Bash(npm *). DDASH_CLAUDE_BIN overrides the claude command.
 const fs = require('fs');
@@ -20,11 +24,12 @@ const { paths, readJson, writeJson, ensureDir, safeId, alive, DEFAULT_SPAWN } = 
 
 function usage() {
   return `Usage: node team.js <lead session id> <command>
-  spawn --role <role> [--model <m>] [--stay] "<task>"
+  spawn --role <role> [--group <g>] [--model <m>] [--stay] "<task>"
   send <sid|role> "<text>"
   list
   show <card-id>
-  handoff <doc-path> [--spawn] [--model <m>]`;
+  handoff <doc-path> [--spawn] [--model <m>]
+  group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]`;
 }
 
 // Split argv into flags (--name value / --flag) and positional words.
@@ -112,16 +117,20 @@ const tagValue = (v) => (/^[^\s\]"]+$/.test(v) ? v : `"${String(v).replace(/["\]
 
 // Start a headless member of this lead. Used by `team.js spawn` and the dashboard (POST /api/team/spawn).
 // Returns { sid, pid, log }.
-function spawnMember(leadSid, { role, model, stay, task } = {}) {
+function spawnMember(leadSid, { role, model, stay, task, group } = {}) {
   role = String(role || '').trim().slice(0, 40);
   task = String(task || '').trim();
+  group = group ? String(group).trim() : '';
   if (!role || !task) throw new Error('spawn needs a role and a task.');
   const { lead, project } = context(leadSid);
+  const g = group ? project.groups?.[group] : null;
+  if (group && !g) throw new Error(`no group ${group}. Create it with: group create ${group}`);
+  if (g) lib.pruneGroup(g);
   const sid = crypto.randomUUID();
   const flags = { role, model: model ? String(model).trim() : undefined, stay: Boolean(stay) };
   const opts = spawnOptions(project, flags);
   const cwd = lead.cwd || process.cwd();
-  const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}] ${task}`;
+  const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}${group ? ` group=${group}` : ''}] ${task}`;
 
   // Pre-register so the member shows up at once; its first-prompt hook completes the registration.
   const sessions = readJson(paths.sessions, {});
@@ -132,6 +141,7 @@ function spawnMember(leadSid, { role, model, stay, task } = {}) {
     kind: 'member', role: flags.role, lead: leadSid, stay: Boolean(flags.stay), headless: true,
     spawn: { ...opts, cwd }, log: paths.log(sid),
   };
+  if (group) sessions[sid].group = group;
   writeJson(paths.sessions, sessions);
   const pid = runClaude(sid, ['-p', '--session-id', sid, ...claudeArgs(opts)], prompt, cwd);
   setPid(sid, pid);
@@ -141,8 +151,8 @@ function spawnMember(leadSid, { role, model, stay, task } = {}) {
 function cmdSpawn(leadSid, argv) {
   const { flags, words } = parseArgs(argv, ['stay']);
   if (!flags.role || !words.length) throw new Error('spawn needs --role <role> and a task.');
-  const r = spawnMember(leadSid, { role: flags.role, model: flags.model, stay: flags.stay, task: words.join(' ') });
-  return `Spawned ${flags.role}: ${r.sid} (pid ${r.pid || '?'}). Log: ${r.log}\nIts cards come to you as [Team report].`;
+  const r = spawnMember(leadSid, { role: flags.role, model: flags.model, stay: flags.stay, task: words.join(' '), group: flags.group });
+  return `Spawned ${flags.role}${flags.group ? ` in ${flags.group}` : ''}: ${r.sid} (pid ${r.pid || '?'}). Log: ${r.log}\nIts cards come to you as [Team report].`;
 }
 
 function setPid(sid, pid) {
@@ -198,7 +208,7 @@ function cmdList(leadSid) {
     let pending = 0;
     try { pending = fs.readdirSync(paths.inbox(s.session_id)).filter((f) => f.endsWith('.json')).length; } catch {}
     const last = s.last_title ? ` | last: ${s.last_status} "${s.last_title}"` : '';
-    return `${s.session_id}  ${s.role}  ${state}${waiting ? ' (waiting)' : ''}${pending ? ` ${pending} queued` : ''}${s.headless ? ' headless' : ''}${s.stay ? ' stay' : ''}${last}`;
+    return `${s.session_id}  ${s.role}${s.group ? ` [${s.group}]` : ''}  ${state}${waiting ? ' (waiting)' : ''}${pending ? ` ${pending} queued` : ''}${s.headless ? ' headless' : ''}${s.stay ? ' stay' : ''}${last}`;
   }).join('\n');
 }
 
@@ -245,7 +255,57 @@ function cmdHandoff(leadSid, argv) {
   return `Handoff ready. Start the new lead (terminal, Orca, or headless with --spawn) with this first prompt:\n${prompt}\nWhen it registers, the members move to it and ${stop}.`;
 }
 
-const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, show: cmdShow, handoff: cmdHandoff };
+// group create|rename|delete|list|prune. Shared by the dashboard (POST /api/groups) through groupAction.
+function groupAction(leadSid, action, { name, newName, purge } = {}) {
+  const { lead, project } = context(leadSid);
+  const key = lead.project_key;
+  if (project.mode !== 'team' || project.lead !== leadSid) throw new Error('groups need team mode with you as the lead.');
+  const done = (r) => { if (!r.ok) throw new Error(r.error); return r; };
+  if (action === 'create') return done(lib.createGroup(key, name, lead.cwd || process.cwd()));
+  if (action === 'rename') return done(lib.renameGroup(key, name, newName));
+  if (action === 'delete') return done(lib.deleteGroup(key, name, { purge }));
+  throw new Error(`unknown group action ${action}`);
+}
+
+function cmdGroup(leadSid, argv) {
+  const { flags, words } = parseArgs(argv, ['purge']);
+  const [action, name, next] = words;
+  const { lead, project, sessions } = context(leadSid);
+  const groups = project.groups || {};
+  if (action === 'list' || !action) {
+    const names = Object.keys(groups).sort();
+    if (!names.length) return 'No groups. Create one with: group create <name>';
+    return names.map((n) => {
+      const members = Object.values(sessions).filter((s) => s.project_key === lead.project_key && s.kind === 'member' && s.group === n);
+      const live = members.filter((s) => !lib.isEnded(s)).length;
+      const last = lib.latestHandoff(groups[n].dir);
+      return `${n}  ${groups[n].dir}  members ${live}/${members.length}${last ? `  latest ${path.basename(last)}` : ''}`;
+    }).join('\n');
+  }
+  if (action === 'prune') {
+    const names = name ? [name] : Object.keys(groups);
+    if (name && !groups[name]) throw new Error(`no group ${name}`);
+    const removed = names.flatMap((n) => lib.pruneGroup(groups[n]));
+    return removed.length ? `Removed ${removed.length} file(s):\n${removed.join('\n')}\nCommit the docs when ready.` : 'Nothing to prune.';
+  }
+  if (!name) throw new Error(`group ${action} needs a group name.`);
+  if (action === 'create') {
+    const r = groupAction(leadSid, 'create', { name });
+    return `Created group ${name}: ${r.dir}\nFill in ${r.dir}/brief.md (scope, key files, rules, current state); members get it before their task.`;
+  }
+  if (action === 'rename') {
+    if (!next) throw new Error('group rename needs the new name.');
+    const r = groupAction(leadSid, 'rename', { name, newName: next });
+    return `Renamed ${name} to ${next} (${r.moved}): ${r.dir}`;
+  }
+  if (action === 'delete') {
+    const r = groupAction(leadSid, 'delete', { name, purge: flags.purge });
+    return `Deleted group ${name}; its members are unassigned. Folder: ${r.folder || 'none'}.`;
+  }
+  throw new Error(`unknown group command ${action}`);
+}
+
+const COMMANDS = { spawn: cmdSpawn, send: cmdSend, list: cmdList, show: cmdShow, handoff: cmdHandoff, group: cmdGroup };
 
 function main(argv) {
   const [leadArg, cmd, ...rest] = argv;
@@ -258,7 +318,7 @@ function main(argv) {
   }
 }
 
-module.exports = { main, spawnMember, parseArgs, findMember, claudeArgs, spawnOptions };
+module.exports = { main, spawnMember, groupAction, parseArgs, findMember, claudeArgs, spawnOptions };
 
 // Run directly, or through the fixed bin path (which requires this file).
 const viaBin = String(require.main?.filename || '').toLowerCase() === path.resolve(paths.teamBin).toLowerCase();

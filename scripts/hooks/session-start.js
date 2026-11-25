@@ -2,10 +2,12 @@
 // SessionStart hook: if the session belongs to a project connected to the dashboard,
 // register it and inject the instructions. Otherwise print nothing (zero tokens).
 // Team mode: a new session gets its instructions on its first prompt instead, because only the
-// prompt carries the member tag. Known team sessions (e.g. resumed) also record their Claude pid.
+// prompt carries the member tag. A member started by team.js spawn is known already (pre-registered
+// under its --session-id), so it gets its group brief and instructions here: SessionStart output lands
+// before the first prompt, UserPromptSubmit output after it. Known team sessions also record their Claude pid.
 const {
   paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, registerSession, injectRules,
-  recordClaudePid, replacedText,
+  recordClaudePid, replacedText, memberStart,
 } = require('../lib');
 
 (async () => {
@@ -16,8 +18,8 @@ const {
   const project = readJson(paths.projects, {})[projectKey(cwd)];
   const known = readJson(paths.sessions, {})[sid];
   if (known?.replaced_by) return void process.stdout.write(replacedText(known));
-  if (project?.mode === 'team' && (!known || known.pending)) return;
+  if (project?.mode === 'team' && (!known || (known.pending && known.kind !== 'member'))) return;
   registerSession(sid, cwd);
   if (project?.mode === 'team') recordClaudePid(sid);
-  process.stdout.write(injectRules(sid));
+  process.stdout.write(known?.pending ? memberStart(sid) : injectRules(sid));
 })();
