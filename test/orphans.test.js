@@ -68,7 +68,8 @@ function session(sid, extra = {}) {
   return { session_id: sid, name: sid, cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', started: now, last_seen: now, ...extra };
 }
 function reset(sessions = {}) {
-  fs.rmSync(BOARD, { recursive: true, force: true });
+  // A process of the previous test may still be closing a file in the board (Windows): retry.
+  fs.rmSync(BOARD, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   fs.mkdirSync(BOARD, { recursive: true });
   writeJson(paths.projects, { [KEY]: { since: new Date().toISOString(), cwd: CWD } });
   writeJson(paths.sessions, sessions);
@@ -238,8 +239,10 @@ test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kill
   const { wrapper, pid } = await startWrappedWaiter('X1');
   const table = lib.processTable();
   assert.deepEqual(lib.waiterChain(pid, table), [pid, wrapper.pid]);
-  assert.equal(lib.orphanWaiter(pid, table), true); // no Claude above it
-  assert.equal(lib.stopWaiter('X1'), true);
+  const top = table.get(wrapper.pid);
+  assert.equal(lib.orphanWaiter(pid, table), true, `not an orphan: wrapper ${JSON.stringify(top)}, its parent ${JSON.stringify(table.get(top?.ppid))}`);
+  const alive = lib.alive(pid);
+  assert.equal(lib.stopWaiter('X1'), true, `not stopped (alive before: ${alive}, after: ${lib.alive(pid)})`);
   assert.equal(lib.alive(pid), false);
   assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper shell left running');
   assert.equal(fs.existsSync(lib.waitLockPath('X1')), false);
@@ -479,9 +482,11 @@ test('sweepWaiters: stops orphan waiters of any version, keeps live ones, remove
   await sleep(300);
   const r = lib.sweepWaiters(lib.processTable());
   const killed = r.killed.map((k) => k.pid);
-  assert.ok(killed.includes(orphan.pid) && killed.includes(wrapped), `not stopped: ${JSON.stringify(r.killed)}`);
-  // Leftovers of earlier tests in this file may be stopped too; nothing else may be.
-  for (const k of r.killed) assert.ok(orphansStarted.has(k.pid), `sweep stopped a process this test did not start: ${JSON.stringify(k)}`);
+  // Another server running its sweep at the same time (e.g. a parallel test run) may have stopped them first.
+  for (const pid of [orphan.pid, wrapped]) assert.ok(killed.includes(pid) || !lib.alive(pid), `not stopped: ${pid} ${JSON.stringify(r.killed)}`);
+  // Leftovers of this or an earlier run of these tests may be stopped too (test session ids are not UUIDs).
+  // Orphans of real sessions are fine to stop as well, but would show up here: report them rather than hide them.
+  for (const k of r.killed) assert.ok(orphansStarted.has(k.pid) || !/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(k.sid), `sweep stopped a real session's orphan waiter: ${JSON.stringify(k)}`);
   assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper left running');
   assert.equal(lib.alive(y3), true);
   assert.equal(lib.alive(hosted.pid), true);
