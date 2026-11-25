@@ -1,0 +1,171 @@
+{
+ "light_all": {
+  "bg": "rgb(246, 247, 249)",
+  "filters": [
+   "전체 5",
+   "검토 필요 1",
+   "막힘 0",
+   "진행 중 1",
+   "완료 1",
+   "중단됨 2"
+  ],
+  "topCards": [
+   {
+    "title": "K newer other session",
+    "badge": "진행 중",
+    "badgeClass": "badge s-wip",
+    "badgeColor": "rgb(99, 108, 118)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S4 done after resume",
+    "badge": "완료",
+    "badgeClass": "badge s-done",
+    "badgeColor": "rgb(31, 138, 76)",
+    "folds": "이전 진행 카드 1개",
+    "foldItems": [
+     "S4 wip, resumed 11월 26일 오전 07:45"
+    ],
+    "foldedBadge": false
+   },
+   {
+    "title": "S3 wip forgotten",
+    "badge": "중단됨",
+    "badgeClass": "badge s-stopped",
+    "badgeColor": "rgb(99, 108, 118)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S2 wip only",
+    "badge": "중단됨",
+    "badgeClass": "badge s-stopped",
+    "badgeColor": "rgb(99, 108, 118)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S1 review",
+    "badge": "검토 필요",
+    "badgeClass": "badge s-review",
+    "badgeColor": "rgb(183, 121, 31)",
+    "folds": "이전 진행 카드 2개",
+    "foldItems": [
+     "S1 wip a 11월 26일 오전 07:45",
+     "S1 wip b 11월 26일 오전 07:45"
+    ],
+    "foldedBadge": false
+   }
+  ]
+ },
+ "light_stopped": {
+  "active": "중단됨 2",
+  "cards": [
+   {
+    "text": "중단됨 S3 wip forgotten 보관 fixrepo · fixrepo · main · 11월 26일 오전 07:45 종료된 세션이라 답글을 받을 수 없습니다",
+    "badge": "중단됨",
+    "cls": "badge s-stopped",
+    "title": "진행 중인 상태로 세션이 끝났습니다",
+    "color": "rgb(99, 108, 118)",
+    "bg": "rgba(0, 0, 0, 0)"
+   },
+   {
+    "text": "중단됨 S2 wip only 보관 fixrepo · fixrepo · main · 11월 26일 오전 07:45 종료된 세션이라 답글을 받을 수 없습니다.",
+    "badge": "중단됨",
+    "cls": "badge s-stopped",
+    "title": "진행 중인 상태로 세션이 끝났습니다",
+    "color": "rgb(99, 108, 118)",
+    "bg": "rgba(0, 0, 0, 0)"
+   }
+  ]
+ },
+ "dark_all": {
+  "bg": "rgb(17, 20, 24)",
+  "filters": [
+   "전체 5",
+   "검토 필요 1",
+   "막힘 0",
+   "진행 중 1",
+   "완료 1",
+   "중단됨 2"
+  ],
+  "topCards": [
+   {
+    "title": "K newer other session",
+    "badge": "진행 중",
+    "badgeClass": "badge s-wip",
+    "badgeColor": "rgb(154, 163, 173)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S4 done after resume",
+    "badge": "완료",
+    "badgeClass": "badge s-done",
+    "badgeColor": "rgb(72, 187, 120)",
+    "folds": "이전 진행 카드 1개",
+    "foldItems": [
+     "S4 wip, resumed 11월 26일 오전 07:45"
+    ],
+    "foldedBadge": false
+   },
+   {
+    "title": "S3 wip forgotten",
+    "badge": "중단됨",
+    "badgeClass": "badge s-stopped",
+    "badgeColor": "rgb(154, 163, 173)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S2 wip only",
+    "badge": "중단됨",
+    "badgeClass": "badge s-stopped",
+    "badgeColor": "rgb(154, 163, 173)",
+    "folds": null,
+    "foldItems": [],
+    "foldedBadge": false
+   },
+   {
+    "title": "S1 review",
+    "badge": "검토 필요",
+    "badgeClass": "badge s-review",
+    "badgeColor": "rgb(236, 201, 75)",
+    "folds": "이전 진행 카드 2개",
+    "foldItems": [
+     "S1 wip a 11월 26일 오전 07:45",
+     "S1 wip b 11월 26일 오전 07:45"
+    ],
+    "foldedBadge": false
+   }
+  ]
+ },
+ "dark_stopped": {
+  "active": "중단됨 2",
+  "cards": [
+   {
+    "text": "중단됨 S3 wip forgotten 보관 fixrepo · fixrepo · main · 11월 26일 오전 07:45 종료된 세션이라 답글을 받을 수 없습니다",
+    "badge": "중단됨",
+    "cls": "badge s-stopped",
+    "title": "진행 중인 상태로 세션이 끝났습니다",
+    "color": "rgb(154, 163, 173)",
+    "bg": "rgba(0, 0, 0, 0)"
+   },
+   {
+    "text": "중단됨 S2 wip only 보관 fixrepo · fixrepo · main · 11월 26일 오전 07:45 종료된 세션이라 답글을 받을 수 없습니다.",
+    "badge": "중단됨",
+    "cls": "badge s-stopped",
+    "title": "진행 중인 상태로 세션이 끝났습니다",
+    "color": "rgb(154, 163, 173)",
+    "bg": "rgba(0, 0, 0, 0)"
+   }
+  ]
+ },
+ "errors": []
+}

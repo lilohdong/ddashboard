@@ -1,0 +1,4 @@
+6_before {"state":"idle"}
+6_gone {"ms_to_ended":577,"tick_ms":700,"state":"ended","end_reason":"gone","control_state":"idle"}
+6_view {"mem1":"ended","mem0":"idle"}
+6_server_log ["ddashboard: session mem1 is gone (ended)"]
