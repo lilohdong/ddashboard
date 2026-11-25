@@ -8,7 +8,8 @@ What a team costs is roughly **how often a session wakes up × how big its conte
 
 - Wake the lead as rarely as possible, and keep its context small.
 - Don't start a member for a small task: a new member pays to read the repository again.
-- Keep reports short. Put evidence in files and pass the paths.
+- Keep reports short: at most 3 summary lines, evidence in the group's `notes/` (or a file) and only its path.
+- Handle a wait command's output and restart it in the same response (parallel tool calls): one model call per message instead of two. Every session's instructions say so.
 
 ## Roles
 
@@ -27,6 +28,7 @@ What a team costs is roughly **how often a session wakes up × how big its conte
    node ~/.ddashboard/bin/team.js <lead id> spawn --role backend "Read docs/brief.md. Add the /api/mode endpoint ..."
    ```
    Use `--model` for a lighter model on simple roles (QA, docs). Use `--stay` only for a member that should keep waiting for instructions; by default a member finishes and exits, and `send` resumes it later.
+   If Orca is running, the member opens as a visible interactive `claude` in a new Orca terminal in the lead's worktree, so you can watch it and step in; otherwise it runs headless. `--headless` or `--orca` picks one (`DDASH_ORCA=0` turns Orca off).
 
 ## Groups
 
@@ -43,14 +45,14 @@ Groups are optional; members without one are listed as `unassigned`. `role` stay
 ## Working
 
 - **Reports** arrive at the lead as `[Team report]` through its wait command. A report has the status, title, up to 3 summary lines and what to check. Long details stay on the card; the lead reads them with `team.js <lead id> show <card id>` only when needed.
-- **Instructions** go out with `team.js <lead id> send <role or id> "<text>"`. A waiting or running member gets it from its inbox; a finished headless member is resumed with the same options.
+- **Instructions** go out with `team.js <lead id> send <role or id> "<text>"`. A waiting or running member gets it from its inbox; an Orca member idle at its prompt gets it typed into its terminal; a finished member is resumed with the same options (in a new Orca terminal when Orca runs).
 - **Blocked members** use the `blocked` status with the question in the summary. The lead answers with `send`, or asks you on the dashboard if it is your call.
 - **What reaches you:** decisions, review requests, problems, and finished milestones. Turn on `Member reports` on the dashboard when you want to look over the lead's shoulder.
 - **Permissions:** headless members run with `acceptEdits` and may run `git`, `node` and `npm` commands. Anything else is denied, which the member reports as blocked. Adjust per project in `~/.ddashboard/projects.json` (`"spawn": { "permission_mode", "allowed_tools", "model" }`). Avoid `bypassPermissions` unless the work is sandboxed.
 
 ## Lead handoff
 
-A lead's context grows with every report. When the sidebar shows its `ctx` in red (150k tokens by default), hand over:
+A lead's context grows with every report. When its context passes `DDASH_LEAD_CONTEXT_LIMIT` (150k tokens by default), the Stop hook tells it once to hand over and the sidebar marks it `handoff due`:
 
 1. The lead writes a handoff doc: goals, decisions so far, open tasks, member ids and roles, where things are. Short; the new lead reads only this.
 2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead headless instead.
@@ -65,5 +67,7 @@ A lead's context grows with every report. When the sidebar shows its `ctx` in re
 - **Small things:** the lead does them itself. Spawning costs a fresh read of the brief and the files.
 - **Member to member:** route questions through the lead for now. Direct member talk tends to ping-pong and re-reads both contexts on every message.
 - **Untagged sessions** in a team project are marked `outside team` and still post directly, so you can always open a side session for something unrelated.
+- **Stale briefs:** when git HEAD is `DDASH_BRIEF_STALE_COMMITS` (20) commits past the last change of a group's `brief.md`, the lead is told once. Update the brief and the warning resets.
+- **Unresponsive sessions:** an idle session with no wait command, not seen for `DDASH_STALE_MIN` minutes, is marked `unresponsive` in the sidebar. Check its terminal, or `Mark ended` it.
 - **If the lead ends** without a handoff, members post straight to the dashboard and are marked `lead missing`. Pick a new lead with the switch next to the project name.
 - **Back to solo:** `/ddashboard:dashboard solo` or the switch. Every session gets the solo instructions once on its next turn.

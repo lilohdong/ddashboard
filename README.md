@@ -87,22 +87,23 @@ Each project runs in one of two modes. You can switch at any time, with a comman
 
 **Team mode** is for one lead session that you talk to, and member sessions (planner, frontend, backend, QA…) that do parts of the work and report to the lead. Delivery between them uses the same file inbox and wait command as dashboard replies, so it costs no tokens.
 
-- **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead usually starts them headless (`claude -p` in the background, no terminal needed) with `team.js`; you can also paste the tagged prompt into any terminal.
+- **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead starts them with `team.js`: if Orca is running, as a visible interactive `claude` in a new Orca terminal in the lead's worktree; otherwise headless (`claude -p` in the background, no terminal needed). You can also paste the tagged prompt into any terminal.
 - **The lead** gets these commands (the exact command line is in its instructions; it runs from the fixed path `~/.ddashboard/bin/team.js`):
   | Command | What it does |
   |---|---|
-  | `spawn --role <role> [--model <m>] [--stay] "<task>"` | Starts a headless member. Output goes to `~/.ddashboard/logs/<session id>.log` |
-  | `send <session id\|role> "<text>"` | Sends an instruction: into the inbox if the member is waiting or running, otherwise resumes it with `claude -p --resume` |
+  | `spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless\|--orca] "<task>"` | Starts a member: in an Orca terminal when Orca runs, else headless (output in `~/.ddashboard/logs/<session id>.log`). `--headless` / `--orca` force one |
+  | `send <session id\|role> "<text>"` | Sends an instruction: into the inbox if the member is waiting or running; typed into its Orca terminal if it sits idle there; otherwise resumes it (`claude --resume` in a new Orca terminal, or `claude -p --resume`) |
   | `list` | Members with role, state, waiting, and last card |
   | `show <card id>` | A card in full (long report details are not copied into the report) |
   | `handoff <doc>` | Hands the lead over to a new session (see the guide) |
   | `group create\|rename\|delete [--purge]\|list\|prune <name>` | Manages groups (below) |
 - **Member reports** reach the lead as `[Team report]`, lead instructions reach members as `[Lead instruction]`, and your replies stay `[Dashboard reply]`. Reports are kept as cards but hidden from the feed; the `Member reports` button shows them, dimmed.
 - **Headless permissions** default to `--permission-mode acceptEdits` plus `Bash(git *)`, `Bash(node *)` and `Bash(npm *)`. Change them per project in `~/.ddashboard/projects.json`: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
-- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`. `+ member` under the lead starts a member from the dashboard (role, optional model, stay, task); the lead is told about it. The lead picker lists sessions newest first with a short id and when they were last seen; sessions not seen for `DDASH_STALE_MIN` minutes (60) are grouped as stale.
+- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`. `+ member` under the lead starts a member from the dashboard (role, optional model, stay, task); the lead is told about it. The lead picker lists sessions newest first with a short id and when they were last seen; sessions not seen for `DDASH_STALE_MIN` minutes (60) are grouped as stale. An idle session with no wait command that has not been seen for that long is marked `unresponsive`.
 - **Cleaning up:** `×` removes an ended session from the sidebar and `Clear N ended` removes all of a project's ended sessions (their cards and token counts stay). An idle session not seen for `DDASH_STALE_MIN` minutes offers `Mark ended` first.
 - **Groups (optional):** a group (e.g. `front`) is a team's shared memory: `docs/groups/<name>/` in the lead's worktree with `brief.md` (scope, key files, rules, current state), `handoff-NNN.md` and `notes/`. `spawn --group <name>` gives a new member the brief (up to about 4000 tokens; the lead is told when it needs trimming) and the latest handoff before its task, and the member writes the next handoff when it finishes. Only the newest 3 handoffs and 30 days of notes are kept (`keep_handoffs` and `notes_days` in the group's entry in `projects.json`). Renaming moves the folder (`git mv` when tracked); deleting moves it to `docs/groups/_archived/` (`--purge` deletes it) and unassigns the members. Nothing is committed for you: the lead commits the docs. The sidebar shows lead → group → members, with `unassigned` for members without a group.
-- **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead, takes over the members and pending messages, and the old lead is ended and stopped.
+- **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead, takes over the members and pending messages, and the old lead is ended and stopped. When the lead's context passes `DDASH_LEAD_CONTEXT_LIMIT` (150k), the Stop hook tells it once to do this, and the sidebar marks it `handoff due`.
+- **Cost guards:** every session is told to restart the wait command in the same response that handles its output (one model call per reply, not two). Member reports are at most 3 summary lines with the evidence in the group's `notes/` and its path. When git HEAD gets `DDASH_BRIEF_STALE_COMMITS` (20) commits past the last change of a group's `brief.md`, the lead is told once that the brief may be stale.
 
 Recommended workflow: [Team mode guide](docs/team-mode-guide.md).
 
@@ -143,7 +144,10 @@ No hook calls the model, and none of them print anything in sessions that aren't
 | `DDASH_POLL_MS` | `1500` | How often the wait command checks for replies (ms) |
 | `DDASH_RECENT_DAYS` | `14` | Cards older than this are archived automatically |
 | `DDASH_CONTEXT_WARN` | `150000` | Context size (tokens) above which a session's `ctx` turns red. Read by the server |
-| `DDASH_STALE_MIN` | `60` | Minutes without activity after which a session counts as stale (lead picker, `Mark ended`). Read by the server |
+| `DDASH_STALE_MIN` | `60` | Minutes without activity after which a session counts as stale (lead picker, `Mark ended`, `unresponsive`). Read by the server |
+| `DDASH_LEAD_CONTEXT_LIMIT` | `150000` | Lead context (tokens) above which the lead is told once to hand off |
+| `DDASH_BRIEF_STALE_COMMITS` | `20` | Commits past a group brief's last change before the lead is told it may be stale |
+| `DDASH_ORCA` | on | `0` never starts members in Orca terminals (always headless) |
 
 To manage the server directly:
 

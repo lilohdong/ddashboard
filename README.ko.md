@@ -89,22 +89,23 @@ Claude Code 안에서 실행합니다.
 
 **team 모드**는 내가 대화하는 팀장 세션 하나와, 일을 나눠 맡고 팀장에게 보고하는 팀원 세션(기획, 프론트, 백엔드, QA 등)으로 일하는 방식입니다. 둘 사이의 전달은 대시보드 답글과 같은 파일 인박스와 대기 명령을 쓰므로 토큰이 들지 않습니다.
 
-- **팀원**은 첫 입력의 태그로 시작합니다: `[ddash role=<역할> lead=<팀장 세션 ID> stay=0|1]`. 보통 팀장이 `team.js`로 헤드리스(`claude -p`를 백그라운드로 실행, 터미널 불필요)로 띄웁니다. 태그를 붙인 지시문을 아무 터미널에 붙여 넣어도 됩니다.
+- **팀원**은 첫 입력의 태그로 시작합니다: `[ddash role=<역할> lead=<팀장 세션 ID> stay=0|1]`. 팀장이 `team.js`로 띄웁니다. Orca가 실행 중이면 팀장 worktree의 새 Orca 터미널에 보이는 대화형 `claude`로, 아니면 헤드리스(`claude -p`를 백그라운드로 실행, 터미널 불필요)로 띄웁니다. 태그를 붙인 지시문을 아무 터미널에 붙여 넣어도 됩니다.
 - **팀장**은 다음 명령을 씁니다(정확한 명령줄은 팀장 안내문에 있고, 고정 경로 `~/.ddashboard/bin/team.js`로 실행됩니다):
   | 명령 | 하는 일 |
   |---|---|
-  | `spawn --role <역할> [--model <m>] [--stay] "<과제>"` | 헤드리스 팀원 실행. 출력은 `~/.ddashboard/logs/<세션 ID>.log` |
-  | `send <세션 ID\|역할> "<내용>"` | 지시 전달. 팀원이 대기 중이거나 실행 중이면 인박스로, 아니면 `claude -p --resume`으로 이어 실행 |
+  | `spawn --role <역할> [--group <g>] [--model <m>] [--stay] [--headless\|--orca] "<과제>"` | 팀원 실행. Orca가 실행 중이면 Orca 터미널, 아니면 헤드리스(출력은 `~/.ddashboard/logs/<세션 ID>.log`). `--headless` / `--orca`로 고정 |
+  | `send <세션 ID\|역할> "<내용>"` | 지시 전달. 팀원이 대기 중이거나 실행 중이면 인박스로, Orca 터미널에서 쉬는 중이면 그 터미널에 입력, 아니면 이어 실행(새 Orca 터미널의 `claude --resume` 또는 `claude -p --resume`) |
   | `list` | 팀원 목록(역할, 상태, 대기 여부, 최근 카드) |
   | `show <카드 ID>` | 카드 전체 보기(긴 details는 보고에 복사되지 않음) |
   | `handoff <문서>` | 새 세션에게 팀장 넘기기(가이드 참고) |
   | `group create\|rename\|delete [--purge]\|list\|prune <이름>` | 그룹 관리(아래) |
 - **팀원 보고**는 팀장에게 `[Team report]`로, 팀장 지시는 팀원에게 `[Lead instruction]`으로, 내 답글은 그대로 `[Dashboard reply]`로 갑니다. 보고는 카드로 남지만 본문에서는 숨겨지고, `Member reports` 버튼을 켜면 흐리게 보입니다.
 - **헤드리스 권한** 기본값은 `--permission-mode acceptEdits`와 `Bash(git *)`, `Bash(node *)`, `Bash(npm *)` 허용입니다. 프로젝트별로 `~/.ddashboard/projects.json`에서 바꿉니다: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
-- **사이드바:** 팀원은 팀장 아래에 역할 배지와 함께 들여쓰기로 표시됩니다. 태그 없이 들어온 세션은 `outside team`(팀 외부)으로 표시되고 대시보드에 직접 올립니다. 팀장이 종료되면 팀원은 직접 올리고 `lead missing`(팀장 없음)으로 표시됩니다. 팀장 아래의 `+ member`로 대시보드에서 팀원을 띄울 수 있고(역할, 모델(선택), stay, 과제), 팀장에게 그 사실이 전달됩니다. 팀장 선택 목록은 최근에 본 세션부터 짧은 ID와 마지막 활동 시각을 함께 보여 주고, `DDASH_STALE_MIN`분(60) 넘게 조용한 세션은 stale 묶음으로 따로 보여 줍니다.
+- **사이드바:** 팀원은 팀장 아래에 역할 배지와 함께 들여쓰기로 표시됩니다. 태그 없이 들어온 세션은 `outside team`(팀 외부)으로 표시되고 대시보드에 직접 올립니다. 팀장이 종료되면 팀원은 직접 올리고 `lead missing`(팀장 없음)으로 표시됩니다. 팀장 아래의 `+ member`로 대시보드에서 팀원을 띄울 수 있고(역할, 모델(선택), stay, 과제), 팀장에게 그 사실이 전달됩니다. 팀장 선택 목록은 최근에 본 세션부터 짧은 ID와 마지막 활동 시각을 함께 보여 주고, `DDASH_STALE_MIN`분(60) 넘게 조용한 세션은 stale 묶음으로 따로 보여 줍니다. 대기 명령 없이 그만큼 조용한 쉬는 중 세션에는 `unresponsive`(응답 없음)가 붙습니다.
 - **정리:** `×`는 종료된 세션을 사이드바에서 지우고, `Clear N ended`는 프로젝트의 종료된 세션을 모두 지웁니다(카드와 토큰 기록은 남음). `DDASH_STALE_MIN`분 넘게 조용한 쉬는 중 세션에는 먼저 `Mark ended`(종료로 표시)가 나옵니다.
 - **그룹(선택):** 그룹(예: `front`)은 팀의 공유 기억입니다. 팀장 worktree의 `docs/groups/<이름>/`에 `brief.md`(담당 범위, 주요 파일, 규칙, 현재 상태), `handoff-NNN.md`, `notes/`를 둡니다. `spawn --group <이름>`으로 띄운 팀원은 과제보다 앞에 brief(약 4천 토큰까지, 넘으면 팀장에게 정리 필요 알림)와 최신 handoff를 받고, 끝날 때 다음 handoff를 씁니다. handoff는 최신 3개, notes는 30일치만 남깁니다(`projects.json`의 그룹 항목에서 `keep_handoffs`, `notes_days`로 조정). 이름을 바꾸면 폴더도 옮기고(추적 중이면 `git mv`), 지우면 폴더를 `docs/groups/_archived/`로 옮기며(`--purge`는 삭제) 팀원은 unassigned가 됩니다. 자동 커밋은 하지 않으니 docs 커밋은 팀장이 합니다. 사이드바에는 팀장 → 그룹 → 팀원 순으로, 그룹 없는 팀원은 `unassigned` 아래에 표시됩니다.
-- **팀장 교대:** 팀장 맥락이 커지면 인수인계 문서를 쓰고 `team.js ... handoff <문서>`를 실행합니다. `[ddash lead-handoff from=<기존 ID> doc=<경로>]`로 시작한 새 세션이 팀장이 되어 팀원과 남은 메시지를 넘겨받고, 기존 팀장은 종료 처리되고 멈춥니다.
+- **팀장 교대:** 팀장 맥락이 커지면 인수인계 문서를 쓰고 `team.js ... handoff <문서>`를 실행합니다. `[ddash lead-handoff from=<기존 ID> doc=<경로>]`로 시작한 새 세션이 팀장이 되어 팀원과 남은 메시지를 넘겨받고, 기존 팀장은 종료 처리되고 멈춥니다. 팀장 맥락이 `DDASH_LEAD_CONTEXT_LIMIT`(15만)를 넘으면 Stop 훅이 이 절차를 한 번 알려 주고, 사이드바에 `handoff due`(교대 필요)가 표시됩니다.
+- **비용 장치:** 모든 세션은 대기 명령의 출력을 처리하는 같은 응답에서 대기 명령을 다시 띄웁니다(답글 1건당 모델 호출 2회 → 1회). 팀원 보고는 요약 3줄 이하이고, 근거는 그룹 `notes/`에 쓰고 경로만 적습니다. 그룹 `brief.md`를 마지막으로 고친 뒤 git HEAD가 `DDASH_BRIEF_STALE_COMMITS`(20)커밋 이상 앞서면 팀장에게 brief가 낡았을 수 있다고 한 번 알립니다.
 
 권장 방식: [팀 모드 가이드](docs/team-mode-guide.md) (영어)
 
@@ -145,7 +146,10 @@ Claude Code 안에서 실행합니다.
 | `DDASH_POLL_MS` | `1500` | 대기 명령이 답글을 확인하는 주기(ms) |
 | `DDASH_RECENT_DAYS` | `14` | 이 기간이 지난 카드는 자동으로 보관 |
 | `DDASH_CONTEXT_WARN` | `150000` | 세션의 `ctx`가 이 토큰 수를 넘으면 경고 색. 서버가 읽음 |
-| `DDASH_STALE_MIN` | `60` | 이 시간(분) 넘게 활동이 없으면 stale로 봄(팀장 선택 목록, `Mark ended`). 서버가 읽음 |
+| `DDASH_STALE_MIN` | `60` | 이 시간(분) 넘게 활동이 없으면 stale로 봄(팀장 선택 목록, `Mark ended`, `unresponsive`). 서버가 읽음 |
+| `DDASH_LEAD_CONTEXT_LIMIT` | `150000` | 팀장 맥락(토큰)이 이 값을 넘으면 교대하라고 한 번 알림 |
+| `DDASH_BRIEF_STALE_COMMITS` | `20` | 그룹 brief를 마지막으로 고친 뒤 이만큼 커밋이 쌓이면 팀장에게 낡았을 수 있다고 알림 |
+| `DDASH_ORCA` | 켜짐 | `0`이면 팀원을 Orca 터미널로 띄우지 않음(항상 헤드리스) |
 
 서버만 따로 다룰 때:
 
