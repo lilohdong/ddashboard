@@ -1,6 +1,10 @@
 // POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar.
 // POST /api/sessions/end {session_id} -> mark an idle, stale session (or one whose Claude is dead) as ended.
-const { readJson, paths, readProjects, safeId, isEnded, forgetSessions } = require('../../lib');
+const { paths, safeId } = require('../../core/paths');
+const { readJson } = require('../../core/fsx');
+const { isEnded } = require('../../domain/session');
+const { readProjects } = require('../../app/teams');
+const { forgetSessions } = require('../../app/sessions');
 const { fail } = require('../router');
 const jobs = require('../jobs');
 const { projectKeyOf } = require('./project');

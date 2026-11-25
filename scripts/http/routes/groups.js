@@ -1,6 +1,9 @@
 // POST /api/groups {project, team?, action: create|rename|delete, name, new_name?, purge?} -> manage a team's groups
 // (same as `team.js <lead> group ...`; needs a live lead). Deleting with purge ends members: off the request path.
-const { readJson, paths, readProjects, teamsOf, own, isEnded } = require('../../lib');
+const { paths } = require('../../core/paths');
+const { readJson } = require('../../core/fsx');
+const { teamsOf, own, isEnded } = require('../../domain/team');
+const { readProjects } = require('../../app/teams');
 const { fail } = require('../router');
 const jobs = require('../jobs');
 const { projectKeyOf } = require('./project');

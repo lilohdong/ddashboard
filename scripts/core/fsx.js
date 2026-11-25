@@ -70,4 +70,16 @@ function readTail(file, bytes) {
   } catch { return null; }
 }
 
-module.exports = { ensureDir, readJson, writeJson, atomicWrite, renameRetry, appendJsonl, readJsonl, readTail, sleep };
+// Parsed jsonl lines from the last `bytes` bytes of a file (transcripts). The first line may be cut off; it is
+// skipped, like any malformed line.
+function readJsonlTail(file, bytes) {
+  const buf = readTail(file, bytes);
+  if (!buf) return [];
+  const rows = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    try { rows.push(JSON.parse(line)); } catch { /* partial or malformed line */ }
+  }
+  return rows;
+}
+
+module.exports = { readJsonlTail, ensureDir, readJson, writeJson, atomicWrite, renameRetry, appendJsonl, readJsonl, readTail, sleep };

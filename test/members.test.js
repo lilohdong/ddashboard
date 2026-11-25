@@ -20,7 +20,7 @@ const SCRIPTS = path.join(ROOT, 'scripts');
 const { paths } = require(path.join(SCRIPTS, 'core', 'paths.js'));
 const { readJson, writeJson, readJsonl } = require(path.join(SCRIPTS, 'core', 'fsx.js'));
 const members = require(path.join(SCRIPTS, 'app', 'members.js'));
-const { projectKey } = require(path.join(SCRIPTS, 'lib.js'));
+const { projectKey } = require(path.join(SCRIPTS, 'app', 'projects.js'));
 
 const KEY = projectKey(CWD);
 const slash = (p) => String(p).replace(/\\/g, '/');

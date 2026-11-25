@@ -1,7 +1,11 @@
 // POST /api/team/end {session_id} -> stop a team member (same as `team.js <lead> end <sid>`).
 // POST /api/team/spawn {lead, role, model?, stay?, task, group?, runner?} -> start a member for a live lead and tell
 // the lead. Both start or stop processes: the use case runs off the request path (http/jobs.js).
-const { readJson, paths, readProjects, safeId, isEnded, teamRole, deliver } = require('../../lib');
+const { paths, safeId } = require('../../core/paths');
+const { readJson } = require('../../core/fsx');
+const { deliver } = require('../../store/inbox');
+const { isEnded, teamRole } = require('../../domain/team');
+const { readProjects } = require('../../app/teams');
 const { RUNNERS } = require('../../app/members');
 const { fail } = require('../router');
 const jobs = require('../jobs');

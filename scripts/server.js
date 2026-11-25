@@ -31,7 +31,10 @@ const os = require('os');
 // Never keep a worktree as the current folder (Windows could not delete it while the server runs; bug-005).
 try { process.chdir(os.homedir()); } catch { /* stay */ }
 const fs = require('fs');
-const { BOARD_DIR, PORT, paths, readJson, writeJson, processTableAsync, sweepWaiters } = require('./lib');
+const { BOARD_DIR, PORT, paths } = require('./core/paths');
+const { readJson, writeJson } = require('./core/fsx');
+const { processTableAsync } = require('./proc/table');
+const { sweepWaiters } = require('./proc/waiter');
 const orca = require('./runners/orca');
 const config = require('./core/config');
 const lifecycle = require('./app/lifecycle');

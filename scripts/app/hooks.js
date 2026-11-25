@@ -4,14 +4,30 @@
 // name and session id.
 const fs = require('fs');
 const path = require('path');
-const {
-  paths, readJson, safeId, serverPid, projectActive, projectKey, setProject, registerSession, injectRules,
-  isRegistered, pendingRules, parseTag, setMember, performHandoff, recordClaudePid, replacedText, memberStart, addTeam,
-  removeTeams, teamOfLead, readProjects, rememberModel, appendCard, appendJsonl, git, takeInbox, formatMessages,
-  messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, pruneGroup, leadContextNotice, checkBriefs, teamRole, teamOfSession, own, newId, waitLockPath, stopWaiter,
-} = require('../lib');
+const { paths, safeId } = require('../core/paths');
+const { readJson, readJsonlTail } = require('../core/fsx');
+const { git } = require('../core/git');
+const { newId } = require('../core/ids');
+const { append: appendCard } = require('../store/cards');
+const usageStore = require('../store/usage');
+const { deliver, take: takeInbox } = require('../store/inbox');
+const { waitLockPath, stopWaiter } = require('../proc/waiter');
+const { replacedText } = require('../domain/rules');
+const { parseTag } = require('../domain/tags');
+const { formatMessages, messagesReason, reportMessage } = require('../domain/messages');
+const { TAIL_BYTES, lastHumanIndex, turnUsage, USAGE_KEYS } = require('../domain/transcript');
+const { teamOfLead, routeCard, teamRole, teamOfSession, own } = require('../domain/team');
 const control = require('./server-control');
+const { serverPid } = control;
+const { projectActive, projectKey, setProject } = require('./projects');
+const { registerSession, isRegistered, recordClaudePid } = require('./sessions');
+const { injectRules, pendingRules, memberStart, rulesUpdate } = require('./rules');
+const { setMember } = require('./members');
+const { performHandoff } = require('./handoff');
+const { addTeam, removeTeams, readProjects } = require('./teams');
+const { rememberModel, leadContextNotice } = require('./lead-context');
+const { pruneGroup } = require('./team-files');
+const { checkBriefs } = require('./groups');
 const sessionsStore = require('../store/sessions');
 const { clone } = require('../store/record');
 const { log } = require('../core/log');
@@ -196,7 +212,7 @@ function recordUsage(s, sid, rows) {
   if (!u.ids.length) return; // nothing new (e.g. no transcript)
 
   const ts = new Date().toISOString();
-  appendJsonl(paths.usageFor(ts), {
+  usageStore.append({
     ts, session_id: sid, project: s.project || '',
     input: u.input, cache_read: u.cache_read, cache_write: u.cache_write, output: u.output,
     context: u.context, reason,
@@ -216,7 +232,7 @@ const onStop = collect(async (input, write) => {
   const before = clone(sessions[sid]);
   const projects = readProjects();
   const cwd = input.cwd || process.cwd();
-  const rows = input.transcript_path ? readTranscriptTail(input.transcript_path) : [];
+  const rows = input.transcript_path ? readJsonlTail(input.transcript_path, TAIL_BYTES) : [];
 
   // A lead replaced by a handoff posts nothing and gets no messages (its inbox moved to the new lead).
   // It is told once to stop: the fallback for when its Claude process could not be stopped.

@@ -22,7 +22,7 @@ const ROOT = path.join(__dirname, '..');
 const SCRIPTS = path.join(ROOT, 'scripts');
 const { paths } = require(path.join(SCRIPTS, 'core', 'paths.js'));
 const { readJson, writeJson } = require(path.join(SCRIPTS, 'core', 'fsx.js'));
-const { projectKey } = require(path.join(SCRIPTS, 'lib.js'));
+const { projectKey } = require(path.join(SCRIPTS, 'app', 'projects.js'));
 const { createRouter, fail } = require(path.join(SCRIPTS, 'http', 'router.js'));
 const routes = require(path.join(SCRIPTS, 'http', 'routes'));
 

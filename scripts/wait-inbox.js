@@ -11,11 +11,17 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const lib = require('./lib');
 const config = require('./core/config');
+const { paths, safeId } = require('./core/paths');
+const { ensureDir, readJson, writeJson } = require('./core/fsx');
+const { alive, processTable, findClaudePid, processName } = require('./proc/table');
+const { waitLockPath, waitInfoPath, waitPid, orphanWaiter, stopWaiter } = require('./proc/waiter');
+const { take: takeInbox } = require('./store/inbox');
+const { formatMessages } = require('./domain/messages');
+const { own } = require('./domain/team');
+const { pendingRules } = require('./app/rules');
 const sessionsStore = require('./store/sessions');
 const lifecycle = require('./app/lifecycle');
-const { paths, ensureDir, safeId, alive, takeInbox, formatMessages, pendingRules, readJson, writeJson } = lib;
 
 try { process.chdir(os.homedir()); } catch { /* stay where we are */ }
 
@@ -23,17 +29,17 @@ const sid = safeId(process.argv[2]);
 const POLL_MS = config.get('DDASH_POLL_MS');
 const CHECK_MS = config.get('DDASH_WAIT_CHECK_MS'); // owner identity re-check (pid reuse)
 const dir = paths.inbox(sid);
-const lock = lib.waitLockPath(sid);
-const info = lib.waitInfoPath(sid);
+const lock = waitLockPath(sid);
+const info = waitInfoPath(sid);
 ensureDir(dir);
 
 // Don't start a second waiter for the same session (a waiter whose owner died does not count: see waitPid).
 // A waiter with no live Claude above it (an orphan, e.g. from an older plugin version) is stopped instead: it
 // would take this session's messages and print them to nobody.
-const other = lib.waitPid(sid);
+const other = waitPid(sid);
 if (other && other !== process.pid) {
-  const table = lib.processTable();
-  if (lib.orphanWaiter(other, table)) lib.stopWaiter(sid, table);
+  const table = processTable();
+  if (orphanWaiter(other, table)) stopWaiter(sid, table);
   else {
     console.log('Already waiting for replies. Nothing to do.');
     process.exit(0);
@@ -47,11 +53,11 @@ const startPpid = process.ppid;
 let owner = config.get('DDASH_WAIT_OWNER');
 let ownerIsClaude = false;
 if (!owner) {
-  owner = lib.findClaudePid(process.ppid);
+  owner = findClaudePid(process.ppid);
   ownerIsClaude = owner > 0;
 }
 if (!owner) owner = startPpid; // no Claude ancestor found (manual run): watch the parent
-const ownerName = lib.processName(owner);
+const ownerName = processName(owner);
 
 try {
   fs.writeFileSync(info, JSON.stringify({ pid: process.pid, owner, owner_name: ownerName, ppid: startPpid, started: new Date().toISOString() }));
@@ -61,7 +67,7 @@ try {
 if (ownerIsClaude) {
   try {
     sessionsStore.update((sessions) => {
-      const s = lib.own(sessions, sid);
+      const s = own(sessions, sid);
       if (s && !(Number(s.claude_pid) > 0) && !s.headless) s.claude_pid = owner;
     });
   } catch { /* best effort */ }
@@ -88,7 +94,7 @@ function ownerReplaced() {
   if (Date.now() - lastCheck < CHECK_MS) return false;
   lastCheck = Date.now();
   if (!ownerName) return false;
-  const now = lib.processName(owner);
+  const now = processName(owner);
   return Boolean(now) && now.toLowerCase() !== ownerName.toLowerCase();
 }
 

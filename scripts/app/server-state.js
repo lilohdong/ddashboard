@@ -2,15 +2,20 @@
 // and usage. Read-only: it writes no board file (gone sessions are ended by the server's liveness tick).
 const fs = require('fs');
 const path = require('path');
-const {
-  paths, readJson, readJsonl, teamRole, routeCard, isStale, STALE_MIN, readSettings, leadLimit, readProjects, teamOfSession,
-  teamsOf, runnersOf, waitPid,
-} = require('../lib');
-const cards = require('../cards');
+const { paths } = require('../core/paths');
+const { readJson } = require('../core/fsx');
+const { waitPid } = require('../proc/waiter');
+const { teamRole, routeCard, teamOfSession, teamsOf, runnersOf } = require('../domain/team');
+const { isStale, STALE_MIN } = require('../domain/session');
+const { leadLimit } = require('../domain/lead-context');
+const { readSettings } = require('./settings');
+const { readProjects } = require('./teams');
+const cards = require('./cards');
 const replies = require('../store/replies');
-const usage = require('../usage');
+const usage = require('./usage');
 const config = require('../core/config');
 const { view } = require('../domain/session');
+
 
 const CONTEXT_WARN = config.get('DDASH_CONTEXT_WARN');
 

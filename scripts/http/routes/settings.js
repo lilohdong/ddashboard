@@ -1,5 +1,8 @@
 // GET /api/settings; POST /api/settings {lang} (dashboard and card language) or {project, runner_lead?, runner_member?}.
-const { readJson, paths, readSettings, saveSettings, readProjects, setRunners } = require('../../lib');
+const { paths } = require('../../core/paths');
+const { readJson } = require('../../core/fsx');
+const { readSettings, saveSettings } = require('../../app/settings');
+const { readProjects, setRunners } = require('../../app/teams');
 const { fail } = require('../router');
 const { projectKeyOf } = require('./project');
 

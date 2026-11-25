@@ -178,12 +178,12 @@ test('an exception inside update leaves the file unchanged and releases the lock
   assert.equal(sessions.get('A').x, 2);
 });
 
-test('lib writers go through the store: setState / markGone / forgetSessions keep a concurrent field', () => {
+test('app/sessions writers go through the store: setState / markGone / forgetSessions keep a concurrent field', () => {
   reset();
-  const lib = require('../scripts/lib');
+  const lib = require('../scripts/app/sessions');
   writeJson(paths.sessions, { A: { session_id: 'A', state: 'idle' }, B: { session_id: 'B', state: 'idle' } });
   sessions.update((m) => {
-    // Nested: lib calls inside an update work on the same map.
+    // Nested: app/sessions calls inside an update work on the same map.
     lib.setState('A', 'working');
     m.B.extra = 1;
   });

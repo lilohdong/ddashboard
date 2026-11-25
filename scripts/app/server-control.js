@@ -3,7 +3,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const { URL, paths, ensureDir, serverPid } = require('../lib');
+const { URL, paths } = require('../core/paths');
+const { ensureDir, readJson } = require('../core/fsx');
+const { alive } = require('../proc/table');
+
+// The server's pid from its pid file, or 0 when it is not running.
+function serverPid() {
+  const info = readJson(paths.serverPid, null);
+  return info && alive(info.pid) ? info.pid : 0;
+}
 
 const SERVER = path.join(__dirname, '..', 'server.js');
 
@@ -39,4 +47,4 @@ function status() {
   return serverPid() ? `Running: ${URL}` : 'Not running';
 }
 
-module.exports = { start, stop, status };
+module.exports = { start, stop, status, serverPid };

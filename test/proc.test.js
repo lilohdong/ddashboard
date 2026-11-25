@@ -11,7 +11,7 @@ process.env.DDASH_BOARD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-proc-
 const table = require('../scripts/proc/table');
 const { identityOf, same } = require('../scripts/proc/identity');
 const kill = require('../scripts/proc/kill');
-const lib = require('../scripts/lib');
+
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -112,10 +112,8 @@ test('killTree stops a real process tree; killClaude refuses a pid that is not C
   assert.equal(kill.killTree(parent.pid, t), false, 'already gone');
 });
 
-test('lib re-exports the moved functions (callers unchanged)', () => {
-  for (const [k, m] of [['processTable', table], ['processTableAsync', table], ['parseProcessList', table], ['isClaudeProcess', table], ['findClaudePid', table], ['alive', table], ['processName', table], ['napUntil', table], ['killTree', kill], ['killPid', kill], ['descendants', kill], ['killClaude', kill]]) {
-    assert.equal(lib[k], m[k], k);
-  }
+test('lib.js is gone: no module re-exports the process functions', () => {
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'scripts', 'lib.js')), false);
 });
 
 (async () => {

@@ -17,7 +17,8 @@ const hooks = require('../scripts/app/hooks');
 const sessions = require('../scripts/store/sessions');
 const { writeJson } = require('../scripts/core/fsx');
 const { paths } = require('../scripts/core/paths');
-const lib = require('../scripts/lib');
+const storeInbox = require('../scripts/store/inbox');
+const appProjects = require('../scripts/app/projects');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -68,7 +69,7 @@ test('onStop: the card from the transcript is stored, usage recorded, the sessio
 
 test('onStop: waiting inbox messages are handed over (block) and the session stays working', async () => {
   reset({ S2: session('S2') });
-  lib.deliver('S2', { text: 'please also update the docs' });
+  storeInbox.deliver('S2', { text: 'please also update the docs' });
   const r = await hooks.onStop({ session_id: 'S2', cwd: TMP, transcript_path: transcript('t2', ['ok']) });
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, 'block');
@@ -126,8 +127,8 @@ test('runHook: a real hook file with garbage input exits 0 and prints nothing', 
 test('runHook: empty, non-JSON or session-less stdin registers nothing, prints nothing, logs, exits 0', () => {
   reset();
   writeJson(paths.serverPid, { pid: process.pid, port: 1 }); // "server running": this test process is alive
-  lib.setProject(TMP, true);
-  assert.ok(lib.projectActive(TMP));
+  appProjects.setProject(TMP, true);
+  assert.ok(appProjects.projectActive(TMP));
   const bad = ['', '   \n', '{not json', 'null', '[]', '123', JSON.stringify({ cwd: TMP }), JSON.stringify({ session_id: 123, cwd: TMP }), JSON.stringify({ session_id: '  ', cwd: TMP })];
   for (const f of ['session-start', 'prompt-submit', 'stop-card', 'session-end']) {
     for (const input of bad) {

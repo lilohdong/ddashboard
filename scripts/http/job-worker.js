@@ -5,7 +5,7 @@ const JOBS = {
   spawnMember: (...a) => require('../app/members').spawnMember(...a),
   endMember: (...a) => require('../app/members').endMember(...a),
   groupAction: (...a) => require('../app/members').groupAction(...a),
-  markEnded: (...a) => require('../lib').markEnded(...a),
+  markEnded: (...a) => require('../app/sessions').markEnded(...a),
 };
 
 (async () => {

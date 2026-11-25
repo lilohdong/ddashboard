@@ -1,8 +1,9 @@
 // In-memory token usage index for the server.
 // Reads usage/YYYY-MM.jsonl and, on each refresh, only the bytes appended since the last read
-// (same approach as cards.js). Keeps running totals per session and per local day.
+// (same approach as store/cards.js). Keeps running totals per session and per local day.
 const fs = require('fs');
-const { usageFiles, USAGE_KEYS } = require('./lib');
+const { files: usageFiles } = require('../store/usage');
+const { USAGE_KEYS } = require('../domain/transcript');
 
 const NL = 0x0a;
 

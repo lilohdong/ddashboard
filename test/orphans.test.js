@@ -16,9 +16,16 @@ process.env.DDASH_ORCA = '0';
 delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
-const lib = require(path.join(ROOT, 'scripts', 'lib.js'));
-const { paths, readJson, writeJson } = lib;
-const KEY = lib.projectKey(CWD);
+const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
+const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
+const procWaiter = require(path.join(ROOT, 'scripts', 'proc', 'waiter.js'));
+const storeInbox = require(path.join(ROOT, 'scripts', 'store', 'inbox.js'));
+const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
+const { paths } = corePaths;
+const { readJson, writeJson } = coreFsx;
+const KEY = appProjects.projectKey(CWD);
 const WAIT = path.join(ROOT, 'scripts', 'wait-inbox.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,7 +38,7 @@ async function until(fn, ms = 8000, step = 100) {
   return false;
 }
 
-// A process that looks like Claude Code to lib.isClaudeProcess (node running a file under "claude-code").
+// A process that looks like Claude Code to procTable.isClaudeProcess (node running a file under "claude-code").
 function fakeClaudeFile() {
   const dir = path.join(BOARD, 'claude-code');
   fs.mkdirSync(dir, { recursive: true });
@@ -75,7 +82,7 @@ function reset(sessions = {}) {
   writeJson(paths.sessions, sessions);
   writeJson(paths.serverPid, { pid: process.pid });
 }
-const lockOf = (sid) => { try { return Number(fs.readFileSync(lib.waitLockPath(sid), 'utf8')); } catch { return 0; } };
+const lockOf = (sid) => { try { return Number(fs.readFileSync(procWaiter.waitLockPath(sid), 'utf8')); } catch { return 0; } };
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -86,16 +93,16 @@ test('F-1: the waiter exits by itself when its Claude process dies, and removes 
   reset({ W1: session('W1') });
   const claude = startFakeClaude();
   const w = startWaiter('W1', claude.pid);
-  assert.ok(await until(() => lockOf('W1') === w.pid && lib.readWaitInfo('W1')), 'waiter did not start');
-  assert.equal(lib.readWaitInfo('W1').owner, claude.pid);
-  assert.equal(lib.waitPid('W1'), w.pid);
+  assert.ok(await until(() => lockOf('W1') === w.pid && procWaiter.readWaitInfo('W1')), 'waiter did not start');
+  assert.equal(procWaiter.readWaitInfo('W1').owner, claude.pid);
+  assert.equal(procWaiter.waitPid('W1'), w.pid);
   claude.kill();
   await exited(claude);
   assert.ok(await until(() => w.exitCode !== null), 'waiter kept running after its owner died (bug-005)');
   assert.equal(w.exitCode, 0);
   assert.equal(w.out, ''); // nothing printed: nobody listens
-  assert.equal(fs.existsSync(lib.waitLockPath('W1')), false);
-  assert.equal(fs.existsSync(lib.waitInfoPath('W1')), false);
+  assert.equal(fs.existsSync(procWaiter.waitLockPath('W1')), false);
+  assert.equal(fs.existsSync(procWaiter.waitInfoPath('W1')), false);
 });
 
 test('F-1: with a live owner the waiter keeps waiting and delivers a message (regression)', async () => {
@@ -105,7 +112,7 @@ test('F-1: with a live owner the waiter keeps waiting and delivers a message (re
   assert.ok(await until(() => lockOf('W2') === w.pid));
   await sleep(500);
   assert.equal(w.exitCode, null);
-  lib.deliver('W2', { type: 'reply', text: 'hello there', ts: new Date().toISOString() });
+  storeInbox.deliver('W2', { type: 'reply', text: 'hello there', ts: new Date().toISOString() });
   assert.ok(await until(() => w.exitCode !== null), 'waiter did not wake up');
   assert.match(w.out, /hello there/);
   claude.kill();
@@ -116,7 +123,7 @@ test('F-2: the waiter does not keep the session folder as its cwd', async () => 
   const claude = startFakeClaude();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-orph-wt-'));
   const w = startWaiter('W3', claude.pid, { cwd: dir });
-  assert.ok(await until(() => lockOf('W3') === w.pid && lib.readWaitInfo('W3')));
+  assert.ok(await until(() => lockOf('W3') === w.pid && procWaiter.readWaitInfo('W3')));
   // Windows refuses to remove a folder that is a process's cwd; elsewhere this passes either way.
   fs.rmSync(dir, { recursive: true });
   assert.equal(fs.existsSync(dir), false);
@@ -134,28 +141,28 @@ test('F-3: a waiter whose owner is dead is not "waiting"; markEnded is not refus
   claude.kill();
   await exited(claude);
   fs.mkdirSync(paths.inbox('W4'), { recursive: true });
-  fs.writeFileSync(lib.waitLockPath('W4'), String(process.pid));
-  fs.writeFileSync(lib.waitInfoPath('W4'), JSON.stringify({ pid: process.pid, owner: dead }));
-  assert.equal(lib.waitPid('W4'), 0);
-  assert.equal(lib.markEnded('W4').ok, true);
+  fs.writeFileSync(procWaiter.waitLockPath('W4'), String(process.pid));
+  fs.writeFileSync(procWaiter.waitInfoPath('W4'), JSON.stringify({ pid: process.pid, owner: dead }));
+  assert.equal(procWaiter.waitPid('W4'), 0);
+  assert.equal(appSessions.markEnded('W4').ok, true);
   // Without wait.info (an older waiter) the lock pid alone still counts, as before.
   reset({ W5: session('W5', { last_seen: old }) });
   fs.mkdirSync(paths.inbox('W5'), { recursive: true });
-  fs.writeFileSync(lib.waitLockPath('W5'), String(process.pid));
-  assert.equal(lib.waitPid('W5'), process.pid);
+  fs.writeFileSync(procWaiter.waitLockPath('W5'), String(process.pid));
+  assert.equal(procWaiter.waitPid('W5'), process.pid);
 });
 
 test('F-3: the waiter records its owner as the session\'s claude_pid when none is known', async () => {
   reset({ W6: session('W6'), W7: session('W7', { claude_pid: 4242 }) });
   const claude = claudeWithWaiter('W6');
   assert.ok(await until(() => readJson(paths.sessions, {}).W6?.claude_pid === claude.pid, 15000), 'claude_pid not recorded');
-  assert.equal(lib.readWaitInfo('W6').owner, claude.pid);
+  assert.equal(procWaiter.readWaitInfo('W6').owner, claude.pid);
   claude.kill();
   await exited(claude);
-  const wp = lib.readWaitInfo('W6').pid;
+  const wp = procWaiter.readWaitInfo('W6').pid;
   // (On Windows node kills a non-detached child with its parent, so the lock may stay behind: waitPid ignores it.)
-  assert.ok(await until(() => !lib.alive(wp)), 'waiter of a fake claude did not exit');
-  assert.equal(lib.waitPid('W6'), 0);
+  assert.ok(await until(() => !procTable.alive(wp)), 'waiter of a fake claude did not exit');
+  assert.equal(procWaiter.waitPid('W6'), 0);
   assert.equal(readJson(paths.sessions, {}).W7.claude_pid, 4242); // a known pid is never overwritten
 });
 
@@ -207,7 +214,7 @@ async function startFakeWaiter(sid, { lock = true } = {}) {
   const pid = await startOrphan(file, [sid]);
   if (lock) {
     fs.mkdirSync(paths.inbox(sid), { recursive: true });
-    fs.writeFileSync(lib.waitLockPath(sid), String(pid));
+    fs.writeFileSync(procWaiter.waitLockPath(sid), String(pid));
   }
   return { pid };
 }
@@ -220,32 +227,32 @@ async function startWrappedWaiter(sid) {
   orphansStarted.add(pid);
   started.push({ kill: () => { try { process.kill(pid); } catch {} } });
   fs.mkdirSync(paths.inbox(sid), { recursive: true });
-  fs.writeFileSync(lib.waitLockPath(sid), String(pid));
+  fs.writeFileSync(procWaiter.waitLockPath(sid), String(pid));
   return { wrapper: { pid: wrapper }, pid };
 }
 
 test('waitCommandSid: every plugin version and Claude\'s bash wrapper', () => {
   const sid = 'd0504315-19ba-41a2-b07f-656b621ac05f';
-  assert.equal(lib.waitCommandSid(`"C:\\Program Files\\nodejs\\node.exe" C:/Users/u/.ddashboard/bin/wait.js ${sid}`), sid);
-  assert.equal(lib.waitCommandSid(`"C:\\Program Files\\nodejs\\node.exe" C:/Users/u/.claude/plugins/cache/ddashboard/ddashboard/0.1.0/scripts/wait-inbox.js ${sid}`), sid);
-  assert.equal(lib.waitCommandSid(`bash -c "source /c/x/shell-snapshots/snapshot-bash-1.sh && { eval 'node \\"C:/Users/u/.ddashboard/bin/wait.js\\" ${sid}' < /dev/null; } && pwd -P"`), sid);
-  assert.equal(lib.waitCommandSid('/usr/bin/node /home/u/.ddashboard/bin/wait.js abc_1'), 'abc_1');
-  assert.equal(lib.waitCommandSid('node server.js'), '');
-  assert.equal(lib.waitCommandSid('node await.js x'), '');
+  assert.equal(procWaiter.waitCommandSid(`"C:\\Program Files\\nodejs\\node.exe" C:/Users/u/.ddashboard/bin/wait.js ${sid}`), sid);
+  assert.equal(procWaiter.waitCommandSid(`"C:\\Program Files\\nodejs\\node.exe" C:/Users/u/.claude/plugins/cache/ddashboard/ddashboard/0.1.0/scripts/wait-inbox.js ${sid}`), sid);
+  assert.equal(procWaiter.waitCommandSid(`bash -c "source /c/x/shell-snapshots/snapshot-bash-1.sh && { eval 'node \\"C:/Users/u/.ddashboard/bin/wait.js\\" ${sid}' < /dev/null; } && pwd -P"`), sid);
+  assert.equal(procWaiter.waitCommandSid('/usr/bin/node /home/u/.ddashboard/bin/wait.js abc_1'), 'abc_1');
+  assert.equal(procWaiter.waitCommandSid('node server.js'), '');
+  assert.equal(procWaiter.waitCommandSid('node await.js x'), '');
 });
 
 test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kills a pid that is not a waiter', async () => {
   reset({ X1: session('X1') });
   const { wrapper, pid } = await startWrappedWaiter('X1');
-  const table = lib.processTable();
-  assert.deepEqual(lib.waiterChain(pid, table), [pid, wrapper.pid]);
+  const table = procTable.processTable();
+  assert.deepEqual(procWaiter.waiterChain(pid, table), [pid, wrapper.pid]);
   const top = table.get(wrapper.pid);
-  assert.equal(lib.orphanWaiter(pid, table), true, `not an orphan: wrapper ${JSON.stringify(top)}, its parent ${JSON.stringify(table.get(top?.ppid))}`);
-  const alive = lib.alive(pid);
-  assert.equal(lib.stopWaiter('X1'), true, `not stopped (alive before: ${alive}, after: ${lib.alive(pid)})`);
-  assert.equal(lib.alive(pid), false);
-  assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper shell left running');
-  assert.equal(fs.existsSync(lib.waitLockPath('X1')), false);
+  assert.equal(procWaiter.orphanWaiter(pid, table), true, `not an orphan: wrapper ${JSON.stringify(top)}, its parent ${JSON.stringify(table.get(top?.ppid))}`);
+  const alive = procTable.alive(pid);
+  assert.equal(procWaiter.stopWaiter('X1'), true, `not stopped (alive before: ${alive}, after: ${procTable.alive(pid)})`);
+  assert.equal(procTable.alive(pid), false);
+  assert.ok(await until(() => !procTable.alive(wrapper.pid)), 'wrapper shell left running');
+  assert.equal(fs.existsSync(procWaiter.waitLockPath('X1')), false);
   // pid reuse: the lock names a live process that is not this session's wait command.
   reset({ X2: session('X2') });
   const other = await startFakeWaiter('SOMEONE-ELSE', { lock: false });
@@ -253,9 +260,9 @@ test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kill
   await sleep(300);
   fs.mkdirSync(paths.inbox('X2'), { recursive: true });
   for (const p of [other, sleeper]) {
-    fs.writeFileSync(lib.waitLockPath('X2'), String(p.pid));
-    assert.equal(lib.stopWaiter('X2'), false);
-    assert.equal(lib.alive(p.pid), true);
+    fs.writeFileSync(procWaiter.waitLockPath('X2'), String(p.pid));
+    assert.equal(procWaiter.stopWaiter('X2'), false);
+    assert.equal(procTable.alive(p.pid), true);
   }
 });
 
@@ -263,9 +270,9 @@ test('forgetSessions stops an orphan waiter and removes the inbox (was: waiter k
   reset({ X3: session('X3', { state: 'ended', ended: new Date().toISOString() }) });
   const w = await startFakeWaiter('X3');
   await sleep(300);
-  assert.equal(lib.waitPid('X3'), w.pid);
-  assert.deepEqual(lib.forgetSessions(['X3']).forgotten, ['X3']);
-  assert.ok(await until(() => !lib.alive(w.pid)), 'waiter of a forgotten session still runs (bug-005)');
+  assert.equal(procWaiter.waitPid('X3'), w.pid);
+  assert.deepEqual(appSessions.forgetSessions(['X3']).forgotten, ['X3']);
+  assert.ok(await until(() => !procTable.alive(w.pid)), 'waiter of a forgotten session still runs (bug-005)');
   assert.equal(fs.existsSync(paths.inbox('X3')), false);
 });
 
@@ -274,15 +281,15 @@ test('markEnded: an orphan waiter (older version, no wait.info) does not block i
   reset({ X4: session('X4', { last_seen: old }) });
   const w = await startFakeWaiter('X4');
   await sleep(300);
-  assert.equal(lib.waitPid('X4'), w.pid); // legacy rule: the lock pid alone says waiting
-  const r = lib.markEnded('X4');
+  assert.equal(procWaiter.waitPid('X4'), w.pid); // legacy rule: the lock pid alone says waiting
+  const r = appSessions.markEnded('X4');
   assert.equal(r.ok, true, r.error);
-  assert.ok(await until(() => !lib.alive(w.pid)), 'orphan waiter left running');
+  assert.ok(await until(() => !procTable.alive(w.pid)), 'orphan waiter left running');
   reset({ X5: session('X5', { last_seen: old }) });
   // A waiter under a live Claude still blocks it (the waiter must have a real Claude ancestor).
   const c2 = claudeWithWaiter('X5');
-  assert.ok(await until(() => lib.readWaitInfo('X5')?.owner === c2.pid, 15000));
-  assert.equal(lib.markEnded('X5').code, 409);
+  assert.ok(await until(() => procWaiter.readWaitInfo('X5')?.owner === c2.pid, 15000));
+  assert.equal(appSessions.markEnded('X5').code, 409);
   c2.kill();
 });
 
@@ -293,7 +300,7 @@ test('SessionEnd hook stops the session\'s waiter', async () => {
   const r = require('child_process').spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', 'session-end.js')], { input: JSON.stringify({ session_id: 'X6' }), env: process.env });
   assert.equal(r.status, 0);
   assert.equal(readJson(paths.sessions, {}).X6.state, 'ended');
-  assert.ok(await until(() => !lib.alive(w.pid)), 'waiter left running after SessionEnd');
+  assert.ok(await until(() => !procTable.alive(w.pid)), 'waiter left running after SessionEnd');
 });
 
 test('a new waiter takes over from an orphan waiter instead of saying "Already waiting"', async () => {
@@ -303,7 +310,7 @@ test('a new waiter takes over from an orphan waiter instead of saying "Already w
   const claude = startFakeClaude();
   const w = startWaiter('X7', claude.pid);
   assert.ok(await until(() => lockOf('X7') === w.pid, 15000), `new waiter did not take over: ${w.out}`);
-  assert.equal(lib.alive(orphan.pid), false);
+  assert.equal(procTable.alive(orphan.pid), false);
   assert.doesNotMatch(w.out, /Already waiting/);
   claude.kill();
 });
@@ -327,12 +334,12 @@ setInterval(() => {}, 1000);
   const claude = track(spawn(process.execPath, [file], { stdio: ['ignore', 'pipe', 'ignore'] }));
   const [shell, tool] = await new Promise((r) => claude.stdout.once('data', (d) => r(String(d).trim().split(' ').map(Number))));
   started.push({ kill: () => { for (const p of [shell, tool]) try { process.kill(p); } catch {} } });
-  assert.deepEqual(lib.reapToolShells(claude.pid), []); // alive: never
+  assert.deepEqual(procWaiter.reapToolShells(claude.pid), []); // alive: never
   claude.kill();
   await exited(claude);
-  assert.deepEqual(lib.reapToolShells(claude.pid), [shell]);
-  assert.equal(lib.alive(shell), false);
-  assert.equal(lib.alive(tool), true); // not a Claude tool shell: left alone
+  assert.deepEqual(procWaiter.reapToolShells(claude.pid), [shell]);
+  assert.equal(procTable.alive(shell), false);
+  assert.equal(procTable.alive(tool), true); // not a Claude tool shell: left alone
 });
 
 // --- F-9: gone detection for every kind of session ---
@@ -377,7 +384,7 @@ test('F-9: solo, lead and outside sessions whose Claude died are ended (gone) an
     assert.equal(view('N1'), 'idle');
     assert.notEqual(view('H1'), 'ended'); // headless: "finished", resumable
   });
-  assert.deepEqual(lib.forgetSessions(['S1', 'L1', 'O1']).forgotten, ['S1', 'L1', 'O1']);
+  assert.deepEqual(appSessions.forgetSessions(['S1', 'L1', 'O1']).forgotten, ['S1', 'L1', 'O1']);
   live.kill();
 });
 
@@ -385,13 +392,13 @@ test('F-9: a recorded pid now used by another program counts as gone only with a
   const table = new Map([[process.pid, { pid: process.pid, ppid: 1, name: 'node.exe', cmd: 'node server.js' }]]);
   const s = session('R1', { claude_pid: process.pid, last_seen: new Date(Date.now() - 60000).toISOString() });
   table.taken = Date.now();
-  assert.equal(lib.sessionGone(s, null, table), true);
+  assert.equal(appSessions.sessionGone(s, null, table), true);
   table.taken = Date.now() - 120000; // read before the session was last seen: says nothing
-  assert.equal(lib.sessionGone(s, null, table), false);
-  assert.equal(lib.sessionGone(s), false); // no table: alive pid = alive
+  assert.equal(appSessions.sessionGone(s, null, table), false);
+  assert.equal(appSessions.sessionGone(s), false); // no table: alive pid = alive
   table.taken = Date.now();
   table.set(process.pid, { pid: process.pid, ppid: 1, name: 'claude.exe', cmd: 'claude' });
-  assert.equal(lib.sessionGone(s, null, table), false);
+  assert.equal(appSessions.sessionGone(s, null, table), false);
 });
 
 test('F-9: SessionStart records the Claude pid in solo mode too', async () => {
@@ -418,15 +425,15 @@ test('F-9: UserPromptSubmit records a missing pid once (0 when no Claude is foun
   assert.equal(readJson(paths.sessions, {}).P2.claude_pid, 0); // no Claude above it
 });
 
-test('F-3: /api/state does not show "waiting" for a waiter whose owner is dead (server uses lib.waitPid)', async () => {
+test('F-3: /api/state does not show "waiting" for a waiter whose owner is dead (server uses procWaiter.waitPid)', async () => {
   const dead = await deadPid();
   reset({ V1: session('V1'), V2: session('V2') });
   for (const sid of ['V1', 'V2']) fs.mkdirSync(paths.inbox(sid), { recursive: true });
   // Live pid in both locks (this test, not a wait command, so the sweep leaves it); V1's owner is dead.
-  fs.writeFileSync(lib.waitLockPath('V1'), String(process.pid));
-  fs.writeFileSync(lib.waitInfoPath('V1'), JSON.stringify({ pid: process.pid, owner: dead }));
-  fs.writeFileSync(lib.waitLockPath('V2'), String(process.pid));
-  fs.writeFileSync(lib.waitInfoPath('V2'), JSON.stringify({ pid: process.pid, owner: process.pid }));
+  fs.writeFileSync(procWaiter.waitLockPath('V1'), String(process.pid));
+  fs.writeFileSync(procWaiter.waitInfoPath('V1'), JSON.stringify({ pid: process.pid, owner: dead }));
+  fs.writeFileSync(procWaiter.waitLockPath('V2'), String(process.pid));
+  fs.writeFileSync(procWaiter.waitInfoPath('V2'), JSON.stringify({ pid: process.pid, owner: process.pid }));
   await withServer(async (base) => {
     const st = await (await fetch(`${base}/api/state`)).json();
     assert.equal(st.sessions.V1.waiting, false);
@@ -448,24 +455,24 @@ test('orphanWaiter (table fixture): dead or reused parent, init parent, 0.1.0 pa
     W(4000001, 4000099, old), // 0.1.0 waiter, parent gone
     W(live, 4000098, cur), // parent gone... but checked through its own pid below
   ]);
-  assert.equal(lib.orphanWaiter(4000001, t), true);
+  assert.equal(procWaiter.orphanWaiter(4000001, t), true);
   // A waiter under a live Claude: never.
   const t2 = new Map([
     W(live, 9, cur), [9, { pid: 9, ppid: 0, name: 'claude.exe', cmd: 'claude', start: 100 }],
   ]);
-  assert.equal(lib.orphanWaiter(live, t2), lib.alive(9) ? false : true); // pid 9 alive only on some systems
+  assert.equal(procWaiter.orphanWaiter(live, t2), procTable.alive(9) ? false : true); // pid 9 alive only on some systems
   // Under a live program that is not Claude (unknown host): not provable, never killed.
   const t3 = new Map([W(live, process.ppid, cur), [process.ppid, { pid: process.ppid, ppid: 0, name: 'Code.exe', cmd: 'code', start: 100 }]]);
-  assert.equal(lib.orphanWaiter(live, t3), false);
+  assert.equal(procWaiter.orphanWaiter(live, t3), false);
   // Same, but that pid was started after the waiter: a reuse of the dead parent's pid.
   t3.get(process.ppid).start = 300;
-  assert.equal(lib.orphanWaiter(live, t3), true);
+  assert.equal(procWaiter.orphanWaiter(live, t3), true);
   // POSIX: re-parented to init.
   const t4 = new Map([W(live, 1, cur, { start: 0 }), [1, { pid: 1, ppid: 0, name: 'systemd', cmd: '/sbin/init' }]]);
-  if (lib.alive(1)) assert.equal(lib.orphanWaiter(live, t4), true);
+  if (procTable.alive(1)) assert.equal(procWaiter.orphanWaiter(live, t4), true);
   // The bash wrappers count as part of the waiter: their parent decides.
   const t5 = new Map([W(live, process.ppid, cur), bash(process.ppid, 4000097, 's2')]);
-  assert.equal(lib.orphanWaiter(live, t5), true);
+  assert.equal(procWaiter.orphanWaiter(live, t5), true);
 });
 
 test('sweepWaiters: stops orphan waiters of any version, keeps live ones, removes stale locks', async () => {
@@ -473,25 +480,25 @@ test('sweepWaiters: stops orphan waiters of any version, keeps live ones, remove
   const orphan = await startFakeWaiter('Y1'); // like the 0.1.0 waiters seen live (old/scripts/wait-inbox.js)
   const { wrapper, pid: wrapped } = await startWrappedWaiter('Y2');
   const claude = claudeWithWaiter('Y3'); // a working session
-  assert.ok(await until(() => lib.readWaitInfo('Y3')?.owner === claude.pid, 15000));
-  const y3 = lib.readWaitInfo('Y3').pid;
+  assert.ok(await until(() => procWaiter.readWaitInfo('Y3')?.owner === claude.pid, 15000));
+  const y3 = procWaiter.readWaitInfo('Y3').pid;
   const { file } = fakeWaiterFiles();
   const hosted = track(spawn(process.execPath, [file, 'Y5'], { stdio: 'ignore' })); // live parent (this test): kept
   fs.mkdirSync(paths.inbox('Y4'), { recursive: true });
-  fs.writeFileSync(lib.waitLockPath('Y4'), String(await deadPid())); // stale lock
+  fs.writeFileSync(procWaiter.waitLockPath('Y4'), String(await deadPid())); // stale lock
   await sleep(300);
-  const r = lib.sweepWaiters(lib.processTable());
+  const r = procWaiter.sweepWaiters(procTable.processTable());
   const killed = r.killed.map((k) => k.pid);
   // Another server running its sweep at the same time (e.g. a parallel test run) may have stopped them first.
-  for (const pid of [orphan.pid, wrapped]) assert.ok(killed.includes(pid) || !lib.alive(pid), `not stopped: ${pid} ${JSON.stringify(r.killed)}`);
+  for (const pid of [orphan.pid, wrapped]) assert.ok(killed.includes(pid) || !procTable.alive(pid), `not stopped: ${pid} ${JSON.stringify(r.killed)}`);
   // The sweep is scoped to this test's board (DDASH_BOARD_DIR): it may only stop orphans this file started.
   for (const k of r.killed) assert.ok(orphansStarted.has(k.pid), `sweep stopped a process this test did not start: ${JSON.stringify(k)}`);
-  assert.ok(await until(() => !lib.alive(wrapper.pid)), 'wrapper left running');
-  assert.equal(lib.alive(y3), true);
-  assert.equal(lib.alive(hosted.pid), true);
+  assert.ok(await until(() => !procTable.alive(wrapper.pid)), 'wrapper left running');
+  assert.equal(procTable.alive(y3), true);
+  assert.equal(procTable.alive(hosted.pid), true);
   assert.ok(r.locks >= 1);
-  assert.equal(fs.existsSync(lib.waitLockPath('Y4')), false);
-  assert.equal(fs.existsSync(lib.waitLockPath('Y3')), true);
+  assert.equal(fs.existsSync(procWaiter.waitLockPath('Y4')), false);
+  assert.equal(fs.existsSync(procWaiter.waitLockPath('Y3')), true);
   claude.kill();
 });
 
@@ -504,13 +511,13 @@ test('sweepWaiters with DDASH_BOARD_DIR set leaves an orphan waiter outside that
   const pid = await startOrphan(file, ['Z9']); // a real-looking orphan, but not under this board
   try {
     await sleep(300);
-    const table = lib.processTable();
-    assert.equal(lib.orphanWaiter(pid, table), true); // it is an orphan...
-    assert.deepEqual(lib.sweepWaiters(table).killed.filter((k) => k.pid === pid), []); // ...but out of scope
-    assert.equal(lib.alive(pid), true);
+    const table = procTable.processTable();
+    assert.equal(procWaiter.orphanWaiter(pid, table), true); // it is an orphan...
+    assert.deepEqual(procWaiter.sweepWaiters(table).killed.filter((k) => k.pid === pid), []); // ...but out of scope
+    assert.equal(procTable.alive(pid), true);
   } finally {
     try { process.kill(pid); } catch {}
-    await until(() => !lib.alive(pid));
+    await until(() => !procTable.alive(pid));
     fs.rmSync(other, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
@@ -520,7 +527,7 @@ test('server: sweeps orphan waiters at start', async () => {
   const orphan = await startFakeWaiter('Y6');
   await sleep(300);
   await withServer(async () => {
-    assert.ok(await until(() => !lib.alive(orphan.pid), 15000), 'server did not stop the orphan waiter');
+    assert.ok(await until(() => !procTable.alive(orphan.pid), 15000), 'server did not stop the orphan waiter');
   });
 });
 
@@ -543,7 +550,7 @@ require(${JSON.stringify(path.join(ROOT, 'scripts', 'control.js'))}).start().the
     assert.equal(fs.existsSync(dir), false);
   } finally {
     try { process.kill(pid); } catch {}
-    await until(() => !lib.alive(pid));
+    await until(() => !procTable.alive(pid));
   }
 });
 

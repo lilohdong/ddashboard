@@ -1,5 +1,5 @@
 // GET /api/state (read-only: gone sessions are ended by the server's liveness tick) and GET /api/search.
-const cards = require('../../cards');
+const cards = require('../../app/cards');
 const serverState = require('../../app/server-state');
 
 module.exports = [

@@ -17,11 +17,31 @@ process.env.DDASH_WINDOW = '0'; // never open real terminal windows; the window 
 process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests use a fake orca command
 
 const ROOT = path.join(__dirname, '..');
-const lib = require(path.join(ROOT, 'scripts', 'lib.js'));
+const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
+const coreConfig = require(path.join(ROOT, 'scripts', 'core', 'config.js'));
+const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
+const procKill = require(path.join(ROOT, 'scripts', 'proc', 'kill.js'));
+const domTeam = require(path.join(ROOT, 'scripts', 'domain', 'team.js'));
+const domTags = require(path.join(ROOT, 'scripts', 'domain', 'tags.js'));
+const domMessages = require(path.join(ROOT, 'scripts', 'domain', 'messages.js'));
+const domRules = require(path.join(ROOT, 'scripts', 'domain', 'rules.js'));
+const domLeadContext = require(path.join(ROOT, 'scripts', 'domain', 'lead-context.js'));
+const domTranscript = require(path.join(ROOT, 'scripts', 'domain', 'transcript.js'));
+const storeInbox = require(path.join(ROOT, 'scripts', 'store', 'inbox.js'));
+const storeCards = require(path.join(ROOT, 'scripts', 'store', 'cards.js'));
+const appTeams = require(path.join(ROOT, 'scripts', 'app', 'teams.js'));
+const appHandoff = require(path.join(ROOT, 'scripts', 'app', 'handoff.js'));
+const appRules = require(path.join(ROOT, 'scripts', 'app', 'rules.js'));
+const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
+const appSettings = require(path.join(ROOT, 'scripts', 'app', 'settings.js'));
+const appLeadContext = require(path.join(ROOT, 'scripts', 'app', 'lead-context.js'));
 const team = require(path.join(ROOT, 'scripts', 'team.js'));
-const { paths, readJson, writeJson } = lib;
+const { paths } = corePaths;
+const { readJson, writeJson } = coreFsx;
 
-const KEY = lib.projectKey(CWD);
+const KEY = appProjects.projectKey(CWD);
 const slash = (p) => String(p).replace(/\\/g, '/');
 const project = () => readJson(paths.projects, {})[KEY];
 const teamConf = (name = 'Alpha') => project().teams[name];
@@ -41,7 +61,7 @@ const test = (name, fn) => tests.push({ name, fn });
 // --- fixtures ---
 
 function session(sid, extra = {}) {
-  return { session_id: sid, name: sid, cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', last_seen: new Date().toISOString(), text_ver: lib.RULES_TEXT_VER, ...extra };
+  return { session_id: sid, name: sid, cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', last_seen: new Date().toISOString(), text_ver: domRules.RULES_TEXT_VER, ...extra };
 }
 
 function reset({ mode = 'solo', lead, sessions = {} } = {}) {
@@ -77,92 +97,92 @@ function runHook(name, input, env = {}) {
 
 const inboxFiles = (sid) => { try { return fs.readdirSync(paths.inbox(sid)).filter((f) => f.endsWith('.json')); } catch { return []; } };
 const inbox = (sid) => inboxFiles(sid).map((f) => readJson(path.join(paths.inbox(sid), f), null));
-const allCards = () => lib.cardFiles().flatMap((f) => lib.readJsonl(f));
+const allCards = () => storeCards.files().flatMap((f) => coreFsx.readJsonl(f));
 const cardText = (c) => `done.\n\`\`\`card\n${JSON.stringify(c)}\n\`\`\``;
 
 // --- tag parsing ---
 
 test('parseTag: member tag', () => {
-  assert.deepEqual(lib.parseTag('[ddash role=frontend lead=abc-123 stay=1] build the page'),
+  assert.deepEqual(domTags.parseTag('[ddash role=frontend lead=abc-123 stay=1] build the page'),
     { type: 'member', role: 'frontend', lead: 'abc-123', stay: true, rest: 'build the page' });
-  const t = lib.parseTag('  [ddash role="QA lead" lead=x stay=0]\nTest it');
+  const t = domTags.parseTag('  [ddash role="QA lead" lead=x stay=0]\nTest it');
   assert.equal(t.role, 'QA lead');
   assert.equal(t.stay, false);
   assert.equal(t.rest, 'Test it');
-  assert.equal(lib.parseTag('[ddash lead=x] go').role, 'member');
+  assert.equal(domTags.parseTag('[ddash lead=x] go').role, 'member');
 });
 
 test('parseTag: handoff tag', () => {
-  assert.deepEqual(lib.parseTag('[ddash lead-handoff from=old-1 doc="C:/a b/h.md"] take over'),
+  assert.deepEqual(domTags.parseTag('[ddash lead-handoff from=old-1 doc="C:/a b/h.md"] take over'),
     { type: 'handoff', from: 'old-1', doc: 'C:/a b/h.md', rest: 'take over' });
 });
 
 test('parseTag: no tag or incomplete tag', () => {
-  assert.equal(lib.parseTag('hello [ddash role=x lead=y]'), null);
-  assert.equal(lib.parseTag('[ddash role=x]'), null); // no lead
-  assert.equal(lib.parseTag('[ddash lead-handoff doc=x]'), null); // no from
-  assert.equal(lib.parseTag(''), null);
+  assert.equal(domTags.parseTag('hello [ddash role=x lead=y]'), null);
+  assert.equal(domTags.parseTag('[ddash role=x]'), null); // no lead
+  assert.equal(domTags.parseTag('[ddash lead-handoff doc=x]'), null); // no from
+  assert.equal(domTags.parseTag(''), null);
 });
 
 test('wakeReason knows the message headers', () => {
-  assert.equal(lib.wakeReason('[Dashboard reply]\n- x'), 'reply');
-  assert.equal(lib.wakeReason('[Team report]\n- x'), 'report');
-  assert.equal(lib.wakeReason('[Lead instruction]\nx'), 'order');
-  assert.equal(lib.wakeReason('[ddash role=a lead=b] task'), 'order');
-  assert.equal(lib.wakeReason('hi'), 'human');
+  assert.equal(domTranscript.wakeReason('[Dashboard reply]\n- x'), 'reply');
+  assert.equal(domTranscript.wakeReason('[Team report]\n- x'), 'report');
+  assert.equal(domTranscript.wakeReason('[Lead instruction]\nx'), 'order');
+  assert.equal(domTranscript.wakeReason('[ddash role=a lead=b] task'), 'order');
+  assert.equal(domTranscript.wakeReason('hi'), 'human');
 });
 
 // --- routing ---
 
 test('routeCard: solo mode posts to the board', () => {
   const sessions = { M1: session('M1', { kind: 'member', lead: 'L1' }), L1: session('L1') };
-  const r = lib.routeCard(sessions, { [KEY]: { mode: 'solo' } }, 'M1');
+  const r = domTeam.routeCard(sessions, { [KEY]: { mode: 'solo' } }, 'M1');
   assert.deepEqual(r, { to: 'board', role: 'solo' });
 });
 
 test('routeCard: team mode sends member cards to the lead', () => {
   const sessions = { M1: session('M1', { kind: 'member', lead: 'L1' }), L1: session('L1'), O1: session('O1') };
   const projects = { [KEY]: { mode: 'team', teams: { Alpha: { lead: 'L1' } } } };
-  assert.deepEqual(lib.routeCard(sessions, projects, 'M1'), { to: 'lead', role: 'member', lead: 'L1' });
-  assert.deepEqual(lib.routeCard(sessions, projects, 'L1'), { to: 'board', role: 'lead' });
-  assert.deepEqual(lib.routeCard(sessions, projects, 'O1'), { to: 'board', role: 'outside' });
+  assert.deepEqual(domTeam.routeCard(sessions, projects, 'M1'), { to: 'lead', role: 'member', lead: 'L1' });
+  assert.deepEqual(domTeam.routeCard(sessions, projects, 'L1'), { to: 'board', role: 'lead' });
+  assert.deepEqual(domTeam.routeCard(sessions, projects, 'O1'), { to: 'board', role: 'outside' });
 });
 
 test('routeCard: lead missing falls back to the board', () => {
   const projects = { [KEY]: { mode: 'team', teams: { Alpha: { lead: 'L1' } } } };
   const ended = { M1: session('M1', { kind: 'member', lead: 'L1' }), L1: session('L1', { state: 'ended', ended: 'x' }) };
-  assert.deepEqual(lib.routeCard(ended, projects, 'M1'), { to: 'board', role: 'member', lead_missing: true });
+  assert.deepEqual(domTeam.routeCard(ended, projects, 'M1'), { to: 'board', role: 'member', lead_missing: true });
   const gone = { M1: session('M1', { kind: 'member', lead: 'L1' }) }; // lead session forgotten
-  assert.equal(lib.routeCard(gone, projects, 'M1').lead_missing, true);
+  assert.equal(domTeam.routeCard(gone, projects, 'M1').lead_missing, true);
   // A member whose lead leads no team (its team was removed) is outside: straight to the board.
   const stray = { M1: session('M1', { kind: 'member', lead: 'L9' }) };
-  assert.deepEqual(lib.routeCard(stray, projects, 'M1'), { to: 'board', role: 'outside' });
+  assert.deepEqual(domTeam.routeCard(stray, projects, 'M1'), { to: 'board', role: 'outside' });
 });
 
 // --- message formatting ---
 
 test('formatMessages: dashboard replies keep the 0.2.0 format', () => {
-  const out = lib.formatMessages([{ text: 'do it', card_title: 'Plan' }, { type: 'reply', text: 'thanks' }]);
+  const out = domMessages.formatMessages([{ text: 'do it', card_title: 'Plan' }, { type: 'reply', text: 'thanks' }]);
   assert.equal(out, '[Dashboard reply]\n- [card: Plan] do it\n- thanks');
 });
 
 test('formatMessages: reports and instructions get their own headers', () => {
-  const report = lib.reportMessage(
+  const report = domMessages.reportMessage(
     { id: 'c1', status: 'review', title: 'Login page', summary: ['added form'], review: ['check styles'], details: 'x'.repeat(400) },
     { session_id: 'abcdef123456', role: 'frontend' },
   );
   assert.equal(report.details_ref, 'c1');
   assert.equal(report.details, undefined);
-  const out = lib.formatMessages([{ type: 'order', text: 'fix the bug' }, report, { text: 'hi' }]);
+  const out = domMessages.formatMessages([{ type: 'order', text: 'fix the bug' }, report, { text: 'hi' }]);
   assert.equal(out, [
     '[Dashboard reply]\n- hi',
     '[Team report]\n- frontend (abcdef12) review: Login page\n  added form\n  check: check styles\n  details: long, read with: team.js show c1',
     '[Lead instruction]\n- fix the bug',
   ].join('\n\n'));
-  const short = lib.reportMessage({ id: 'c2', status: 'done', title: 't', details: 'short' }, { session_id: 's' });
+  const short = domMessages.reportMessage({ id: 'c2', status: 'done', title: 't', details: 'short' }, { session_id: 's' });
   assert.equal(short.details, 'short');
-  assert.equal(lib.messagesReason([report]), 'report');
-  assert.equal(lib.messagesReason([report, { text: 'x' }]), 'reply');
+  assert.equal(domMessages.messagesReason([report]), 'report');
+  assert.equal(domMessages.messagesReason([report, { text: 'x' }]), 'reply');
 });
 
 // --- rules ---
@@ -171,18 +191,18 @@ test('rules: solo text unchanged, team texts per role, re-injected once on mode 
   teamFixture();
   const sessions = readJson(paths.sessions, {});
   const p = readJson(paths.projects, {})[KEY];
-  assert.equal(lib.rulesFor(sessions.O1, { mode: 'solo' }), lib.rulesText('O1'));
-  assert.match(lib.rulesFor(sessions.L1, p), /lead of team "Alpha"/);
-  assert.match(lib.rulesFor(sessions.L1, p), /docs\/teams\/Alpha\/<g>\//);
-  assert.match(lib.rulesFor(sessions.L1, p), /bin\/team\.js" L1/);
-  assert.match(lib.rulesFor(sessions.M1, p), /Role: frontend/);
-  assert.match(lib.rulesFor(sessions.M1, p), /Don't start a wait command/);
-  assert.match(lib.rulesFor({ ...sessions.M1, stay: true }, p), /bin\/wait\.js" M1/);
-  assert.match(lib.rulesFor(sessions.O1, p), /teams: Alpha\). You are outside every team/);
-  assert.equal(lib.pendingRules('M1'), ''); // rules_ver === mode_ver
-  lib.setMode(KEY, 'solo');
-  assert.match(lib.pendingRules('M1'), /mode changed \(now solo\)/);
-  assert.equal(lib.pendingRules('M1'), '');
+  assert.equal(appRules.rulesFor(sessions.O1, { mode: 'solo' }), appRules.rulesText('O1'));
+  assert.match(appRules.rulesFor(sessions.L1, p), /lead of team "Alpha"/);
+  assert.match(appRules.rulesFor(sessions.L1, p), /docs\/teams\/Alpha\/<g>\//);
+  assert.match(appRules.rulesFor(sessions.L1, p), /bin\/team\.js" L1/);
+  assert.match(appRules.rulesFor(sessions.M1, p), /Role: frontend/);
+  assert.match(appRules.rulesFor(sessions.M1, p), /Don't start a wait command/);
+  assert.match(appRules.rulesFor({ ...sessions.M1, stay: true }, p), /bin\/wait\.js" M1/);
+  assert.match(appRules.rulesFor(sessions.O1, p), /teams: Alpha\). You are outside every team/);
+  assert.equal(appRules.pendingRules('M1'), ''); // rules_ver === mode_ver
+  appTeams.setMode(KEY, 'solo');
+  assert.match(appRules.pendingRules('M1'), /mode changed \(now solo\)/);
+  assert.equal(appRules.pendingRules('M1'), '');
 });
 
 test('rules: every role restarts the wait command in the same response; member reports stay short', () => {
@@ -191,18 +211,18 @@ test('rules: every role restarts the wait command in the same response; member r
   const p0 = readJson(paths.projects, {})[KEY];
   const p = { ...p0, teams: { Alpha: { ...p0.teams.Alpha, groups: { front: { dir: 'C:/x/docs/teams/Alpha/front' } } } } };
   const same = /same response, as parallel tool calls/;
-  assert.match(lib.rulesFor(sessions.O1, { mode: 'solo' }), same);
-  assert.match(lib.rulesFor(sessions.L1, p), same);
-  assert.match(lib.rulesFor(sessions.O1, p), same);
-  assert.match(lib.rulesFor({ ...sessions.M1, stay: true }, p), same);
-  assert.match(lib.rulesFor(sessions.M1, p), /summary of at most 3 lines: put the evidence in a file/);
-  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /evidence in C:\/x\/docs\/teams\/Alpha\/front\/notes\/ and give the path/);
-  assert.match(lib.rulesFor({ ...sessions.M1, group: 'front' }, p), /bin\/team\.js" M1 next-handoff: it creates the next handoff-NNN\.md/);
+  assert.match(appRules.rulesFor(sessions.O1, { mode: 'solo' }), same);
+  assert.match(appRules.rulesFor(sessions.L1, p), same);
+  assert.match(appRules.rulesFor(sessions.O1, p), same);
+  assert.match(appRules.rulesFor({ ...sessions.M1, stay: true }, p), same);
+  assert.match(appRules.rulesFor(sessions.M1, p), /summary of at most 3 lines: put the evidence in a file/);
+  assert.match(appRules.rulesFor({ ...sessions.M1, group: 'front' }, p), /evidence in C:\/x\/docs\/teams\/Alpha\/front\/notes\/ and give the path/);
+  assert.match(appRules.rulesFor({ ...sessions.M1, group: 'front' }, p), /bin\/team\.js" M1 next-handoff: it creates the next handoff-NNN\.md/);
 });
 
 test('setMode: team adds a team next to the others (no replacing), solo removes teams', () => {
   teamFixture();
-  const r = lib.setMode(KEY, 'team', { lead: 'O1', team: 'Beta' });
+  const r = appTeams.setMode(KEY, 'team', { lead: 'O1', team: 'Beta' });
   assert.equal(r.ok, true, r.error);
   const s = readJson(paths.sessions, {});
   const p = project();
@@ -215,12 +235,12 @@ test('setMode: team adds a team next to the others (no replacing), solo removes 
   assert.equal(s.L1.kind, 'lead');
   assert.equal(s.M1.lead, 'L1'); // members stay with their own lead
   // A name in use and a session that already leads a team are refused; free text becomes a folder-safe name.
-  assert.match(lib.addTeam(KEY, 'Alpha', 'M1').error, /team Alpha exists/);
-  assert.match(lib.addTeam(KEY, 'Gamma', 'O1').error, /already leads team Beta/);
-  assert.equal(lib.addTeam(KEY, 'my team!', 'M1').team, 'my-team');
-  assert.equal(lib.removeTeams(KEY, ['my-team']).ok, true);
-  assert.equal(lib.setMode(KEY, 'team', { lead: 'nobody' }).ok, false);
-  lib.setMode(KEY, 'solo');
+  assert.match(appTeams.addTeam(KEY, 'Alpha', 'M1').error, /team Alpha exists/);
+  assert.match(appTeams.addTeam(KEY, 'Gamma', 'O1').error, /already leads team Beta/);
+  assert.equal(appTeams.addTeam(KEY, 'my team!', 'M1').team, 'my-team');
+  assert.equal(appTeams.removeTeams(KEY, ['my-team']).ok, true);
+  assert.equal(appTeams.setMode(KEY, 'team', { lead: 'nobody' }).ok, false);
+  appTeams.setMode(KEY, 'solo');
   const p2 = project();
   assert.equal(p2.mode, 'solo');
   assert.deepEqual(p2.teams, {});
@@ -259,7 +279,7 @@ test('Stop hook: lead missing posts to the board with lead_missing', () => {
 
 test('Stop hook: solo mode stores the card and hands replies over as before', () => {
   reset({ sessions: { S1: session('S1') } });
-  lib.deliver('S1', { text: 'next step', card_title: 'Plan' });
+  storeInbox.deliver('S1', { text: 'next step', card_title: 'Plan' });
   const out = JSON.parse(runHook('stop-card.js', { session_id: 'S1', cwd: CWD, last_assistant_message: cardText({ title: 'Plan' }) }));
   assert.deepEqual(out, { decision: 'block', reason: '[Dashboard reply]\n- [card: Plan] next step' });
   const [card] = allCards();
@@ -321,12 +341,12 @@ test('M-1c: unknown baseline uses the absolute cap (80% of the window)', () => {
   teamFixture();
   const p = project();
   const s = { session_id: 'L1', kind: 'lead', last_context: 150000, cwd: CWD };
-  assert.equal(lib.leadContextNotice(s, p, { transcript: path.join(BOARD, 'missing.jsonl') }), '');
+  assert.equal(appLeadContext.leadContextNotice(s, p, { transcript: path.join(BOARD, 'missing.jsonl') }), '');
   assert.equal(s.lead_baseline, 0);
   assert.equal(s.lead_baseline_unknown, true);
   assert.equal(s.lead_handoff_at, 160000);
   s.last_context = 161000;
-  assert.match(lib.leadContextNotice(s, p, {}), /context \(161000 tokens\) is past the team lead handoff point \(160000, 80% of the 200000-token context window\)/);
+  assert.match(appLeadContext.leadContextNotice(s, p, {}), /context \(161000 tokens\) is past the team lead handoff point \(160000, 80% of the 200000-token context window\)/);
 });
 
 test('M-1c: the handoff point is cut to 80% of the window; a lead starting above it is told at once', () => {
@@ -348,7 +368,7 @@ test('M-1c: context window from the model ([1m]), kept after a compact', () => {
   teamFixture();
   const transcript = path.join(BOARD, 't.jsonl');
   // SessionStart records the model; [1m] means a 1M window (start 150k is not a large start there).
-  lib.rememberModel('L1', 'claude-opus-5-5[1m]');
+  appLeadContext.rememberModel('L1', 'claude-opus-5-5[1m]');
   contextTurns(transcript, [150000, 240000]);
   assert.equal(runHook('stop-card.js', { session_id: 'L1', cwd: CWD, transcript_path: transcript }), '');
   let L1 = readJson(paths.sessions, {}).L1;
@@ -361,30 +381,30 @@ test('M-1c: context window from the model ([1m]), kept after a compact', () => {
   L1 = readJson(paths.sessions, {}).L1;
   assert.equal(L1.context_window, 1000000);
   // Pure rules.
-  assert.equal(lib.contextWindow({}), 200000);
-  assert.equal(lib.contextWindow({ models: ['opus[1m]'] }), 1000000);
-  assert.equal(lib.contextWindow({ stored: 1000000 }), 1000000);
-  assert.equal(lib.contextWindow({ seen: 250000 }), 1000000);
+  assert.equal(domLeadContext.contextWindow({}), 200000);
+  assert.equal(domLeadContext.contextWindow({ models: ['opus[1m]'] }), 1000000);
+  assert.equal(domLeadContext.contextWindow({ stored: 1000000 }), 1000000);
+  assert.equal(domLeadContext.contextWindow({ seen: 250000 }), 1000000);
 });
 
 test('M-1c: leadLimit and large start use the given window', () => {
-  assert.deepEqual(lib.leadLimit(40000, 200000), { baseline: 40000, window: 200000, at: 140000, budget: 100000, big: false });
-  assert.equal(lib.leadLimit(90000, 200000).at, 160000); // 80% of 200k
-  assert.equal(lib.leadLimit(150000, 200000).big, true); // over half of 200k
-  assert.equal(lib.leadLimit(150000, 1000000).big, false); // not of 1M
-  assert.equal(lib.leadLimit(150000, 1000000).at, 250000);
-  assert.equal(lib.leadLimit(0, 200000).at, 160000); // unknown start: absolute cap
+  assert.deepEqual(domLeadContext.leadLimit(40000, 200000), { baseline: 40000, window: 200000, at: 140000, budget: 100000, big: false });
+  assert.equal(domLeadContext.leadLimit(90000, 200000).at, 160000); // 80% of 200k
+  assert.equal(domLeadContext.leadLimit(150000, 200000).big, true); // over half of 200k
+  assert.equal(domLeadContext.leadLimit(150000, 1000000).big, false); // not of 1M
+  assert.equal(domLeadContext.leadLimit(150000, 1000000).at, 250000);
+  assert.equal(domLeadContext.leadLimit(0, 200000).at, 160000); // unknown start: absolute cap
 });
 
 test('M-1c: envNum keeps 0, ignores empty and invalid values', () => {
   process.env.DDASH_TEST_NUM = '0';
-  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 0);
+  assert.equal(coreConfig.envNum('DDASH_TEST_NUM', 5), 0);
   process.env.DDASH_TEST_NUM = '';
-  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+  assert.equal(coreConfig.envNum('DDASH_TEST_NUM', 5), 5);
   process.env.DDASH_TEST_NUM = 'abc';
-  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+  assert.equal(coreConfig.envNum('DDASH_TEST_NUM', 5), 5);
   delete process.env.DDASH_TEST_NUM;
-  assert.equal(lib.envNum('DDASH_TEST_NUM', 5), 5);
+  assert.equal(coreConfig.envNum('DDASH_TEST_NUM', 5), 5);
 });
 
 test('M-1c: adding or removing a team clears the lead context state', () => {
@@ -392,21 +412,21 @@ test('M-1c: adding or removing a team clears the lead context state', () => {
   const s = readJson(paths.sessions, {});
   Object.assign(s.O1, { lead_baseline: 90000, lead_handoff_at: 160000, context_handoff_told: true, lead_baseline_unknown: true });
   writeJson(paths.sessions, s);
-  assert.equal(lib.addTeam(KEY, 'Beta', 'O1').ok, true);
+  assert.equal(appTeams.addTeam(KEY, 'Beta', 'O1').ok, true);
   const fields = (sid) => ['lead_baseline', 'lead_handoff_at', 'context_handoff_told', 'lead_baseline_unknown'].map((k) => readJson(paths.sessions, {})[sid][k]);
   assert.deepEqual(fields('O1'), [undefined, undefined, undefined, undefined]);
   const s2 = readJson(paths.sessions, {});
   Object.assign(s2.O1, { lead_baseline: 1, lead_handoff_at: 2, context_handoff_told: true });
   writeJson(paths.sessions, s2);
-  assert.equal(lib.removeTeams(KEY, ['Beta']).ok, true);
+  assert.equal(appTeams.removeTeams(KEY, ['Beta']).ok, true);
   assert.deepEqual(fields('O1'), [undefined, undefined, undefined, undefined]);
 });
 
 test('M-1c: estimateTokens counts Korean and other non-ASCII text high', () => {
-  assert.equal(lib.estimateTokens('abcdefg'), 2);
-  assert.equal(lib.estimateTokens('가나다라'), 6);
-  assert.equal(lib.estimateTokens(''), 0);
-  assert.ok(lib.estimateTokens('한'.repeat(4001)) > 6000);
+  assert.equal(domLeadContext.estimateTokens('abcdefg'), 2);
+  assert.equal(domLeadContext.estimateTokens('가나다라'), 6);
+  assert.equal(domLeadContext.estimateTokens(''), 0);
+  assert.ok(domLeadContext.estimateTokens('한'.repeat(4001)) > 6000);
 });
 
 test('UserPromptSubmit: member tag registers the member; replaced lead prompts are blocked', () => {
@@ -444,7 +464,7 @@ test('SessionStart: team mode defers new sessions to the first prompt', () => {
   assert.equal(runHook('session-start.js', { session_id: 'NEW', cwd: CWD }), '');
   assert.equal(readJson(paths.sessions, {}).NEW, undefined);
   reset({ sessions: {} });
-  assert.equal(runHook('session-start.js', { session_id: 'NEW', cwd: CWD }), lib.rulesText('NEW'));
+  assert.equal(runHook('session-start.js', { session_id: 'NEW', cwd: CWD }), appRules.rulesText('NEW'));
 });
 
 // --- team.js ---
@@ -561,9 +581,9 @@ test('M-1c: a new team gets a lead-rules.md template; an existing one is kept', 
   const file = path.join(CWD, 'docs', 'teams', 'Beta', 'lead-rules.md');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, 'mine');
-  assert.equal(lib.addTeam(KEY, 'Beta', 'O1').ok, true);
+  assert.equal(appTeams.addTeam(KEY, 'Beta', 'O1').ok, true);
   assert.equal(fs.readFileSync(file, 'utf8'), 'mine');
-  assert.equal(lib.addTeam(KEY, 'Gamma', 'M1').ok, true);
+  assert.equal(appTeams.addTeam(KEY, 'Gamma', 'M1').ok, true);
   assert.match(fs.readFileSync(path.join(CWD, 'docs', 'teams', 'Gamma', 'lead-rules.md'), 'utf8'), /lead rules/);
 });
 
@@ -598,13 +618,13 @@ function orcaEnv({ up = true, writable = true, fail = false } = {}) {
   process.env.FAKE_ORCA_FAIL = fail ? '1' : '0';
   try { fs.unlinkSync(process.env.FAKE_ORCA_LOG); } catch {}
 }
-const orcaCalls = () => lib.readJsonl(process.env.FAKE_ORCA_LOG);
+const orcaCalls = () => coreFsx.readJsonl(process.env.FAKE_ORCA_LOG);
 const orcaOff = () => { process.env.DDASH_ORCA = '0'; };
 const flagOf = (argv, name) => argv[argv.indexOf(name) + 1];
 
 test('team.js spawn: visible in Orca when it runs, with the same pre-registration', () => {
   teamFixture();
-  lib.setRunners(KEY, { runner_member: 'orca' });
+  appTeams.setRunners(KEY, { runner_member: 'orca' });
   orcaEnv();
   try {
     const r = team.main(['L1', 'spawn', '--role', 'fe', '--model', 'sonnet', 'build\nthe page']);
@@ -633,7 +653,7 @@ test('team.js spawn: visible in Orca when it runs, with the same pre-registratio
 
 test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed terminal falls back to headless', async () => {
   teamFixture();
-  lib.setRunners(KEY, { runner_member: 'orca' });
+  appTeams.setRunners(KEY, { runner_member: 'orca' });
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
   try {
     orcaEnv();
@@ -663,7 +683,7 @@ test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed te
 
 test('M-1c: team.js handoff --spawn: visible Orca terminal when Orca runs, --headless/--orca like spawn', async () => {
   teamFixture();
-  lib.setRunners(KEY, { runner_lead: 'orca' });
+  appTeams.setRunners(KEY, { runner_lead: 'orca' });
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
@@ -737,7 +757,7 @@ const windowSpec = async () => {
 test('M-1d: runners default to headless even when Orca runs', async () => {
   teamFixture();
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
-  assert.deepEqual(lib.runnersOf(project()), { runner_lead: 'headless', runner_member: 'headless' });
+  assert.deepEqual(domTeam.runnersOf(project()), { runner_lead: 'headless', runner_member: 'headless' });
   try {
     orcaEnv();
     process.env.FAKE_OUT = path.join(BOARD, 'd1.json');
@@ -757,7 +777,7 @@ test('M-1d: runners default to headless even when Orca runs', async () => {
 test('M-1d: runner window opens a terminal window (members, leads, resume)', async () => {
   teamFixture();
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
-  assert.equal(lib.setRunners(KEY, { runner_lead: 'window', runner_member: 'window' }).ok, true);
+  assert.equal(appTeams.setRunners(KEY, { runner_lead: 'window', runner_member: 'window' }).ok, true);
   try {
     windowEnv();
     const r = team.main(['L1', 'spawn', '--role', 'fe', 'build']);
@@ -799,7 +819,7 @@ test('M-1d: runner window opens a terminal window (members, leads, resume)', asy
 test('M-1d: an unavailable configured runner falls back to headless with a note; flags override and are strict', async () => {
   teamFixture();
   process.env.DDASH_CLAUDE_BIN = fakeClaude();
-  lib.setRunners(KEY, { runner_member: 'window', runner_lead: 'orca' });
+  appTeams.setRunners(KEY, { runner_member: 'window', runner_lead: 'orca' });
   try {
     windowOff(); // DDASH_WINDOW=0
     process.env.FAKE_OUT = path.join(BOARD, 'f1.json');
@@ -825,7 +845,7 @@ test('M-1d: an unavailable configured runner falls back to headless with a note;
     assert.match(team.main(['L1', 'spawn', '--window', '--orca', '--role', 'be', 'api']).out, /use only one of --headless, --orca, --window/);
     // --window works when a window can open, whatever the setting.
     windowEnv();
-    lib.setRunners(KEY, { runner_member: 'orca' });
+    appTeams.setRunners(KEY, { runner_member: 'orca' });
     assert.match(team.main(['L1', 'spawn', '--window', '--role', 'qa', 'test']).out, /in a new terminal window/);
     await windowSpec();
   } finally { orcaOff(); windowOff(); }
@@ -833,9 +853,9 @@ test('M-1d: an unavailable configured runner falls back to headless with a note;
 
 test('M-1d: setRunners validates; /api/settings with a project saves runners, /api/state shows them', async () => {
   teamFixture();
-  assert.match(lib.setRunners(KEY, { runner_lead: 'tmux' }).error, /runner_lead must be one of headless, orca, window/);
-  assert.match(lib.setRunners(KEY, {}).error, /required/);
-  assert.equal(lib.setRunners('nope', { runner_lead: 'orca' }).code, 404);
+  assert.match(appTeams.setRunners(KEY, { runner_lead: 'tmux' }).error, /runner_lead must be one of headless, orca, window/);
+  assert.match(appTeams.setRunners(KEY, {}).error, /required/);
+  assert.equal(appTeams.setRunners('nope', { runner_lead: 'orca' }).code, 404);
   await withServer(async (post, base) => {
     const r = await post('/api/settings', { project: KEY, runner_member: 'orca' }, { Origin: base });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -852,7 +872,7 @@ test('M-1d: setRunners validates; /api/settings with a project saves runners, /a
 test('M-1d review: window launcher never puts paths on a shell command line (&, %, ^, quotes)', () => {
   const save = process.env.DDASH_WINDOW_BIN;
   delete process.env.DDASH_WINDOW_BIN;
-  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
   const cwd = 'C:/a&b/100%PATH%^x';
   const argv = ['C:/node js/node.exe', 'C:/x&y/orca-launch.js', 'C:/logs/50%/s.json'];
   try {
@@ -873,7 +893,7 @@ test('M-1d review: window launcher never puts paths on a shell command line (&, 
 });
 
 test('M-1d review: openWindow refuses a missing folder and a failing launcher (so spawn falls back to headless)', async () => {
-  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
   teamFixture(); // resets the board: before the fake launchers are written
   windowEnv();
   try {
@@ -883,7 +903,7 @@ test('M-1d review: openWindow refuses a missing folder and a failing launcher (s
     process.env.DDASH_WINDOW_BIN = bad;
     assert.throws(() => term.openWindow({ title: 't', cwd: CWD, argv: ['x'], dir: BOARD }), /failed \(exit 3\)/);
     // A configured window runner whose launch fails: headless with a note.
-    lib.setRunners(KEY, { runner_member: 'window' });
+    appTeams.setRunners(KEY, { runner_member: 'window' });
     process.env.DDASH_CLAUDE_BIN = fakeClaude();
     process.env.FAKE_OUT = path.join(BOARD, 'wf.json');
     assert.match(team.main(['L1', 'spawn', '--role', 'be', 'api']).out, /^The terminal window could not open a terminal \(.*failed \(exit 3\)\); started headless instead\./);
@@ -938,7 +958,7 @@ test('M-1d review: handoff keeps project settings changed while it ran; /api/tea
   fs.writeFileSync(doc, '# handoff');
   const members = require(path.join(ROOT, 'scripts', 'app', 'members.js')); // the handoff use case (step 9)
   const orig = members.recordClaudePid;
-  members.recordClaudePid = (...a) => { lib.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
+  members.recordClaudePid = (...a) => { appTeams.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
   try { assert.equal(team.main(['L1', 'handoff', doc]).code, 0); } finally { members.recordClaudePid = orig; }
   assert.equal(project().spawn.runner_member, 'orca');
   assert.equal(teamConf().handoff.from, 'L1');
@@ -1019,11 +1039,11 @@ function processPair() {
 
 test('BUG-003: killTree stops a process and the processes it started', async () => {
   const { parent, child } = await processPair();
-  assert.equal(lib.alive(child), true);
-  assert.equal(lib.killTree(parent.pid), true);
-  for (let i = 0; i < 40 && lib.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.equal(lib.alive(child), false, 'child left running');
-  assert.equal(lib.killTree(parent.pid), false); // already gone
+  assert.equal(procTable.alive(child), true);
+  assert.equal(procKill.killTree(parent.pid), true);
+  for (let i = 0; i < 40 && procTable.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(procTable.alive(child), false, 'child left running');
+  assert.equal(procKill.killTree(parent.pid), false); // already gone
 });
 
 test('BUG-003: end closes a window member\'s shell with everything in it; an ended member keeps its end time', async () => {
@@ -1035,9 +1055,9 @@ test('BUG-003: end closes a window member\'s shell with everything in it; an end
   writeJson(paths.sessions, s);
   try {
     assert.match(team.main(['L1', 'end', 'win']).out, new RegExp(`closed its terminal window \\(pid ${parent.pid}\\)`));
-    for (let i = 0; i < 40 && lib.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
-    assert.equal(lib.alive(parent.pid), false);
-    assert.equal(lib.alive(child), false);
+    for (let i = 0; i < 40 && procTable.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(procTable.alive(parent.pid), false);
+    assert.equal(procTable.alive(child), false);
     assert.equal(readJson(paths.sessions, {}).W7.end_reason, 'stopped');
     orcaEnv();
     const all = readJson(paths.sessions, {});
@@ -1045,7 +1065,7 @@ test('BUG-003: end closes a window member\'s shell with everything in it; an end
     writeJson(paths.sessions, all);
     assert.equal(team.main(['L1', 'end', 'old']).out, 'old (E7) is already ended (2026-01-01T00:00:00.000Z); nothing was stopped.');
     assert.ok(!orcaCalls().some((c) => c[1] === 'close')); // no terminal closed
-    assert.equal(lib.alive(process.pid), true); // no pid killed (the recorded pids are this test process)
+    assert.equal(procTable.alive(process.pid), true); // no pid killed (the recorded pids are this test process)
     const e = readJson(paths.sessions, {}).E7;
     assert.equal(e.ended, '2026-01-01T00:00:00.000Z');
     assert.equal(e.end_reason, 'gone');
@@ -1073,7 +1093,7 @@ test('BUG-003: orca-launch records the window shell and its own pid on the sessi
 
 test('BUG-002: the window script runs with NoDefaultCurrentDirectoryInExePath set, in a folder with & and %', () => {
   if (process.platform !== 'win32') return;
-  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
   const save = process.env.DDASH_WINDOW_BIN;
   delete process.env.DDASH_WINDOW_BIN;
   try {
@@ -1101,12 +1121,12 @@ test('BUG-002: the window script runs with NoDefaultCurrentDirectoryInExePath se
 
 test('BUG-001: memberGone never guesses: live wait command, no pid, unknown terminal state', () => {
   const base = { session_id: 'G1', kind: 'member', runner: 'orca', orca: { handle: 'h' }, state: 'idle' };
-  assert.equal(lib.memberGone(base), false); // no pid, terminal not checked
-  assert.equal(lib.memberGone(base, () => null), false); // Orca cannot tell
-  assert.equal(lib.memberGone(base, () => false), true); // terminal closed
-  assert.equal(lib.memberGone({ ...base, claude_pid: process.pid }, () => false), false); // the pid decides when known
-  assert.equal(lib.memberGone({ ...base, headless: true, claude_pid: 999999 }), false); // headless: "finished" rule
-  assert.equal(lib.memberGone({ ...base, state: 'ended' }, () => false), false);
+  assert.equal(appSessions.sessionGone(base), false); // no pid, terminal not checked
+  assert.equal(appSessions.sessionGone(base, () => null), false); // Orca cannot tell
+  assert.equal(appSessions.sessionGone(base, () => false), true); // terminal closed
+  assert.equal(appSessions.sessionGone({ ...base, claude_pid: process.pid }, () => false), false); // the pid decides when known
+  assert.equal(appSessions.sessionGone({ ...base, headless: true, claude_pid: 999999 }), false); // headless: "finished" rule
+  assert.equal(appSessions.sessionGone({ ...base, state: 'ended' }, () => false), false);
 });
 
 test('team.js send to an Orca member: inbox, typed into its terminal, or resumed', async () => {
@@ -1171,10 +1191,10 @@ test('forgetSessions / markEnded', () => {
   s.OLD = session('OLD', { last_seen: new Date(Date.now() - 2 * 3600e3).toISOString() });
   writeJson(paths.sessions, s);
   fs.mkdirSync(paths.done('E1'), { recursive: true });
-  assert.deepEqual(lib.forgetSessions(['E1', 'M1']), { forgotten: ['E1'], refused: ['M1'] });
+  assert.deepEqual(appSessions.forgetSessions(['E1', 'M1']), { forgotten: ['E1'], refused: ['M1'] });
   assert.equal(fs.existsSync(paths.inbox('E1')), false);
-  assert.equal(lib.markEnded('M1').code, 409); // seen recently
-  assert.equal(lib.markEnded('OLD').ok, true);
+  assert.equal(appSessions.markEnded('M1').code, 409); // seen recently
+  assert.equal(appSessions.markEnded('OLD').ok, true);
   assert.equal(readJson(paths.sessions, {}).OLD.end_reason, 'marked');
 });
 
@@ -1283,21 +1303,21 @@ test('card language: rules unchanged without a setting, named language with one,
   teamFixture();
   const sessions = readJson(paths.sessions, {});
   const p = readJson(paths.projects, {})[KEY];
-  assert.match(lib.rulesText('S'), /written in the user's language/);
-  assert.doesNotMatch(lib.rulesFor(sessions.M1, p), /written in/);
-  assert.equal(lib.pendingRules('O1'), '');
-  assert.equal(lib.saveSettings({ lang: 'fr' }).ok, false);
-  lib.saveSettings({ lang: 'ko' });
-  assert.match(lib.rulesText('S'), /written in Korean\)/);
-  assert.match(lib.rulesFor(sessions.L1, p), /written in Korean\)/);
-  assert.match(lib.rulesFor(sessions.O1, p), /written in Korean\)/);
-  assert.match(lib.rulesFor(sessions.M1, p), /short summary lines, written in Korean\)/);
-  assert.match(lib.pendingRules('O1'), /card language changed \(now Korean\)/);
-  assert.equal(lib.pendingRules('O1'), '');
-  lib.saveSettings({ lang: 'zh-CN' });
-  assert.match(lib.pendingRules('O1'), /Simplified Chinese/);
-  lib.saveSettings({ lang: null });
-  assert.match(lib.rulesText('S'), /written in the user's language/);
+  assert.match(appRules.rulesText('S'), /written in the user's language/);
+  assert.doesNotMatch(appRules.rulesFor(sessions.M1, p), /written in/);
+  assert.equal(appRules.pendingRules('O1'), '');
+  assert.equal(appSettings.saveSettings({ lang: 'fr' }).ok, false);
+  appSettings.saveSettings({ lang: 'ko' });
+  assert.match(appRules.rulesText('S'), /written in Korean\)/);
+  assert.match(appRules.rulesFor(sessions.L1, p), /written in Korean\)/);
+  assert.match(appRules.rulesFor(sessions.O1, p), /written in Korean\)/);
+  assert.match(appRules.rulesFor(sessions.M1, p), /short summary lines, written in Korean\)/);
+  assert.match(appRules.pendingRules('O1'), /card language changed \(now Korean\)/);
+  assert.equal(appRules.pendingRules('O1'), '');
+  appSettings.saveSettings({ lang: 'zh-CN' });
+  assert.match(appRules.pendingRules('O1'), /Simplified Chinese/);
+  appSettings.saveSettings({ lang: null });
+  assert.match(appRules.rulesText('S'), /written in the user's language/);
 });
 
 test('server: settings API', async () => {
@@ -1317,7 +1337,7 @@ test('server: settings API', async () => {
 
 // --- card keys ---
 
-const cardsIndex = () => { const c = require(path.join(ROOT, 'scripts', 'cards.js')); c.reset(); return c; };
+const cardsIndex = () => { const c = require(path.join(ROOT, 'scripts', 'app', 'cards.js')); c.reset(); return c; };
 const post = (sid, c) => runHook('stop-card.js', { session_id: sid, cwd: CWD, last_assistant_message: cardText(c) });
 
 test('key: valid keys are stored with project_key; invalid keys are dropped, the card is kept', () => {
@@ -1335,7 +1355,7 @@ test('key: valid keys are stored with project_key; invalid keys are dropped, the
 
 test('key: a newer card with the same key replaces earlier ones from any session, only in the same project', () => {
   reset({ sessions: { S1: session('S1'), S2: session('S2') } });
-  lib.appendCard({ id: 'other-1', ts: new Date(Date.now() - 1000).toISOString(), session_id: 'X', project_key: 'other-project', key: 'login-fix', title: 'other project' });
+  storeCards.append({ id: 'other-1', ts: new Date(Date.now() - 1000).toISOString(), session_id: 'X', project_key: 'other-project', key: 'login-fix', title: 'other project' });
   post('S1', { title: 'v1', key: 'login-fix' });
   post('S1', { title: 'unrelated' });
   post('S2', { title: 'v2', key: 'login-fix' });
@@ -1374,7 +1394,7 @@ test('key: member cards drop the key (reports, not board cards); a new lead afte
   const s0 = readJson(paths.sessions, {});
   s0.L2 = session('L2');
   writeJson(paths.sessions, s0);
-  assert.equal(lib.performHandoff('L1', 'L2', 'C:/doc.md', { kill: () => true, killClaude: () => true }).ok, true);
+  assert.equal(appHandoff.performHandoff('L1', 'L2', 'C:/doc.md', { kill: () => true, killClaude: () => true }).ok, true);
   post('L2', { title: 'new lead', key: 'login-fix' });
   const st = cardsIndex().state(300, { reports: true });
   assert.deepEqual(st.cards.map((c) => c.title), ['member', 'new lead']);
@@ -1395,13 +1415,13 @@ test('key: the card instructions explain keys in every card language, for solo a
   const p = readJson(paths.projects, {})[KEY];
   const line = /add "key":"task-name" \(a-z, 0-9, -, _; max 60\): a newer card with the same key in this project replaces the older ones/;
   for (const lang of ['en', 'ko', 'zh-CN']) {
-    assert.equal(lib.saveSettings({ lang }).ok, true);
-    assert.match(lib.rulesFor(sessions.O1, { mode: 'solo' }), line);
-    assert.match(lib.rulesFor(sessions.O1, p), line);
-    assert.match(lib.rulesFor(sessions.L1, p), line);
-    assert.doesNotMatch(lib.rulesFor(sessions.M1, p), /"key"/);
+    assert.equal(appSettings.saveSettings({ lang }).ok, true);
+    assert.match(appRules.rulesFor(sessions.O1, { mode: 'solo' }), line);
+    assert.match(appRules.rulesFor(sessions.O1, p), line);
+    assert.match(appRules.rulesFor(sessions.L1, p), line);
+    assert.doesNotMatch(appRules.rulesFor(sessions.M1, p), /"key"/);
   }
-  lib.saveSettings({ lang: '' });
+  appSettings.saveSettings({ lang: '' });
   const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
   for (const lang of ['en', 'ko', 'zh-CN']) {
     assert.ok(i18n.DICT[lang]['card.keyTitle'], lang);
@@ -1469,11 +1489,11 @@ test('server: /api/search with key and project_key returns one task history', as
 
 test('rules: a running session gets the instructions again once when the instruction text changes', () => {
   reset({ sessions: { S1: session('S1', { text_ver: 0 }) } });
-  const update = lib.pendingRules('S1');
+  const update = appRules.pendingRules('S1');
   assert.match(update, /instructions were updated/);
   assert.match(update, /"key":"task-name"/);
-  assert.equal(lib.pendingRules('S1'), '');
-  assert.equal(readJson(paths.sessions, {}).S1.text_ver, lib.RULES_TEXT_VER);
+  assert.equal(appRules.pendingRules('S1'), '');
+  assert.equal(readJson(paths.sessions, {}).S1.text_ver, domRules.RULES_TEXT_VER);
 });
 
 // The dashboard page tests (key tag, BUG-004 polling) live in test/web.test.js.

@@ -16,10 +16,15 @@ process.env.DDASH_BOARD_DIR = BOARD; // must be set before lib is required
 delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
-const lib = require(path.join(ROOT, 'scripts', 'lib.js'));
+const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
+const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
+const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
 const team = require(path.join(ROOT, 'scripts', 'team.js'));
-const { paths, readJson, writeJson } = lib;
-const KEY = lib.projectKey(CWD);
+const { paths } = corePaths;
+const { readJson, writeJson } = coreFsx;
+const KEY = appProjects.projectKey(CWD);
 const slash = (p) => String(p).replace(/\\/g, '/');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -43,7 +48,7 @@ else { out({ ok: false }); process.exit(1); }
   return file;
 }
 
-// A process that looks like Claude Code to lib.isClaudeProcess (node running a file under "claude-code").
+// A process that looks like Claude Code to procTable.isClaudeProcess (node running a file under "claude-code").
 function fakeClaudeFile() {
   const dir = path.join(BOARD, 'claude-code');
   fs.mkdirSync(dir, { recursive: true });
@@ -62,7 +67,7 @@ async function deadPid() {
   const p = startFakeClaude();
   const pid = p.pid;
   await new Promise((r) => { p.on('exit', r); p.kill(); });
-  assert.equal(lib.alive(pid), false, 'fixture: pid should be dead');
+  assert.equal(procTable.alive(pid), false, 'fixture: pid should be dead');
   return pid;
 }
 
@@ -148,7 +153,7 @@ test('QA-B001-4 dashboard: dead member stuck in working can be cleaned up (markE
   const pid = await deadPid();
   const old = new Date(Date.now() - 2 * 3600e3).toISOString();
   setup({ D4: member('D4', { state: 'working', last_seen: old, claude_pid: pid, orca: { handle: 'term_closed' } }) }, { term_closed: false });
-  const r = lib.markEnded('D4');
+  const r = appSessions.markEnded('D4');
   assert.equal(r.ok, true, `markEnded refused a dead member: ${r.error} (bug-001)`);
 });
 

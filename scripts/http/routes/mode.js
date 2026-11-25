@@ -1,6 +1,8 @@
 // POST /api/mode {project, mode: team, lead, team?} adds a team led by that session;
 // {project, mode: solo, team?} removes that team (no team: every team).
-const { readJson, paths, readProjects, safeId, setMode } = require('../../lib');
+const { paths, safeId } = require('../../core/paths');
+const { readJson } = require('../../core/fsx');
+const { readProjects, setMode } = require('../../app/teams');
 const { fail } = require('../router');
 const { projectKeyOf } = require('./project');
 

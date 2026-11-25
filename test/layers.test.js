@@ -1,32 +1,28 @@
 #!/usr/bin/env node
 // Layer rules of docs/architecture.md §3.2, checked from the require() calls (and web/ imports).
 // Run: node test/layers.test.js
-// The new layers (core, store, proc, runners, domain) are checked strictly: they start clean and must stay so.
-// Rules that today's entry points still break (server.js and orca-launch.js require team.js, hooks require
-// control.js) only warn until refactor step 13; set STRICT = true then.
+// Every rule is strict since refactor step 13 (lib.js and the orca.js/terminal.js/cards.js shims are gone).
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const STRICT = false;
+const STRICT = true;
 const ROOT = path.join(__dirname, '..');
 const SCRIPTS = path.join(ROOT, 'scripts');
 const rel = (f) => path.relative(SCRIPTS, f).replace(/\\/g, '/');
 
 const ENTRIES = new Set(['team.js', 'control.js', 'wait-inbox.js', 'orca-launch.js', 'server.js']);
-const LEGACY = new Set(['lib.js', 'cards.js', 'usage.js', 'i18n.js']); // shrink away in later steps
-const LEGACY_RUNNERS = new Set(['orca.js', 'terminal.js']); // become runners/* in step 9
+const WEB = new Set(['i18n.js']); // UMD file served to the page as /i18n.js (and required by tests)
 
 // Layer of a module: { name, level }.
 function layerOf(r) {
   const top = r.split('/')[0];
   if (r.startsWith('hooks/') || ENTRIES.has(r)) return { name: 'entry', level: 4 };
   if (top === 'app' || top === 'http') return { name: top, level: 3 };
-  if (LEGACY.has(r)) return { name: 'legacy', level: 3 };
   if (top === 'domain') return { name: 'domain', level: 2 };
-  if (top === 'runners' || LEGACY_RUNNERS.has(r)) return { name: 'runners', level: 1 };
+  if (top === 'runners') return { name: 'runners', level: 1 };
   if (['core', 'store', 'proc'].includes(top)) return { name: top, level: 1 };
-  if (top === 'web') return { name: 'web', level: 4 };
+  if (top === 'web' || WEB.has(r)) return { name: 'web', level: 4 };
   return { name: 'other', level: 4 };
 }
 
@@ -85,8 +81,8 @@ function check() {
       continue;
     }
     if (a.name === 'domain' && !(b.name === 'domain' || e.to === 'core/config.js')) strict.push(`${where}: domain/ may use only domain/ and core/config`);
-    else if (a.level === 1 && b.level === 1 && !L1_ALLOWED[a.name].includes(b.name)) (LEGACY_RUNNERS.has(e.from) ? warn : strict).push(`${where}: ${a.name}/ may not use ${b.name}/`);
-    else if (b.level > a.level) (a.level <= 2 && !LEGACY_RUNNERS.has(e.from) ? strict : warn).push(`${where}: ${a.name} (L${a.level}) may not use ${b.name} (L${b.level})`);
+    else if (a.level === 1 && b.level === 1 && !L1_ALLOWED[a.name].includes(b.name)) strict.push(`${where}: ${a.name}/ may not use ${b.name}/`);
+    else if (b.level > a.level) (a.level <= 2 ? strict : warn).push(`${where}: ${a.name} (L${a.level}) may not use ${b.name} (L${b.level})`);
     if (a.name === 'entry' && b.name === 'entry') warn.push(`${where}: an entry point may not require another entry point`);
   }
   return { strict, warn };
@@ -100,7 +96,7 @@ test('layers: core/store/proc/runners/domain/web follow the dependency rules', (
   assert.deepEqual(strict, []);
 });
 
-test(`layers: entry points and legacy modules (${STRICT ? 'strict' : 'warn only until step 13'})`, () => {
+test(`layers: entry points and app/http (${STRICT ? 'strict' : 'warn only'})`, () => {
   const { warn } = check();
   for (const w of warn) console.log(`     WARN ${w}`);
   if (STRICT) assert.deepEqual(warn, []);
@@ -110,7 +106,7 @@ test('layers: the parser sees requires and imports (self-check)', () => {
   const all = edges();
   assert.ok(all.some((e) => e.from === 'store/record.js' && e.to === 'core/lock.js'));
   assert.ok(all.some((e) => e.from === 'web/main.mjs' && e.to.startsWith('web/')));
-  assert.ok(all.some((e) => e.from === 'server.js' && e.to === 'lib.js'));
+  assert.ok(all.some((e) => e.from === 'server.js' && e.to === 'core/paths.js'));
 });
 
 (async () => {

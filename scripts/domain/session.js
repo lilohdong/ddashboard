@@ -24,6 +24,7 @@
 //   forget    ended -> (record deleted)                                 409 not_ended otherwise
 // ctx.fields on any event but spawn: other fields written with the transition (undefined deletes), only when it
 // is legal; lifecycle fields in it (state, ended, end_reason, replaced_by) are ignored.
+const config = require('../core/config');
 
 const PHASES = ['pending', 'working', 'idle', 'ended'];
 const END_REASONS = ['exit', 'gone', 'stopped', 'marked', 'handoff'];
@@ -124,4 +125,8 @@ function view(s, live = {}) {
   };
 }
 
-module.exports = { PHASES, END_REASONS, isEnded, phase, transition, view };
+// Idle without activity for DDASH_STALE_MIN minutes (the dashboard's "unresponsive" when no waiter listens).
+const STALE_MIN = config.get('DDASH_STALE_MIN');
+const isStale = (s, now = Date.now()) => !s.last_seen || now - new Date(s.last_seen).getTime() > STALE_MIN * 60000;
+
+module.exports = { PHASES, END_REASONS, isEnded, phase, transition, view, STALE_MIN, isStale };

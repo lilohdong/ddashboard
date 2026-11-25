@@ -1,5 +1,5 @@
 // POST /api/archive {card_id, archived} -> archive or unarchive a card.
-const cards = require('../../cards');
+const cards = require('../../app/cards');
 const { fail } = require('../router');
 
 module.exports = [
