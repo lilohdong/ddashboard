@@ -454,6 +454,156 @@ test('server: forget, mark ended, spawn from the dashboard', async () => {
   });
 });
 
+// --- groups ---
+
+const groupDir = (name) => path.join(CWD, 'docs', 'groups', name);
+
+test('parseTag: group attribute', () => {
+  assert.equal(lib.parseTag('[ddash role=fe lead=L1 group=front] x').group, 'front');
+  assert.equal(lib.parseTag('[ddash role=fe lead=L1 group=../x] x').group, undefined);
+});
+
+test('groups: create, rename (plain), delete to _archived, purge', () => {
+  teamFixture();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  assert.equal(team.main(['L1', 'group', 'create', 'front']).code, 0);
+  assert.match(fs.readFileSync(path.join(groupDir('front'), 'brief.md'), 'utf8'), /## Key files/);
+  assert.ok(fs.existsSync(path.join(groupDir('front'), 'notes')));
+  assert.equal(team.main(['L1', 'group', 'create', 'front']).code, 1); // exists
+  assert.equal(team.main(['L1', 'group', 'create', '../evil']).code, 1);
+  assert.equal(team.main(['M1', 'group', 'create', 'x']).code, 1); // not the lead
+  const s = readJson(paths.sessions, {});
+  s.M1.group = 'front';
+  writeJson(paths.sessions, s);
+  assert.equal(team.main(['L1', 'group', 'rename', 'front', 'web']).code, 0);
+  assert.ok(fs.existsSync(path.join(groupDir('web'), 'brief.md')));
+  assert.ok(!fs.existsSync(groupDir('front')));
+  assert.equal(readJson(paths.sessions, {}).M1.group, 'web');
+  assert.equal(readJson(paths.projects, {})[KEY].groups.web.dir, groupDir('web').replace(/\\/g, '/'));
+  assert.match(team.main(['L1', 'group', 'list']).out, /^web .* members 1\/1/);
+  assert.equal(team.main(['L1', 'group', 'delete', 'web']).code, 0);
+  const archived = fs.readdirSync(path.join(CWD, 'docs', 'groups', '_archived'));
+  assert.equal(archived.length, 1);
+  assert.match(archived[0], /^web-\d{8}$/);
+  assert.equal(readJson(paths.sessions, {}).M1.group, undefined);
+  assert.deepEqual(readJson(paths.projects, {})[KEY].groups, {});
+  team.main(['L1', 'group', 'create', 'tmp']);
+  assert.equal(team.main(['L1', 'group', 'delete', 'tmp', '--purge']).code, 0);
+  assert.ok(!fs.existsSync(groupDir('tmp')));
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('groups: rename uses git mv when the folder is tracked', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-repo-'));
+  const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' });
+  try {
+    git('init', '-q');
+    teamFixture();
+    const s = readJson(paths.sessions, {});
+    s.L1.cwd = repo;
+    writeJson(paths.sessions, s);
+    assert.equal(team.main(['L1', 'group', 'create', 'api']).code, 0);
+    git('add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'groups');
+    assert.match(team.main(['L1', 'group', 'rename', 'api', 'backend']).out, /git mv/);
+    assert.match(git('status', '--porcelain').stdout, /^R {2}docs\/groups\/api\/brief\.md -> docs\/groups\/backend\/brief\.md/m);
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('groups: prune keeps the newest handoffs and drops old notes only', () => {
+  teamFixture();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  team.main(['L1', 'group', 'create', 'front']);
+  const dir = groupDir('front');
+  for (const n of [1, 2, 3, 4, 10]) fs.writeFileSync(path.join(dir, `handoff-${String(n).padStart(3, '0')}.md`), `h${n}`);
+  fs.writeFileSync(path.join(dir, 'notes', 'old.md'), 'old');
+  fs.writeFileSync(path.join(dir, 'notes', 'new.md'), 'new');
+  const past = new Date(Date.now() - 40 * 86400000);
+  fs.utimesSync(path.join(dir, 'notes', 'old.md'), past, past);
+  fs.writeFileSync(path.join(CWD, 'docs', 'outside.md'), 'keep'); // outside the group folder
+  fs.utimesSync(path.join(CWD, 'docs', 'outside.md'), past, past);
+  // The Stop hook of a group member prunes.
+  const s = readJson(paths.sessions, {});
+  s.M1.group = 'front';
+  writeJson(paths.sessions, s);
+  runHook('stop-card.js', { session_id: 'M1', cwd: CWD, last_assistant_message: '' });
+  assert.deepEqual(lib.handoffs(dir), ['handoff-003.md', 'handoff-004.md', 'handoff-010.md']);
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'notes')), ['new.md']);
+  assert.ok(fs.existsSync(path.join(CWD, 'docs', 'outside.md')));
+  assert.equal(lib.latestHandoff(dir), path.join(dir, 'handoff-010.md').replace(/\\/g, '/'));
+  assert.equal(team.main(['L1', 'group', 'prune', 'front']).out, 'Nothing to prune.');
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('groups: a spawned member gets the brief at SessionStart, before its task; long briefs are cut and reported', async () => {
+  teamFixture();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  team.main(['L1', 'group', 'create', 'front']);
+  const dir = groupDir('front');
+  fs.writeFileSync(path.join(dir, 'brief.md'), '# front brief\nScope: the UI');
+  fs.writeFileSync(path.join(dir, 'handoff-001.md'), 'h1');
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  process.env.FAKE_OUT = path.join(BOARD, 'g-spawn.json');
+  assert.equal(team.main(['L1', 'spawn', '--role', 'fe', '--group', 'nope', 'x']).code, 1);
+  const r = team.main(['L1', 'spawn', '--role', 'fe', '--group', 'front', 'build it']);
+  assert.equal(r.code, 0, r.out);
+  const got = await waitFor(process.env.FAKE_OUT);
+  assert.equal(got.input, '[ddash role=fe lead=L1 stay=0 group=front] build it');
+  const sid = got.argv[got.argv.indexOf('--session-id') + 1];
+  assert.equal(readJson(paths.sessions, {})[sid].group, 'front');
+  const start = runHook('session-start.js', { session_id: sid, cwd: CWD });
+  assert.ok(start.startsWith('[ddashboard] Group "front" brief'), start);
+  assert.ok(start.indexOf('Scope: the UI') < start.indexOf('You are a team member'));
+  assert.match(start, /Latest handoff: .*handoff-001\.md/);
+  assert.match(start, /write the next handoff-NNN\.md/);
+  // The tag prompt then registers it without repeating anything.
+  assert.equal(runHook('prompt-submit.js', { session_id: sid, cwd: CWD, prompt: got.input }), '');
+  const s = readJson(paths.sessions, {})[sid];
+  assert.equal(s.pending, undefined);
+  assert.equal(s.group, 'front');
+  // Two members of the group get the same prefix (the part before their own instructions).
+  const ctx = lib.groupContext('front', readJson(paths.projects, {})[KEY].groups.front);
+  assert.ok(start.startsWith(ctx.text));
+  // Too long: cut, and the lead is told once.
+  fs.writeFileSync(path.join(dir, 'brief.md'), 'x'.repeat(lib.BRIEF_MAX_CHARS + 50));
+  const s2 = readJson(paths.sessions, {});
+  s2.P1 = session('P1', { kind: 'member', role: 'fe', lead: 'L1', group: 'front', pending: true });
+  s2.P2 = session('P2', { kind: 'member', role: 'fe', lead: 'L1', group: 'front', pending: true });
+  writeJson(paths.sessions, s2);
+  for (const f of inboxFiles('L1')) fs.unlinkSync(path.join(paths.inbox('L1'), f));
+  assert.match(runHook('session-start.js', { session_id: 'P1', cwd: CWD }), /brief cut at 16000/);
+  runHook('session-start.js', { session_id: 'P2', cwd: CWD });
+  const notes = inbox('L1').filter((m) => /brief front needs trimming/.test(m.title));
+  assert.equal(notes.length, 1);
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('server: /api/groups and spawn with a group', async () => {
+  teamFixture();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  process.env.FAKE_OUT = path.join(BOARD, 'g-ui.json');
+  await withServer(async (post, base) => {
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'qa' }, { Origin: 'http://evil.example' })).status, 403);
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'qa' })).status, 200);
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'qa' })).status, 400);
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'rename', name: 'qa', new_name: 'test' })).status, 200);
+    const st = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(Object.keys(st.teams.proj.groups), ['test']);
+    const r = await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'check', group: 'test' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.match((await waitFor(process.env.FAKE_OUT)).input, / group=test\] check$/);
+    assert.match(inbox('L1').find((m) => m.from === r.body.session_id).title, /\(group test\) spawned by the user/);
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'delete', name: 'test', purge: true })).status, 200);
+    assert.ok(!fs.existsSync(groupDir('test')));
+    const s = readJson(paths.sessions, {});
+    s.L1.state = 'ended';
+    writeJson(paths.sessions, s);
+    assert.equal((await post('/api/groups', { project: 'proj', action: 'create', name: 'z' })).status, 409);
+  });
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
 // --- run ---
 
 (async () => {

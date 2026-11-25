@@ -3,11 +3,12 @@
 //   GET  /            dashboard page
 //   GET  /api/state   sessions, replies, recent active cards, last card per session, archived count,
 //                     token usage (usage_total for connected sessions, usage_today), context_warn,
-//                     teams (mode and lead per project). ?reports=1 also returns member reports (via_lead cards).
+//                     teams (mode, lead and groups per project). ?reports=1 also returns member reports (via_lead cards).
 //   POST /api/mode    {project, mode: solo|team, lead?, lead_name?} -> switch a project's mode
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
 //   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
-//   POST /api/team/spawn      {lead, role, model?, stay?, task} -> start a headless member for a live lead
+//   POST /api/team/spawn      {lead, role, model?, stay?, task, group?} -> start a headless member for a live lead
+//   POST /api/groups          {project, action: create|rename|delete, name, new_name?, purge?} -> manage team groups
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
@@ -63,7 +64,8 @@ function teams(projects, sessions) {
   const out = {};
   for (const [key, p] of Object.entries(projects)) {
     const name = p.name || nameOf[key] || path.basename(p.cwd || key);
-    out[name] = { key, mode: p.mode === 'team' ? 'team' : 'solo', lead: p.lead || null, lead_name: p.lead_name || null, mode_ver: Number(p.mode_ver) || 0 };
+    const groups = Object.fromEntries(Object.entries(p.groups || {}).map(([n, g]) => [n, { dir: g.dir, created: g.created }]));
+    out[name] = { key, mode: p.mode === 'team' ? 'team' : 'solo', lead: p.lead || null, lead_name: p.lead_name || null, mode_ver: Number(p.mode_ver) || 0, groups };
   }
   return out;
 }
@@ -201,14 +203,34 @@ const server = http.createServer((req, res) => {
       if (!role || !task) return send(res, 400, { error: 'role and task required' });
       let r;
       try {
-        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000) });
+        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined });
       } catch (err) { return send(res, 400, { error: String(err.message || err) }); }
       const first = task.split(/\r?\n/)[0].slice(0, 200);
       deliver(leadSid, {
         type: 'report', from: r.sid, role: role.slice(0, 40), status: 'wip',
-        title: `member ${role} ${r.sid.slice(0, 8)} spawned by the user: ${first}`,
+        title: `member ${role} ${r.sid.slice(0, 8)}${msg.group ? ` (group ${msg.group})` : ''} spawned by the user: ${first}`,
       });
       send(res, 200, { ok: true, session_id: r.sid, pid: r.pid, log: r.log });
+    });
+  }
+
+  // Create, rename or delete a team group (same code as `team.js <lead> group ...`). Needs a live lead.
+  if (req.method === 'POST' && url.pathname === '/api/groups') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const projects = readJson(paths.projects, {});
+      const sessions = readJson(paths.sessions, {});
+      const name = String(msg.project || '');
+      const key = projects[name] ? name : teams(projects, sessions)[name]?.key;
+      if (!key || !projects[key]) return send(res, 404, { error: 'unknown project' });
+      const p = projects[key];
+      const lead = sessions[p.lead];
+      if (p.mode !== 'team' || !lead || isEnded(lead)) return send(res, 409, { error: 'groups need team mode with a live lead' });
+      if (!['create', 'rename', 'delete'].includes(msg.action)) return send(res, 400, { error: 'action must be create, rename or delete' });
+      try {
+        const r = team.groupAction(p.lead, msg.action, { name: String(msg.name || ''), newName: String(msg.new_name || ''), purge: msg.purge === true });
+        send(res, 200, r);
+      } catch (err) { send(res, 400, { error: String(err.message || err) }); }
     });
   }
 
