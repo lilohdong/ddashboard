@@ -73,10 +73,25 @@ function parseJsonLenient(raw) {
   try { return JSON.parse(raw); } catch { return JSON.parse(escapeControlsInStrings(raw)); }
 }
 
+// Body of the last ```card block. A ``` inside the JSON (e.g. a code block in "details") is not the
+// closing fence, so try each following ``` in turn and take the first one that leaves valid JSON.
+function cardBody(text) {
+  const s = String(text);
+  const opens = [...s.matchAll(/```card[ \t]*\r?\n/g)];
+  if (!opens.length) return null;
+  const start = opens[opens.length - 1].index + opens[opens.length - 1][0].length;
+  let first = null;
+  for (let end = s.indexOf('```', start); end !== -1; end = s.indexOf('```', end + 3)) {
+    const raw = s.slice(start, end).trim();
+    if (first == null) first = raw;
+    try { parseJsonLenient(raw); return raw; } catch { /* not the closing fence */ }
+  }
+  return first ?? s.slice(start).trim();
+}
+
 function parseCard(text) {
-  const blocks = [...String(text).matchAll(/```card\s*\n([\s\S]*?)```/g)];
-  if (!blocks.length) return null;
-  const raw = blocks[blocks.length - 1][1].trim();
+  const raw = cardBody(text);
+  if (raw == null) return null;
   try {
     const c = parseJsonLenient(raw);
     const card = {
