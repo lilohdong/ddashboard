@@ -122,6 +122,47 @@ test('runHook: a real hook file with garbage input exits 0 and prints nothing', 
   }
 });
 
+// verify-009 F1: in an active project with the server up, a garbled hook call must not register a session.
+test('runHook: empty, non-JSON or session-less stdin registers nothing, prints nothing, logs, exits 0', () => {
+  reset();
+  writeJson(paths.serverPid, { pid: process.pid, port: 1 }); // "server running": this test process is alive
+  lib.setProject(TMP, true);
+  assert.ok(lib.projectActive(TMP));
+  const bad = ['', '   \n', '{not json', 'null', '[]', '123', JSON.stringify({ cwd: TMP }), JSON.stringify({ session_id: 123, cwd: TMP }), JSON.stringify({ session_id: '  ', cwd: TMP })];
+  for (const f of ['session-start', 'prompt-submit', 'stop-card', 'session-end']) {
+    for (const input of bad) {
+      const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', `${f}.js`)], { input, cwd: TMP, encoding: 'utf8', env: process.env });
+      assert.equal(r.status, 0, `${f} ${input}: ${r.stderr}`);
+      assert.equal(r.stdout, '', `${f} ${input}`);
+      assert.equal(r.stderr, '', `${f} ${input}`);
+    }
+  }
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(paths.sessions, "utf8"))), []);
+  const lines = fs.readFileSync(paths.appLog, 'utf8').split('\n').filter((l) => / ignored: /.test(l));
+  assert.equal(lines.length, 4 * bad.length);
+  assert.match(lines.join('\n'), /hook session-start: ignored: empty stdin/);
+  assert.match(lines.join('\n'), /hook stop-card: ignored: stdin is not JSON/);
+  assert.match(lines.join('\n'), /hook prompt-submit: ignored: stdin is not a JSON object/);
+  assert.match(lines.join('\n'), /hook session-end: ignored: no session_id/);
+  // control: the same setup with a real session id registers it
+  const ok = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', 'session-start.js')], { input: JSON.stringify({ session_id: 'REAL1', cwd: TMP }), cwd: TMP, encoding: 'utf8', env: process.env });
+  assert.equal(ok.status, 0);
+  assert.ok(sessions.get('REAL1'), 'a real hook call still registers');
+  assert.ok(ok.stdout.length > 0, 'and prints its instructions');
+});
+
+test('parseHookInput: only a JSON object with a string session_id is a hook call', () => {
+  const p = hooks.parseHookInput;
+  assert.deepEqual(p('{"session_id":"S1","cwd":"x"}'), { input: { session_id: 'S1', cwd: 'x' } });
+  assert.equal(p('').error, 'empty stdin');
+  assert.equal(p(undefined).error, 'empty stdin');
+  assert.equal(p('{').error, 'stdin is not JSON');
+  assert.equal(p('null').error, 'stdin is not a JSON object');
+  assert.equal(p('["S1"]').error, 'stdin is not a JSON object');
+  assert.equal(p('{"session_id":7}').error, 'no session_id');
+  assert.equal(p('{}').error, 'no session_id');
+});
+
 test('hook files are thin (at most 15 lines, one runHook call)', () => {
   const dir = path.join(ROOT, 'scripts', 'hooks');
   for (const f of fs.readdirSync(dir)) {

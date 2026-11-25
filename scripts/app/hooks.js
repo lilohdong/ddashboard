@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, injectRules,
+  paths, readJson, safeId, serverPid, projectActive, projectKey, setProject, registerSession, injectRules,
   isRegistered, pendingRules, parseTag, setMember, performHandoff, recordClaudePid, replacedText, memberStart, addTeam,
   removeTeams, teamOfLead, readProjects, rememberModel, appendCard, appendJsonl, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
@@ -317,12 +317,41 @@ const onSessionEnd = collect(async (input) => {
 
 const USE_CASES = { onSessionStart, onPrompt, onStop, onSessionEnd };
 
+// Hook stdin as Claude Code sends it: a JSON object with a string session_id. Anything else (empty, not JSON,
+// null, an array, no or a non-string session_id) is not a real hook call: { error } says why, and the hook does
+// nothing (registering it would leave a bogus "unknown" session and print the rules text).
+function parseHookInput(text) {
+  if (!String(text ?? '').trim()) return { error: 'empty stdin' };
+  let input;
+  try { input = JSON.parse(text); } catch { return { error: 'stdin is not JSON' }; }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'stdin is not a JSON object' };
+  if (typeof input.session_id !== 'string' || !input.session_id.trim()) return { error: 'no session_id' };
+  return { input };
+}
+
+function readStdin() {
+  return new Promise((resolve) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => (data += c));
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', () => resolve(data));
+  });
+}
+
 // The whole hook process: stdin -> use case -> stdout. Never throws, exit code 0 (a failing hook must never break
-// Claude); an error prints nothing and is logged as "hook <name>: <session id>: <stack>".
+// Claude); an error prints nothing and is logged as "hook <name>: <session id>: <stack>". Input that is not a real
+// hook call (see parseHookInput) runs nothing, prints nothing and is logged as "hook <name>: ignored: <why>".
 async function runHook(name, fn) {
   let input = {};
   try {
-    input = await readHookInput();
+    const parsed = parseHookInput(await readStdin());
+    if (parsed.error) {
+      log(`hook ${name}`, `ignored: ${parsed.error}`);
+      process.exitCode = 0;
+      return;
+    }
+    input = parsed.input;
     const use = typeof fn === 'function' ? fn : USE_CASES[fn];
     const r = await use(input);
     if (r?.stdout) process.stdout.write(r.stdout);
@@ -332,4 +361,4 @@ async function runHook(name, fn) {
   process.exitCode = 0;
 }
 
-module.exports = { ...USE_CASES, runHook, lastTurnText, recordUsage };
+module.exports = { ...USE_CASES, runHook, parseHookInput, lastTurnText, recordUsage };
