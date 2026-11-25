@@ -65,6 +65,17 @@
   .group-head .nav { flex: 1; min-width: 0; }
   .mode-sel { flex: none; max-width: 120px; font: inherit; font-size: 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 2px; cursor: pointer; }
   .sess.member { padding-left: 30px; }
+  .sess.depth2 { padding-left: 46px; }
+  .ghead { display: flex; align-items: center; gap: 4px; padding: 4px 8px 2px 30px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .ghead .gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ghead .gname.unassigned { font-weight: 400; font-style: italic; }
+  .ghead .sess-act { margin-top: 0; }
+  .side-act.depth2, .spawn-form.depth2 { padding-left: 46px; }
+  .group-del { margin: 2px 8px 6px 30px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; display: grid; gap: 6px; }
+  .group-del label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+  .group-del .row { display: flex; gap: 6px; }
+  .group-del button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+  .group-del button.danger { color: var(--blocked); border-color: currentColor; }
   .tag { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: 2px; white-space: nowrap; }
   .tag.lead { color: var(--accent); border-color: currentColor; }
   .tag.warn, .badge.warn { color: var(--blocked); border-color: currentColor; }
@@ -184,7 +195,8 @@ let scope = store.get('scope', { kind: 'all' }); // { kind: 'all' | 'project' | 
 let filter = store.get('filter', 'all');
 let showEnded = store.get('showEnded', false);
 let showReports = store.get('showReports', false); // team mode: also show member reports (dimmed)
-let spawnFor = null; // lead session id whose "+ member" form is open
+let spawnFor = null; // "<lead sid>|<group>" whose "+ member" form is open
+let groupDel = null; // { project, name } whose delete confirmation is open
 let spawnDraft = { role: '', model: '', stay: false, task: '' };
 let drafts = {};
 let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archived_count: 0 };
@@ -294,18 +306,52 @@ const teams = () => state.teams || {};
 const underLead = (s) => s.team === 'member' && !s.lead_missing;
 
 // Sidebar order in team mode: each lead followed by its members (indented), then everyone else.
-function teamOrder(list, cmp) {
+// Rows: { s, depth } sessions, { ghead } group headers, { spawn } "+ member", { gtools } "+ group".
+// With groups: lead > group > members, then "unassigned" for members without a (known) group.
+function teamOrder(list, cmp, groupNames) {
   const byLead = {};
   for (const s of list) if (underLead(s)) (byLead[s.lead] ||= []).push(s);
   const out = [];
   for (const l of list.filter((s) => s.team === 'lead').sort(cmp)) {
-    out.push([l, false]);
-    for (const m of (byLead[l.session_id] || []).sort(cmp)) out.push([m, true]);
+    const live = l.view !== 'ended';
+    const members = (byLead[l.session_id] || []).sort(cmp);
     delete byLead[l.session_id];
+    out.push({ s: l, depth: 0 });
+    if (!groupNames.length) {
+      for (const m of members) out.push({ s: m, depth: 1 });
+      if (live) out.push({ spawn: l.session_id, group: '', depth: 1 });
+      if (live) out.push({ gtools: l.session_id });
+      continue;
+    }
+    for (const g of groupNames) {
+      const ms = members.filter((m) => m.group === g);
+      out.push({ ghead: g, lead: l.session_id, count: ms.length, live });
+      for (const m of ms) out.push({ s: m, depth: 2 });
+      if (live) out.push({ spawn: l.session_id, group: g, depth: 2 });
+    }
+    const rest = members.filter((m) => !groupNames.includes(m.group));
+    out.push({ ghead: '', lead: l.session_id, count: rest.length, live });
+    for (const m of rest) out.push({ s: m, depth: 2 });
+    if (live) out.push({ spawn: l.session_id, group: '', depth: 2 });
+    if (live) out.push({ gtools: l.session_id });
   }
-  for (const ms of Object.values(byLead)) for (const m of ms.sort(cmp)) out.push([m, true]);
-  for (const s of list.filter((x) => x.team !== 'lead' && !underLead(x)).sort(cmp)) out.push([s, false]);
+  for (const ms of Object.values(byLead)) for (const m of ms.sort(cmp)) out.push({ s: m, depth: 1 });
+  for (const s of list.filter((x) => x.team !== 'lead' && !underLead(x)).sort(cmp)) out.push({ s, depth: 0 });
   return out;
+}
+
+function groupHeadHtml(r, p) {
+  if (!r.ghead) return `<div class="ghead"><span class="gname unassigned">unassigned</span><span>${r.count}</span></div>`;
+  const acts = r.live ? `<button class="sess-act" data-group-rename="${esc(r.ghead)}" data-project="${esc(p)}" title="Rename the group (its folder moves too)">rename</button><button class="sess-act" data-group-del="${esc(r.ghead)}" data-project="${esc(p)}" title="Remove the group">delete</button>` : '';
+  const dir = teams()[p]?.groups?.[r.ghead]?.dir || '';
+  let html = `<div class="ghead" title="${esc(dir)}"><span class="gname">${esc(r.ghead)}</span><span>${r.count}</span>${acts}</div>`;
+  if (groupDel && groupDel.project === p && groupDel.name === r.ghead) {
+    html += `<div class="group-del">Delete group ${esc(r.ghead)}? Its members become unassigned. The folder moves to docs/groups/_archived/.
+      <label><input type="checkbox" data-group-purge> Also delete the folder</label>
+      <div class="row"><button class="danger" data-group-del-ok>Delete</button><button data-group-del-cancel>Cancel</button></div>
+    </div>`;
+  }
+  return html;
 }
 
 // solo / team switch next to the project name; choosing team picks the lead session.
@@ -314,10 +360,12 @@ const staleMin = () => num(state.stale_min) || 60;
 const stale = (s) => !s.last_seen || Date.now() - new Date(s.last_seen) > staleMin() * 60000;
 
 // "+ member" under a live lead in team mode, or its form when open.
-function spawnHtml(lead) {
-  if (spawnFor !== lead.session_id) return `<button class="nav side-act" data-spawn-for="${esc(lead.session_id)}" title="Start a headless member for this lead">+ member</button>`;
+function spawnHtml(lead, group = '', depth = 1) {
+  const id = `${lead}|${group}`;
+  const cls = depth > 1 ? ' depth2' : '';
+  if (spawnFor !== id) return `<button class="nav side-act${cls}" data-spawn-for="${esc(id)}" title="Start a headless member${group ? ` in ${esc(group)}` : ''}">+ member</button>`;
   const d = spawnDraft;
-  return `<form class="spawn-form" data-spawn="${esc(lead.session_id)}">
+  return `<form class="spawn-form${cls}" data-spawn="${esc(lead)}" data-group="${esc(group)}">
     <input type="text" name="role" placeholder="Role (e.g. frontend)" value="${esc(d.role)}" required>
     <input type="text" name="model" placeholder="Model (optional, e.g. sonnet)" value="${esc(d.model)}">
     <label><input type="checkbox" name="stay"${d.stay ? ' checked' : ''}> Stay (keep waiting for instructions)</label>
@@ -379,19 +427,26 @@ function renderSide() {
   for (const p of names) {
     const cmp = (a, b) => order[a.view] - order[b.view] || String(a.name).localeCompare(String(b.name));
     const t = teams()[p];
-    const list = t?.mode === 'team' ? teamOrder(groups[p], cmp) : groups[p].sort(cmp).map((s) => [s, false]);
-    const pu = list.filter(([s]) => urgent[s.session_id]).length;
+    const groupNames = Object.keys(t?.groups || {}).sort();
+    const list = t?.mode === 'team' ? teamOrder(groups[p], cmp, groupNames) : groups[p].sort(cmp).map((s) => ({ s, depth: 0 }));
+    const sessRows = list.filter((r) => r.s);
+    const pu = sessRows.filter((r) => urgent[r.s.session_id]).length;
     const nameCount = {};
-    for (const [s] of list) nameCount[s.name] = (nameCount[s.name] || 0) + 1;
+    for (const { s } of sessRows) nameCount[s.name] = (nameCount[s.name] || 0) + 1;
     const endedHere = sessions.filter((s) => s.project === p && s.view === 'ended').length;
     html += `<div class="group">
       <div class="group-head">
         <button class="nav group-title ${sel('project', p)}" data-kind="project" data-id="${esc(p)}"><span class="grow">${esc(p)}</span>${pu ? `<span class="count">${pu}</span>` : ''}</button>
         ${modeSelect(p)}
       </div>
-      ${list.map(([s, member]) => `
+      ${list.map((r) => {
+        if (r.ghead != null) return groupHeadHtml(r, p);
+        if (r.spawn) return spawnHtml(r.spawn, r.group, r.depth);
+        if (r.gtools) return `<button class="nav side-act" data-group-add="${esc(p)}" title="A group keeps shared memory for its members in docs/groups/<name>/">+ group</button>`;
+        const s = r.s;
+        return `
         <div class="sess-row">
-        <button class="nav sess${member ? ' member' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}\n${esc(s.session_id)}">
+        <button class="nav sess${r.depth ? ' member' : ''}${r.depth > 1 ? ' depth2' : ''} ${sel('session', s.session_id)}" data-kind="session" data-id="${esc(s.session_id)}" title="${esc(s.cwd)}\n${esc(s.session_id)}">
           <span class="dot ${s.view}"></span>
           <span class="grow">
             <span class="sname">${esc(s.name)}${nameCount[s.name] > 1 ? ` <span class="sid">${shortId(s.session_id)}</span>` : ''}${sessTags(s, t)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
@@ -399,7 +454,8 @@ function renderSide() {
             ${usageLine(s)}
           </span>
         </button>${sessAct(s)}
-        </div>${t?.mode === 'team' && s.team === 'lead' && s.view !== 'ended' ? spawnHtml(s) : ''}`).join('')}
+        </div>`;
+      }).join('')}
       ${endedHere ? `<button class="nav side-act flat" data-clear-ended="${esc(p)}" title="Remove this project's ended sessions from the sidebar (cards stay)">Clear ${endedHere} ended</button>` : ''}
     </div>`;
   }
@@ -594,6 +650,30 @@ async function sideAction(e) {
     await post('/api/sessions/forget', { project: clear, ended: true });
     return true;
   }
+  const add = t.closest('[data-group-add]')?.dataset.groupAdd;
+  if (add) {
+    const name = prompt('New group name (letters, digits, - and _). Its folder is docs/groups/<name>/ in the lead\'s worktree.');
+    if (!name) return false;
+    await post('/api/groups', { project: add, action: 'create', name: name.trim() });
+    return true;
+  }
+  const ren = t.closest('[data-group-rename]');
+  if (ren) {
+    const next = prompt(`Rename group ${ren.dataset.groupRename} to:`, ren.dataset.groupRename);
+    if (!next || next.trim() === ren.dataset.groupRename) return false;
+    await post('/api/groups', { project: ren.dataset.project, action: 'rename', name: ren.dataset.groupRename, new_name: next.trim() });
+    return true;
+  }
+  const del = t.closest('[data-group-del]');
+  if (del) { groupDel = { project: del.dataset.project, name: del.dataset.groupDel }; renderSide(); return false; }
+  if (t.closest('[data-group-del-cancel]')) { groupDel = null; renderSide(); return false; }
+  if (t.closest('[data-group-del-ok]') && groupDel) {
+    const purge = Boolean(t.closest('.group-del')?.querySelector('[data-group-purge]')?.checked);
+    const g = groupDel;
+    groupDel = null;
+    await post('/api/groups', { project: g.project, action: 'delete', name: g.name, purge });
+    return true;
+  }
   const spawn = t.closest('[data-spawn-for]')?.dataset.spawnFor;
   if (spawn) { spawnFor = spawn; renderSide(); document.querySelector('.spawn-form input[name=role]')?.focus(); return false; }
   if (t.closest('[data-spawn-cancel]')) { spawnFor = null; spawnDraft = { role: '', model: '', stay: false, task: '' }; renderSide(); return false; }
@@ -601,7 +681,7 @@ async function sideAction(e) {
 }
 
 document.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel]')) {
+  if (e.target.closest('[data-forget], [data-mark-ended], [data-clear-ended], [data-spawn-for], [data-spawn-cancel], [data-group-add], [data-group-rename], [data-group-del], [data-group-del-ok], [data-group-del-cancel]')) {
     try { if (await sideAction(e)) load(); } catch (err) { alert('Could not do that: ' + err.message); }
     return;
   }
@@ -681,7 +761,7 @@ document.addEventListener('input', (e) => {
 });
 
 async function submitSpawn(form) {
-  const body = { lead: form.dataset.spawn, role: form.elements.role.value.trim(), model: form.elements.model.value.trim() || undefined, stay: form.elements.stay.checked, task: form.elements.task.value.trim() };
+  const body = { lead: form.dataset.spawn, group: form.dataset.group || undefined, role: form.elements.role.value.trim(), model: form.elements.model.value.trim() || undefined, stay: form.elements.stay.checked, task: form.elements.task.value.trim() };
   if (!body.role || !body.task) return;
   try {
     await post('/api/team/spawn', body);
@@ -710,7 +790,7 @@ document.addEventListener('submit', async (e) => {
 applySide();
 load();
 // Don't re-render while a reply is being typed.
-setInterval(() => { if (!spawnFor && !document.activeElement?.matches('textarea, select, input')) load(); }, 3000);
+setInterval(() => { if (!spawnFor && !groupDel && !document.activeElement?.matches('textarea, select, input')) load(); }, 3000);
 </script>
 </body>
 </html>
