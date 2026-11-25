@@ -363,7 +363,7 @@ ${group}${tail}
 
 // --- Team mode ---
 
-const DEFAULT_SPAWN = { permission_mode: 'acceptEdits', allowed_tools: ['Bash(git *)', 'Bash(node *)', 'Bash(npm *)'] };
+const DEFAULT_SPAWN = { permission_mode: 'auto', allowed_tools: ['Bash(git *)', 'Bash(node *)', 'Bash(npm *)'] };
 const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
 const isEnded = (s) => Boolean(s && (s.ended || s.state === 'ended'));

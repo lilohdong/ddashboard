@@ -369,7 +369,7 @@ test('team.js spawn: headless claude -p with the tag, default permissions, recor
   const sid = got.argv[got.argv.indexOf('--session-id') + 1];
   assert.equal(got.argv[0], '-p');
   assert.deepEqual(got.argv.slice(got.argv.indexOf('--model'), got.argv.indexOf('--model') + 2), ['--model', 'sonnet']);
-  assert.ok(got.argv.includes('acceptEdits'));
+  assert.ok(got.argv.includes('auto'));
   assert.deepEqual(got.argv.slice(-3), ['Bash(git *)', 'Bash(node *)', 'Bash(npm *)']);
   assert.equal(got.input, `[ddash role=backend lead=L1 stay=0] build the API`);
   assert.equal(got.nested, '');
@@ -467,7 +467,7 @@ test('team.js spawn: visible in Orca when it runs, with the same pre-registratio
     const spec = JSON.parse(fs.readFileSync(m[2], 'utf8'));
     const sid = flagOf(spec.args, '--session-id');
     assert.equal(flagOf(spec.args, '--model'), 'sonnet');
-    assert.ok(spec.args.includes('acceptEdits'));
+    assert.ok(spec.args.includes('auto'));
     assert.ok(!spec.args.includes('-p'));
     assert.equal(fs.readFileSync(spec.prompt_file, 'utf8'), '[ddash role=fe lead=L1 stay=0] build\nthe page');
     const s = readJson(paths.sessions, {})[sid];

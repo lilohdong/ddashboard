@@ -15,7 +15,7 @@
 //       groups keep shared memory in docs/groups/<g>/ of the lead's worktree (brief.md, handoff-NNN.md, notes/).
 //       Nothing is committed; the lead commits the docs.
 // Headless permissions come from projects.json[<project>].spawn = { permission_mode, allowed_tools },
-// default: acceptEdits + Bash(git *), Bash(node *), Bash(npm *). DDASH_CLAUDE_BIN overrides the claude command.
+// default: auto (the auto-mode classifier) + Bash(git *), Bash(node *), Bash(npm *). DDASH_CLAUDE_BIN overrides the claude command.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

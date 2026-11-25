@@ -48,7 +48,7 @@ Groups are optional; members without one are listed as `unassigned`. `role` stay
 - **Instructions** go out with `team.js <lead id> send <role or id> "<text>"`. A waiting or running member gets it from its inbox; an Orca member idle at its prompt gets it typed into its terminal; a finished member is resumed with the same options (in a new Orca terminal when Orca runs).
 - **Blocked members** use the `blocked` status with the question in the summary. The lead answers with `send`, or asks you on the dashboard if it is your call.
 - **What reaches you:** decisions, review requests, problems, and finished milestones. Turn on `Member reports` on the dashboard when you want to look over the lead's shoulder.
-- **Permissions:** headless members run with `acceptEdits` and may run `git`, `node` and `npm` commands. Anything else is denied, which the member reports as blocked. Adjust per project in `~/.ddashboard/projects.json` (`"spawn": { "permission_mode", "allowed_tools", "model" }`). Avoid `bypassPermissions` unless the work is sandboxed.
+- **Permissions:** members run in auto mode (`--permission-mode auto`): a classifier approves safe actions, and `git`, `node` and `npm` commands are always allowed. A denied action is reported as blocked. Adjust per project in `~/.ddashboard/projects.json` (`"spawn": { "permission_mode", "allowed_tools", "model" }`). Avoid `bypassPermissions` unless the work is sandboxed.
 
 ## Lead handoff
 
