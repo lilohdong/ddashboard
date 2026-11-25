@@ -6,9 +6,8 @@ const path = require('path');
 const { readJson } = require('../core/fsx');
 const models = require('../store/models');
 const { leadContextCheck } = require('../domain/lead-context');
+const { teamRole } = require('../domain/team');
 const { ensureTeamBin } = require('./bins');
-// teamRole is still in lib.js (loaded lazily: lib re-exports this module); domain/team takes it next.
-const lib = () => require('../lib');
 
 // Model names from Claude settings (user, project, local) and ANTHROPIC_MODEL.
 function settingsModels(cwd) {
@@ -46,7 +45,7 @@ function firstContext(transcriptPath) {
 // opts: transcript (path, for the baseline), models (model names seen this turn), cwd (Claude settings).
 // Works on the given objects; the caller saves the session.
 function leadContextNotice(s, p, opts = {}) {
-  if (!s || lib().teamRole(s, p) !== 'lead') return '';
+  if (!s || teamRole(s, p) !== 'lead') return '';
   return leadContextCheck(s, {
     firstContext: () => firstContext(opts.transcript),
     models: () => [...(opts.models || []), models.known(s.session_id), ...settingsModels(opts.cwd || s.cwd)],

@@ -224,14 +224,13 @@ const rulesCtx = () => ({
 
 const rulesText = (sid) => rules.soloText(sid, rulesCtx());
 
-// --- Team mode ---
-
-const DEFAULT_SPAWN = { permission_mode: 'auto', allowed_tools: ['Bash(git *)', 'Bash(node *)', 'Bash(npm *)'] };
-
-// How new sessions start (plan M-1d): projects.json spawn.runner_lead (a new lead on handoff --spawn) and
-// spawn.runner_member (members). headless | orca | window; default headless.
-const RUNNER_VALUES = ['headless', 'orca', 'window'];
-const runnersOf = (p) => Object.fromEntries(['runner_lead', 'runner_member'].map((k) => [k, RUNNER_VALUES.includes(p?.spawn?.[k]) ? p.spawn[k] : 'headless']));
+// --- Team mode --- (pure rules in domain/team.js, tags in domain/tags.js)
+const {
+  DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, TEAM_NAME, GROUP_NAME, GROUP_NAME_ERROR, GROUP_DEFAULTS, badGroupName, groupSettings,
+  teamsOf, own, sameName, hasTeams, teamOfLead, teamOfSession, teamSlug, teamMembers, teamRole, routeCard,
+  syncMode, addTeamIn, removeTeamsIn,
+} = require('./domain/team');
+const { parseTag } = require('./domain/tags');
 
 // Save a project's runners (either or both). Returns { ok, runner_lead, runner_member } or { ok: false, code, error }.
 function setRunners(key, values = {}) {
@@ -247,28 +246,7 @@ function setRunners(key, values = {}) {
     return { ok: true, ...runnersOf(p) };
   });
 }
-const DEFAULT_TEAM_RULES = { peer_talk: false, qa_direct: false };
 
-
-// Where a session stands in its project: solo | lead | member | outside (team mode, in no team).
-// A member belongs to the team whose lead spawned it (s.lead); a member of a removed team is outside.
-function teamRole(s, p) {
-  if (!s || !p || !hasTeams(p)) return 'solo';
-  if (teamOfLead(p, s.session_id)) return 'lead';
-  if (s.kind === 'member' && s.lead && teamOfLead(p, s.lead)) return 'member';
-  return 'outside';
-}
-
-// Where a session's card goes: the dashboard, or its lead's inbox. A member whose lead has
-// ended (or is unknown) posts to the dashboard with a lead_missing flag.
-function routeCard(sessions, projects, sid) {
-  const s = sessions[sid];
-  const role = teamRole(s, s && projects[s.project_key]);
-  if (role !== 'member') return { to: 'board', role };
-  const lead = sessions[s.lead];
-  if (!lead || isEnded(lead)) return { to: 'board', role, lead_missing: true };
-  return { to: 'lead', role, lead: s.lead };
-}
 
 // A session's place in its team, as domain/rules.rulesFor needs it.
 function placeOf(s, p) {
@@ -321,34 +299,6 @@ function pendingRules(sid) {
 // A repo can have several teams. Each has one lead session; its members report only to that lead.
 // A handoff changes only lead; name, worktree and groups stay. mode is 'team' while any team is left.
 
-const TEAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
-const teamsOf = (p) => (p && p.teams && typeof p.teams === 'object' ? p.teams : {});
-// obj[key] only when it is obj's own entry, so names like "constructor" never hit Object.prototype.
-const own = (obj, key) => (obj && typeof obj === 'object' && Object.hasOwn(obj, key) ? obj[key] : undefined);
-// The key of obj equal to name ignoring case (folders on Windows/macOS ignore case), or undefined.
-const sameName = (obj, name) => Object.keys(obj || {}).find((k) => k.toLowerCase() === String(name).toLowerCase());
-const hasTeams = (p) => Object.keys(teamsOf(p)).length > 0;
-
-// The team a session leads: { name, team } or null.
-function teamOfLead(p, sid) {
-  if (!sid) return null;
-  for (const [name, team] of Object.entries(teamsOf(p))) if (team.lead === sid) return { name, team };
-  return null;
-}
-
-// The team of a lead or member session: { name, team } or null.
-function teamOfSession(s, p) {
-  if (!s) return null;
-  return teamOfLead(p, s.session_id) || (s.kind === 'member' && s.lead ? teamOfLead(p, s.lead) : null);
-}
-
-// A folder-safe team name from free text ('' if nothing usable is left).
-const teamSlug = (name) => String(name || '').trim().replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 40);
-
-function nextTeamName(p) {
-  for (let i = 1; ; i++) if (!sameName(teamsOf(p), `team${i}`)) return `team${i}`;
-}
-
 // Root of the git worktree that holds dir (dir itself outside git), with forward slashes.
 const worktreeRoot = (dir) => slash(gitIn(['rev-parse', '--show-toplevel'], dir) || dir);
 
@@ -385,11 +335,6 @@ function ensureLeadRules(team, name) {
     if (e.code !== 'EEXIST') return '';
   }
   return file;
-}
-
-function syncMode(p) {
-  if (hasTeams(p)) p.mode = 'team';
-  else if (p.mode) p.mode = 'solo';
 }
 
 // 0.3.0 settings before M-1b kept one lead per project (lead, lead_name, groups). They become one team named
@@ -466,12 +411,6 @@ function readProjects() {
   return projectsStore.update(migrateAll);
 }
 
-function bumpMode(p) {
-  syncMode(p);
-  p.mode_ver = (Number(p.mode_ver) || 0) + 1;
-  p.rules = { ...DEFAULT_TEAM_RULES, ...(p.rules || {}) };
-}
-
 // Add a team led by the given session. Refuses a name in use and a session that already leads a team.
 // No name: team1, team2, ... Other teams are not touched. Bumps mode_ver (every session gets new instructions once).
 function addTeam(key, name, lead) {
@@ -479,25 +418,9 @@ function addTeam(key, name, lead) {
   // git outside the locks: the worktree of the lead's folder.
   const before = own(sessionsStore.read(), lead);
   const worktree = worktreeRoot(before?.cwd || projectsStore.get(key)?.cwd || process.cwd());
-  return projectsStore.update((projects) => sessionsStore.update((sessions) => addTeamIn(projects, sessions, key, name, lead, worktree)));
-}
-function addTeamIn(projects, sessions, key, name, lead, worktree) {
-  const p = projects[key];
-  if (!p) return { ok: false, error: 'project is not connected' };
-  if (!own(sessions, lead)) return { ok: false, error: 'unknown lead session' };
-  p.teams ||= {};
-  const team = name ? teamSlug(name) : nextTeamName(p);
-  if (!TEAM_NAME.test(team)) return { ok: false, error: 'team names use letters, digits, - and _ (up to 40)' };
-  const taken = sameName(p.teams, team);
-  if (taken) return { ok: false, code: 409, error: `team ${taken} exists in this project (names ignore case); pick another name` };
-  const led = teamOfLead(p, lead);
-  if (led) return { ok: false, code: 409, error: `this session already leads team ${led.name}` };
-  p.teams[team] = { lead, worktree, groups: {}, created: new Date().toISOString() };
-  ensureLeadRules(p.teams[team], team);
-  bumpMode(p);
-  sessions[lead].kind = 'lead';
-  clearLeadContext(sessions[lead]);
-  return { ok: true, team, mode: p.mode, mode_ver: p.mode_ver, lead };
+  const r = projectsStore.update((projects) => sessionsStore.update((sessions) => addTeamIn(projects, sessions, key, name, lead, worktree)));
+  if (r.ok) ensureLeadRules({ worktree }, r.team);
+  return r;
 }
 
 // Remove teams by name (every team when names is empty). Their members are released (kind, lead and group
@@ -507,54 +430,12 @@ function removeTeams(key, names = []) {
   readProjects(); // migrate first
   return projectsStore.update((projects) => sessionsStore.update((sessions) => removeTeamsIn(projects, sessions, key, names)));
 }
-function removeTeamsIn(projects, sessions, key, names) {
-  const p = projects[key];
-  if (!p) return { ok: false, error: 'project is not connected' };
-  const list = names.length ? names : Object.keys(teamsOf(p));
-  for (const n of list) if (!own(teamsOf(p), n)) return { ok: false, code: 404, error: `no team ${n}` };
-  for (const n of list) {
-    const leadSid = p.teams[n].lead;
-    const lead = own(sessions, leadSid);
-    if (lead?.kind === 'lead') delete lead.kind;
-    clearLeadContext(lead);
-    for (const m of teamMembers(sessions, key, p.teams[n])) {
-      m.former_lead = leadSid;
-      delete m.kind;
-      delete m.lead;
-      delete m.group;
-    }
-    delete p.teams[n];
-  }
-  bumpMode(p);
-  return { ok: true, removed: list, mode: p.mode, mode_ver: p.mode_ver };
-}
 
 // Dashboard switch. team: add a team led by lead (named team or leadName). solo: remove the named team,
 // or every team when none is named.
 function setMode(key, mode, { lead, leadName, team } = {}) {
   if (mode === 'team') return addTeam(key, team || leadName, lead);
   return removeTeams(key, team ? [team] : []);
-}
-
-// First-prompt tags:
-//   [ddash role=<role> lead=<lead sid> stay=0|1]         register a team member
-//   [ddash lead-handoff from=<old lead sid> doc=<path>]  take over as team lead
-// Values may be quoted ("..."). Returns null when the prompt doesn't start with a tag.
-function parseTag(prompt) {
-  const m = String(prompt || '').match(/^\s*\[ddash\s+([^\]]*)\]/);
-  if (!m) return null;
-  const attrs = {};
-  for (const a of m[1].matchAll(/([\w-]+)(?:=(?:"([^"]*)"|(\S+)))?/g)) attrs[a[1].toLowerCase()] = a[2] ?? a[3] ?? true;
-  const rest = String(prompt).slice(m.index + m[0].length).trim();
-  if (attrs['lead-handoff']) {
-    if (typeof attrs.from !== 'string') return null;
-    return { type: 'handoff', from: safeId(attrs.from), doc: typeof attrs.doc === 'string' ? attrs.doc : '', rest };
-  }
-  if (typeof attrs.lead !== 'string') return null;
-  const stay = attrs.stay === true || ['1', 'true', 'yes'].includes(String(attrs.stay).toLowerCase());
-  const role = typeof attrs.role === 'string' && attrs.role.trim() ? attrs.role.trim().slice(0, 40) : 'member';
-  const group = typeof attrs.group === 'string' && GROUP_NAME.test(attrs.group) ? attrs.group : undefined;
-  return { type: 'member', role, lead: safeId(attrs.lead), stay, ...(group ? { group } : {}), rest };
 }
 
 // Register a session as a member (from its tag). The session must be registered already.
@@ -646,9 +527,7 @@ function handoffSessions(sessions, projects, from, to, doc) {
 // Groups belong to one team: two teams may use the same group name, and one team's upkeep never
 // touches another team's folders.
 
-const GROUP_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const BRIEF_MAX_CHARS = 16000; // about 4000 tokens
-const GROUP_DEFAULTS = { keep_handoffs: 3, notes_days: 30 };
 
 const briefTemplate = (name) => `# ${name} brief
 
@@ -667,19 +546,12 @@ const briefTemplate = (name) => `# ${name} brief
 // True if git tracks any file under dir.
 const gitTracked = (dir) => Boolean(gitIn(['ls-files', '--', '.'], dir));
 
-function groupSettings(g) {
-  return { ...GROUP_DEFAULTS, ...(g || {}) };
-}
-
 // A group folder with notes/ and a brief template (an existing brief is kept).
 function ensureGroupDir(dir, name) {
   ensureDir(path.join(dir, 'notes'));
   const brief = path.join(dir, 'brief.md');
   if (!fs.existsSync(brief)) fs.writeFileSync(brief, briefTemplate(name));
 }
-
-const badGroupName = (name) => !GROUP_NAME.test(String(name || '')) || String(name).startsWith('_');
-const GROUP_NAME_ERROR = 'group names use letters, digits, - and _ (up to 40)';
 
 // The team's entry in a copy of projects (for checks and folder work outside the lock): { p, team } or { error }.
 // Its worktree is filled in when missing (git), so teamIn can store it.
@@ -702,9 +574,6 @@ function teamIn(projects, key, teamName, worktree) {
   return team;
 }
 const TEAM_GONE = (teamName) => ({ ok: false, error: `no team ${teamName}` });
-
-// Members of a team (by its current lead).
-const teamMembers = (sessions, key, team) => Object.values(sessions).filter((s) => s.project_key === key && s.kind === 'member' && s.lead === team.lead);
 
 function groupsOf(key, teamName) {
   return teamsOf(readProjects()[key])[teamName]?.groups || {};
