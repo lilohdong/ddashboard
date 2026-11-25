@@ -12,7 +12,7 @@ const path = require('path');
 const {
   paths, readJson, writeJson, appendCard, appendJsonl, readHookInput, safeId, git, takeInbox, formatMessages,
   messagesReason, readTranscriptTail, lastHumanIndex, turnUsage, USAGE_KEYS, routeCard, deliver, reportMessage,
-  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession,
+  rulesUpdate, replacedText, pruneGroup, leadContextNotice, checkBriefs, teamRole, readProjects, teamOfSession, own,
 } = require('../lib');
 
 const MAX_DETAILS = 4000;
@@ -168,7 +168,7 @@ function parseCard(text) {
   }
 
   // Group folder upkeep: keep the newest handoffs, drop old notes (only inside its own team's docs/teams/<team>/<group>/).
-  const group = sessions[sid].group && teamOfSession(sessions[sid], projects[sessions[sid].project_key])?.team.groups?.[sessions[sid].group];
+  const group = sessions[sid].group && own(teamOfSession(sessions[sid], projects[sessions[sid].project_key])?.team.groups, sessions[sid].group);
   if (group) try { pruneGroup(group); } catch { /* best effort */ }
   // Brief staleness (lead and members only): the lead is told once when a brief falls behind HEAD.
   if (['lead', 'member'].includes(teamRole(sessions[sid], projects[sessions[sid].project_key]))) {

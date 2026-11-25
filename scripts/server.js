@@ -23,7 +23,7 @@ const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, LEAD_CONTEXT_LIMIT,
-  readProjects, teamOfSession, teamsOf,
+  readProjects, teamOfSession, teamsOf, own,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
@@ -81,7 +81,7 @@ function teams(projects, sessions) {
   return out;
 }
 
-const projectKeyOf = (projects, sessions, name) => (projects[name] ? name : teams(projects, sessions)[name]?.key);
+const projectKeyOf = (projects, sessions, name) => (own(projects, name) ? name : own(teams(projects, sessions), name)?.key);
 
 function waiting(sid) {
   try {
@@ -262,7 +262,7 @@ const server = http.createServer((req, res) => {
       const names = Object.keys(list);
       const tn = msg.team ? String(msg.team) : names.length === 1 ? names[0] : '';
       if (!names.length) return send(res, 409, { error: 'groups need team mode with a live lead' });
-      if (!list[tn]) return send(res, tn ? 404 : 400, { error: tn ? `no team ${tn}` : 'team required: this project has several teams' });
+      if (!own(list, tn)) return send(res, tn ? 404 : 400, { error: tn ? `no team ${tn}` : 'team required: this project has several teams' });
       const lead = sessions[list[tn].lead];
       if (!lead || isEnded(lead)) return send(res, 409, { error: 'groups need team mode with a live lead' });
       if (!['create', 'rename', 'delete'].includes(msg.action)) return send(res, 400, { error: 'action must be create, rename or delete' });

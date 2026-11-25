@@ -996,7 +996,11 @@ test('M-1b: removing a team leaves the others; the project is solo when no team 
     const st = await (await fetch(`${base}/api/state`)).json();
     assert.deepEqual(Object.keys(Object.values(st.teams)[0].teams).sort(), ['Alpha', 'Beta']);
     assert.equal(Object.values(st.teams)[0].teams.Beta.lead, 'L2');
-    assert.equal(st.sessions.M2.team_name, 'Beta');
+    assert.equal(st.sessions.L2.team_name, 'Beta');
+    // Members of a removed team were released: they do not rejoin when their lead starts a team again.
+    assert.equal(st.sessions.M2.team, 'outside');
+    assert.equal(st.sessions.M2.former_lead, 'L2');
+    assert.equal(st.sessions.M2.lead, undefined);
     // With several teams, /api/groups needs the team.
     assert.equal((await post('/api/groups', { project: KEY, action: 'create', name: 'g' })).status, 400);
     assert.equal((await post('/api/groups', { project: KEY, team: 'Beta', action: 'create', name: 'g' })).status, 200);
@@ -1034,7 +1038,7 @@ test('M-1b: settings and group folders from before teams move on first read (git
     assert.equal(t.handoff.from, 'L1');
     for (const k of ['lead', 'lead_name', 'groups', 'handoff']) assert.equal(p[k], undefined, k);
     assert.equal(p.mode, 'team');
-    assert.equal(p.mode_ver, 3);
+    assert.equal(p.mode_ver, 4); // bumped: running sessions get the new instructions
     // Saved once; the folder moved with git mv and the empty docs/groups/ is gone.
     assert.ok(readJson(paths.projects, {})[KEY].teams['Alpha-Team']);
     assert.equal(fs.readFileSync(path.join(t.groups.front.dir, 'brief.md'), 'utf8'), 'old brief');
@@ -1089,6 +1093,110 @@ test('M-1b: handoff numbers never collide (exclusive create, next number on a cl
   assert.equal(team.main(['L1', 'next-handoff']).code, 1);
   assert.equal(team.main(['O1', 'next-handoff']).code, 1);
   fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('M-1b review: team and group names ignore case; prototype names are plain names', () => {
+  twoTeams();
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+  // 'alpha' would share docs/teams/alpha/ with 'Alpha' on a case-insensitive file system.
+  assert.match(lib.addTeam(KEY, 'alpha', 'O1').error, /team Alpha exists in this project \(names ignore case\)/);
+  assert.match(runHook('prompt-submit.js', { session_id: 'O1', cwd: CWD, prompt: '/ddashboard:dashboard team BETA' }), /No team was added: team Beta exists/);
+  assert.equal(team.main(['L1', 'group', 'create', 'Front']).code, 0);
+  assert.match(team.main(['L1', 'group', 'create', 'front']).out, /group Front exists in team Alpha \(names ignore case\)/);
+  team.main(['L1', 'group', 'create', 'back']);
+  assert.match(team.main(['L1', 'group', 'rename', 'back', 'FRONT']).out, /group Front exists/);
+  // Names that are Object.prototype keys are not found unless they really exist.
+  assert.equal(lib.removeTeams(KEY, ['constructor']).code, 404);
+  assert.match(team.main(['L1', 'spawn', '--role', 'x', '--group', 'toString', 'task']).out, /no group toString in team Alpha/);
+  assert.match(team.main(['L1', 'group', 'delete', 'constructor']).out, /no group constructor/);
+  assert.equal(lib.addTeam(KEY, 'constructor', 'O1').ok, true);
+  assert.equal(teamConf('constructor').lead, 'O1');
+  assert.equal(team.main(['O1', 'group', 'create', 'hasOwnProperty']).code, 0);
+  assert.ok(fs.existsSync(path.join(groupDir('hasOwnProperty', 'constructor'), 'brief.md')));
+  const s = readJson(paths.sessions, {});
+  s.M1.group = 'toString'; // a group that does not exist
+  writeJson(paths.sessions, s);
+  assert.doesNotMatch(lib.rulesFor(s.M1, project()), /Group "toString" folder/);
+  runHook('stop-card.js', { session_id: 'M1', cwd: CWD, last_assistant_message: '' }); // no crash
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('M-1b review: removing a team releases its members for good', () => {
+  twoTeams();
+  const s0 = readJson(paths.sessions, {});
+  s0.M1.group = 'front';
+  writeJson(paths.sessions, s0);
+  const r = lib.removeTeams(KEY, ['Alpha']);
+  assert.equal(r.ok, true);
+  let s = readJson(paths.sessions, {});
+  assert.equal(s.M1.kind, undefined);
+  assert.equal(s.M1.lead, undefined);
+  assert.equal(s.M1.group, undefined);
+  assert.equal(s.M1.former_lead, 'L1');
+  assert.equal(s.M2.lead, 'L2'); // the other team keeps its members
+  // The same lead starts a new team: the released member stays outside.
+  assert.equal(lib.addTeam(KEY, 'Delta', 'L1').ok, true);
+  s = readJson(paths.sessions, {});
+  assert.equal(lib.teamRole(s.M1, project()), 'outside');
+  assert.equal(lib.routeCard(s, project(), 'M1').to, 'board');
+});
+
+test('M-1b review: migration bumps mode_ver, so running sessions get the new instructions once', () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.M1.rules_ver = 3;
+  s.M1.group = 'front';
+  writeJson(paths.sessions, s);
+  writeJson(paths.projects, {
+    [KEY]: { since: 'x', cwd: CWD, name: 'proj', mode: 'team', mode_ver: 3, lead: 'L1', lead_name: 'Alpha', groups: { front: { dir: slash(path.join(CWD, 'docs', 'groups', 'front')) } } },
+  });
+  const update = lib.pendingRules('M1');
+  assert.match(update, /mode changed \(now team\)/);
+  assert.match(update, /docs\/teams\/Alpha\/front/);
+  assert.match(update, /next-handoff/);
+  assert.equal(lib.pendingRules('M1'), '');
+  assert.equal(project().mode_ver, 4);
+  fs.rmSync(path.join(CWD, 'docs'), { recursive: true, force: true });
+});
+
+test('M-1b review: migration moves group folders inside the worktree that holds them', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-repo-'));
+  const wt = `${repo}-wt`;
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  try {
+    git(repo, 'init', '-q');
+    for (const g of ['front', 'back']) {
+      fs.mkdirSync(path.join(repo, 'docs', 'groups', g), { recursive: true });
+      fs.writeFileSync(path.join(repo, 'docs', 'groups', g, 'brief.md'), `${g} brief`);
+    }
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-qm', 'groups');
+    assert.equal(git(repo, 'worktree', 'add', '-q', wt).status, 0);
+    // The lead now sits in the second worktree; front's folder is in the first, back's in the second.
+    reset({ sessions: { L1: session('L1', { kind: 'lead', cwd: wt }) } });
+    writeJson(paths.projects, {
+      [KEY]: {
+        since: 'x', cwd: CWD, name: 'proj', mode: 'team', mode_ver: 1, lead: 'L1', lead_name: 'Alpha',
+        groups: {
+          front: { dir: slash(path.join(repo, 'docs', 'groups', 'front')) },
+          back: { dir: slash(path.join(wt, 'docs', 'groups', 'back')) },
+        },
+      },
+    });
+    const t = lib.readProjects()[KEY].teams.Alpha;
+    // The team's worktree is the one holding docs/groups/, not the lead's current one.
+    assert.equal(t.worktree.toLowerCase(), slash(repo).toLowerCase());
+    assert.equal(t.groups.front.dir, slash(path.join(t.worktree, 'docs', 'teams', 'Alpha', 'front')));
+    assert.match(git(repo, 'status', '--porcelain').stdout, /^R {2}docs\/groups\/front\/brief\.md -> docs\/teams\/Alpha\/front\/brief\.md/m);
+    // The folder in the other worktree is not moved (no deletions left in its index), and the lead is told.
+    assert.equal(t.groups.back.dir.toLowerCase(), slash(path.join(wt, 'docs', 'groups', 'back')).toLowerCase());
+    assert.equal(git(wt, 'status', '--porcelain').stdout.trim(), '');
+    assert.match(inbox('L1')[0].title, /group folders not moved to docs\/teams\/Alpha\/.*back/);
+  } finally {
+    git(repo, 'worktree', 'remove', '--force', wt);
+    fs.rmSync(wt, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 // --- language (settings.json, card language, dashboard dictionary) ---

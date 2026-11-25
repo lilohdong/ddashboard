@@ -393,7 +393,7 @@ function rulesFor(s, p) {
   const sid = s.session_id;
   const role = teamRole(s, p);
   if (role === 'lead') return leadRulesText(sid, teamOfLead(p, sid).name);
-  if (role === 'member') return memberRulesText(sid, s, s.group && teamOfSession(s, p)?.team.groups?.[s.group]);
+  if (role === 'member') return memberRulesText(sid, s, s.group && own(teamOfSession(s, p)?.team.groups, s.group));
   if (role === 'outside') return `${rulesText(sid)}- This project is in team mode (teams: ${Object.keys(p.teams).sort().join(', ')}). You are outside every team, so your cards still go straight to the dashboard.\n`;
   return rulesText(sid);
 }
@@ -441,6 +441,10 @@ function pendingRules(sid) {
 
 const TEAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const teamsOf = (p) => (p && p.teams && typeof p.teams === 'object' ? p.teams : {});
+// obj[key] only when it is obj's own entry, so names like "constructor" never hit Object.prototype.
+const own = (obj, key) => (obj && typeof obj === 'object' && Object.hasOwn(obj, key) ? obj[key] : undefined);
+// The key of obj equal to name ignoring case (folders on Windows/macOS ignore case), or undefined.
+const sameName = (obj, name) => Object.keys(obj || {}).find((k) => k.toLowerCase() === String(name).toLowerCase());
 const hasTeams = (p) => Object.keys(teamsOf(p)).length > 0;
 
 // The team a session leads: { name, team } or null.
@@ -460,7 +464,7 @@ function teamOfSession(s, p) {
 const teamSlug = (name) => String(name || '').trim().replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 40);
 
 function nextTeamName(p) {
-  for (let i = 1; ; i++) if (!teamsOf(p)[`team${i}`]) return `team${i}`;
+  for (let i = 1; ; i++) if (!sameName(teamsOf(p), `team${i}`)) return `team${i}`;
 }
 
 // Root of the git worktree that holds dir (dir itself outside git), with forward slashes.
@@ -475,33 +479,55 @@ function syncMode(p) {
 }
 
 // 0.3.0 settings before M-1b kept one lead per project (lead, lead_name, groups). They become one team named
-// after lead_name, and docs/groups/<g>/ moves to docs/teams/<team>/<g>/ (git mv when tracked).
-// Returns true if p changed.
+// after lead_name, and docs/groups/<g>/ moves to docs/teams/<team>/<g>/ (git mv when tracked) inside the
+// worktree that holds docs/groups/ (which becomes the team's worktree, even if the lead has moved since).
+// A group folder in another worktree is not moved: it keeps its path and the lead is told once.
+// Bumps mode_ver so running sessions get the new instructions. Returns true if p changed.
 function migrateProject(p, sessions) {
   if (!p || typeof p !== 'object' || (p.teams && typeof p.teams === 'object')) return false;
   p.teams = {};
   if (p.mode === 'team' && p.lead) {
     const name = teamSlug(p.lead_name) || 'team1';
-    const dirs = Object.values(p.groups || {}).map((g) => g && g.dir).filter(Boolean);
-    const base = sessions[p.lead]?.cwd || (dirs[0] && path.dirname(path.dirname(path.dirname(dirs[0])))) || p.cwd;
+    const groups = Object.entries(p.groups && typeof p.groups === 'object' ? p.groups : {}).filter(([g]) => GROUP_NAME.test(g));
+    const existing = groups.map(([, g]) => g?.dir).filter((d) => d && fs.existsSync(d));
+    const base = existing[0] || own(sessions, p.lead)?.cwd || p.cwd;
     const team = { lead: p.lead, worktree: worktreeRoot(base), groups: {} };
     if (p.handoff) team.handoff = p.handoff;
     if (p.last_handoff) team.last_handoff = p.last_handoff;
     const oldRoots = new Set();
-    for (const [g, conf] of Object.entries(p.groups || {})) {
-      const dir = slash(path.join(teamDir(team, name), g));
+    const skipped = [];
+    for (const [g, conf] of groups) {
+      if (sameName(team.groups, g)) continue;
+      let dir = slash(path.join(teamDir(team, name), g));
       try {
         if (conf?.dir && fs.existsSync(conf.dir) && !fs.existsSync(dir)) {
-          moveDir(conf.dir, dir);
-          oldRoots.add(path.dirname(conf.dir));
+          if (worktreeRoot(conf.dir).toLowerCase() !== team.worktree.toLowerCase()) {
+            dir = slash(conf.dir); // another worktree: a move would leave deletions in its index
+            skipped.push(`${g} (${dir})`);
+          } else {
+            moveDir(conf.dir, dir);
+            oldRoots.add(path.dirname(conf.dir));
+          }
         }
         ensureGroupDir(dir, g);
-      } catch { /* the folder can be fixed by hand; the settings still move */ }
+      } catch (err) {
+        dir = slash(conf?.dir || dir);
+        skipped.push(`${g} (${err.message})`);
+      }
       team.groups[g] = { ...conf, dir };
     }
     // Drop the old docs/groups/ folder if nothing is left in it.
     for (const d of oldRoots) try { fs.rmdirSync(d); } catch { /* not empty */ }
     p.teams[name] = team;
+    p.mode_ver = (Number(p.mode_ver) || 0) + 1;
+    if (skipped.length) {
+      try {
+        deliver(p.lead, {
+          type: 'report', from: 'ddashboard', role: 'ddashboard', status: 'review',
+          title: `group folders not moved to docs/teams/${name}/ (move them by hand in their worktree): ${skipped.join(', ')}`,
+        });
+      } catch { /* best effort */ }
+    }
   }
   for (const k of ['lead', 'lead_name', 'groups', 'handoff', 'last_handoff']) delete p[k];
   syncMode(p);
@@ -537,13 +563,14 @@ function addTeam(key, name, lead) {
   const p = projects[key];
   if (!p) return { ok: false, error: 'project is not connected' };
   const sessions = readJson(paths.sessions, {});
-  if (!sessions[lead]) return { ok: false, error: 'unknown lead session' };
+  if (!own(sessions, lead)) return { ok: false, error: 'unknown lead session' };
   p.teams ||= {};
   const team = name ? teamSlug(name) : nextTeamName(p);
   if (!TEAM_NAME.test(team)) return { ok: false, error: 'team names use letters, digits, - and _ (up to 40)' };
-  if (p.teams[team]) return { ok: false, code: 409, error: `team ${team} exists in this project; pick another name` };
-  const own = teamOfLead(p, lead);
-  if (own) return { ok: false, code: 409, error: `this session already leads team ${own.name}` };
+  const taken = sameName(p.teams, team);
+  if (taken) return { ok: false, code: 409, error: `team ${taken} exists in this project (names ignore case); pick another name` };
+  const led = teamOfLead(p, lead);
+  if (led) return { ok: false, code: 409, error: `this session already leads team ${led.name}` };
   p.teams[team] = { lead, worktree: worktreeRoot(sessions[lead].cwd || p.cwd || process.cwd()), groups: {}, created: new Date().toISOString() };
   bumpMode(p);
   sessions[lead].kind = 'lead';
@@ -552,18 +579,26 @@ function addTeam(key, name, lead) {
   return { ok: true, team, mode: p.mode, mode_ver: p.mode_ver, lead };
 }
 
-// Remove teams by name (every team when names is empty). Their members become outside sessions; folders stay.
+// Remove teams by name (every team when names is empty). Their members are released (kind, lead and group
+// cleared; former_lead kept), so they post to the dashboard and never rejoin a later team. Folders stay.
 // The project is solo when no team is left.
 function removeTeams(key, names = []) {
   const projects = readProjects();
   const p = projects[key];
   if (!p) return { ok: false, error: 'project is not connected' };
   const list = names.length ? names : Object.keys(teamsOf(p));
-  for (const n of list) if (!teamsOf(p)[n]) return { ok: false, code: 404, error: `no team ${n}` };
+  for (const n of list) if (!own(teamsOf(p), n)) return { ok: false, code: 404, error: `no team ${n}` };
   const sessions = readJson(paths.sessions, {});
   for (const n of list) {
-    const lead = sessions[p.teams[n].lead];
+    const leadSid = p.teams[n].lead;
+    const lead = own(sessions, leadSid);
     if (lead?.kind === 'lead') delete lead.kind;
+    for (const m of teamMembers(sessions, key, p.teams[n])) {
+      m.former_lead = leadSid;
+      delete m.kind;
+      delete m.lead;
+      delete m.group;
+    }
     delete p.teams[n];
   }
   bumpMode(p);
@@ -876,7 +911,7 @@ function teamFor(key, teamName) {
   const projects = readProjects();
   const p = projects[key];
   if (!p) return { error: 'project is not connected' };
-  const team = teamsOf(p)[teamName];
+  const team = own(teamsOf(p), teamName);
   if (!team) return { error: `no team ${teamName}` };
   team.groups ||= {};
   if (!team.worktree) team.worktree = worktreeRoot(readJson(paths.sessions, {})[team.lead]?.cwd || p.cwd || process.cwd());
@@ -894,7 +929,8 @@ function createGroup(key, teamName, name) {
   if (badGroupName(name)) return { ok: false, error: GROUP_NAME_ERROR };
   const { projects, team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
-  if (team.groups[name]) return { ok: false, error: `group ${name} exists in team ${teamName}` };
+  const taken = sameName(team.groups, name);
+  if (taken) return { ok: false, error: `group ${taken} exists in team ${teamName} (names ignore case)` };
   const dir = slash(path.join(teamDir(team, teamName), name));
   ensureGroupDir(dir, name);
   team.groups[name] = { dir, created: new Date().toISOString(), ...GROUP_DEFAULTS };
@@ -902,10 +938,15 @@ function createGroup(key, teamName, name) {
   return { ok: true, dir };
 }
 
-// Move a folder: git mv when tracked (the lead commits it), a plain rename otherwise.
+// Move a folder: git mv when tracked (the lead commits it), a plain rename otherwise. A tracked folder that
+// git cannot move (e.g. the target is in another worktree) is left alone: a plain rename would leave its
+// files as deletions in the index.
 function moveDir(from, to) {
   ensureDir(path.dirname(to));
-  if (gitTracked(from) && gitIn(['mv', from, to], path.dirname(from)) !== null) return 'git mv';
+  if (gitTracked(from)) {
+    if (gitIn(['mv', from, to], path.dirname(from)) !== null) return 'git mv';
+    throw new Error(`git mv failed: ${slash(from)} -> ${slash(to)}`);
+  }
   fs.renameSync(from, to);
   return 'rename';
 }
@@ -914,9 +955,10 @@ function renameGroup(key, teamName, name, next) {
   if (badGroupName(next)) return { ok: false, error: GROUP_NAME_ERROR };
   const { projects, team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
-  const g = team.groups[name];
+  const g = own(team.groups, name);
   if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
-  if (team.groups[next]) return { ok: false, error: `group ${next} exists in team ${teamName}` };
+  const taken = sameName(team.groups, next);
+  if (taken) return { ok: false, error: `group ${taken} exists in team ${teamName} (names ignore case)` };
   const dir = slash(path.join(path.dirname(g.dir), next));
   if (fs.existsSync(dir)) return { ok: false, error: `folder exists: ${dir}` };
   let how = 'none';
@@ -937,7 +979,7 @@ const stamp = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
 function deleteGroup(key, teamName, name, { purge = false } = {}) {
   const { projects, team, error } = teamFor(key, teamName);
   if (error) return { ok: false, error };
-  const g = team.groups[name];
+  const g = own(team.groups, name);
   if (!g) return { ok: false, error: `no group ${name} in team ${teamName}` };
   let folder = null;
   if (fs.existsSync(g.dir)) {
@@ -1081,7 +1123,7 @@ function memberStart(sid) {
   const s = sessions[sid];
   if (!s) return rulesText(sid);
   const p = projects[s.project_key];
-  const g = s.group && teamOfSession(s, p)?.team.groups?.[s.group];
+  const g = s.group && own(teamOfSession(s, p)?.team.groups, s.group);
   let head = '';
   if (g) {
     const ctx = groupContext(s.group, g);
@@ -1175,5 +1217,5 @@ module.exports = {
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,
   pruneGroup, groupContext, memberStart, BRIEF_STALE_COMMITS, checkBriefs, LANG_NAMES, readSettings, saveSettings,
   TEAM_NAME, teamsOf, hasTeams, teamOfLead, teamOfSession, teamSlug, worktreeRoot, migrateProject, readProjects,
-  addTeam, removeTeams, teamMembers, ensureGroupDir, reserveHandoff,
+  addTeam, removeTeams, teamMembers, ensureGroupDir, reserveHandoff, own, sameName,
 };

@@ -171,7 +171,7 @@ function spawnMember(leadSid, { role, model, stay, task, group, runner } = {}) {
   if (!role || !task) throw new Error('spawn needs a role and a task.');
   const { lead, project } = context(leadSid);
   const own = ownTeam(project, leadSid);
-  const g = group ? own.team.groups?.[group] : null;
+  const g = group ? lib.own(own.team.groups, group) : null;
   if (group && !g) throw new Error(`no group ${group} in team ${own.name}. Create it with: group create ${group}`);
   if (g) {
     lib.pruneGroup(g);
@@ -397,7 +397,7 @@ function cmdGroup(leadSid, argv) {
   if (action === 'prune') {
     if (!own) throw new Error('groups need team mode with you as a team lead.');
     const names = name ? [name] : Object.keys(groups);
-    if (name && !groups[name]) throw new Error(`no group ${name}`);
+    if (name && !lib.own(groups, name)) throw new Error(`no group ${name}`);
     const removed = names.flatMap((n) => lib.pruneGroup(groups[n]));
     return removed.length ? `Removed ${removed.length} file(s):\n${removed.join('\n')}\nCommit the docs when ready.` : 'Nothing to prune.';
   }
@@ -426,7 +426,7 @@ function cmdNextHandoff(sid, argv) {
   if (!t) throw new Error('next-handoff is for team leads and members.');
   const name = lib.teamOfLead(project, sid) ? argv[0] : me.group;
   if (!name) throw new Error(lib.teamOfLead(project, sid) ? 'next-handoff needs a group name.' : 'you are in no group; report to your lead instead.');
-  const g = t.team.groups?.[name];
+  const g = lib.own(t.team.groups, name);
   if (!g) throw new Error(`no group ${name} in team ${t.name}`);
   return lib.reserveHandoff(g.dir, `# ${name} handoff
 
