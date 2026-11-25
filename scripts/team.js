@@ -33,8 +33,8 @@ const sessionsStore = require('./store/sessions');
 const lifecycle = require('./app/lifecycle');
 const { view } = require('./domain/session');
 const lib = require('./lib');
-const orca = require('./orca');
-const terminal = require('./terminal');
+const orca = require('./runners/orca');
+const terminal = require('./runners/window');
 
 const { paths, readJson, writeJson, ensureDir, safeId, alive, DEFAULT_SPAWN } = lib;
 const slash = (p) => String(p).replace(/\\/g, '/');

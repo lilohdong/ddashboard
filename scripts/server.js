@@ -35,7 +35,7 @@ const {
   isEnded, forgetSessions, markEnded, deliver, readSettings, saveSettings,
   readProjects, teamsOf, own, setRunners, processTableAsync, sweepWaiters,
 } = require('./lib');
-const orca = require('./orca');
+const orca = require('./runners/orca');
 const cards = require('./cards');
 const usage = require('./usage');
 const team = require('./team');
