@@ -1,0 +1,17 @@
+{
+  "name": "ddashboard",
+  "version": "0.1.0",
+  "description": "A local dashboard for Claude Code: see each session's results as a short card, and reply on the card to instruct that session. Recording cards and waiting for replies cost zero model tokens.",
+  "author": {
+    "name": "lilohdong"
+  },
+  "homepage": "https://github.com/lilohdong/ddashboard",
+  "repository": "https://github.com/lilohdong/ddashboard",
+  "keywords": [
+    "dashboard",
+    "hooks",
+    "multi-session",
+    "worktree",
+    "token-efficient"
+  ]
+}
