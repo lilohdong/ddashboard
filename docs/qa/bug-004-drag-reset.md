@@ -32,7 +32,7 @@
    let pointerDown = false;
    document.addEventListener('pointerdown', () => { pointerDown = true; });
    document.addEventListener('pointerup', () => { pointerDown = false; if (pendingLoad) { pendingLoad = false; load(); } });
-   const selecting = () => { const s = getSelection(); return s && !s.isCollapsed && document.getElementById('main-or-cards-container').contains(s.anchorNode); };
+   const selecting = () => { const s = getSelection(); return s && !s.isCollapsed && ['cards', 'side'].some((id) => document.getElementById(id).contains(s.anchorNode)); };
    // interval: if (pointerDown || selecting()) { pendingLoad = true; return; }
    ```
    선택이 풀리면(`selectionchange`에서 isCollapsed) 미뤄둔 load를 실행. 드래그 중에는 fetch도 해도 되지만 DOM은 만지지 않음.
