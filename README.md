@@ -53,6 +53,7 @@ To turn it off, type `/ddashboard:dashboard off`. The server stops once no proje
   | Gray dot | Idle — a reply is delivered when the next turn ends |
   | Hollow dot | Ended (hidden by default) |
   | `needs you` | The session's latest card is "Needs review" or "Blocked" and you haven't replied yet |
+- **Token meter:** each session line shows its context size after the last turn (e.g. `ctx 120k`) and its cumulative tokens since it connected. The context size turns red above `DDASH_CONTEXT_WARN` (150k by default). Below the session list, `Today` shows today's input, cache-read, and output tokens across all sessions. Hover over either for the exact numbers (cache writes and turns included). The Stop hook reads these from the session transcript; nothing calls the model.
 - **Search:** the search box at the top (`/` to focus, `Esc` to clear) searches every card, archived ones included.
 - **Filters:** narrow cards by status, with a count for each.
 - **Archive:** each card has an Archive button. Cards older than 14 days, and cards replaced by a newer version, are archived automatically. `Archived (N)` at the bottom of the sidebar opens the archive, where you can unarchive.
@@ -94,7 +95,7 @@ A session's name defaults to its folder name; override it with the `DDASH_NAME` 
 |---|---|
 | `SessionStart` | Registers new sessions in connected projects and gives them the card rules |
 | `UserPromptSubmit` | Turns the dashboard on/off, connects sessions that started earlier, marks the session "Working" |
-| `Stop` | Records cards, delivers waiting replies, marks the session "Idle" |
+| `Stop` | Records cards and the turn's token usage (`usage/YYYY-MM.jsonl`), delivers waiting replies, marks the session "Idle" |
 | `SessionEnd` | Marks the session "Ended" |
 
 No hook calls the model, and none of them print anything in sessions that aren't connected.
@@ -108,6 +109,7 @@ No hook calls the model, and none of them print anything in sessions that aren't
 | `DDASH_NAME` | folder name | Session name shown on the dashboard |
 | `DDASH_POLL_MS` | `1500` | How often the wait command checks for replies (ms) |
 | `DDASH_RECENT_DAYS` | `14` | Cards older than this are archived automatically |
+| `DDASH_CONTEXT_WARN` | `150000` | Context size (tokens) above which a session's `ctx` turns red. Read by the server |
 
 To manage the server directly:
 

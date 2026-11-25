@@ -53,6 +53,12 @@
   .legend span { display: flex; align-items: center; gap: 6px; }
   .legend .dot { margin-top: 0; }
   .side-empty { color: var(--muted); font-size: 13px; padding: 8px; }
+  .sess .usage { display: block; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sess .usage .warn { color: var(--blocked); font-weight: 600; }
+  .today { margin-top: 16px; padding: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .today b { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+  .today .row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  .today .row span:last-child { color: var(--text); }
 
   /* Main */
   .main { min-width: 0; }
@@ -208,6 +214,49 @@ function inScope(c) {
   return true;
 }
 
+// Token usage (recorded by the Stop hook, no model calls).
+const num = (v) => Number(v) || 0;
+const fmtTok = (v) => {
+  const n = num(v);
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(n);
+};
+const fullTok = (v) => num(v).toLocaleString();
+const sumTok = (u) => num(u?.input) + num(u?.cache_read) + num(u?.cache_write) + num(u?.output);
+
+function usageTitle(u, extra = []) {
+  return [...extra,
+    `Input: ${fullTok(u.input)}`,
+    `Cache read: ${fullTok(u.cache_read)}`,
+    `Cache write: ${fullTok(u.cache_write)}`,
+    `Output: ${fullTok(u.output)}`,
+    `Turns: ${fullTok(u.turns)}`,
+  ].join('\n');
+}
+
+function usageLine(s) {
+  if (!s.usage && s.last_context == null) return '';
+  const warnAt = num(state.context_warn) || 150000;
+  const ctx = num(s.last_context);
+  const warn = ctx > warnAt;
+  const u = s.usage || {};
+  const title = usageTitle(u, [`Context (last turn): ${fullTok(ctx)}${warn ? ` — over ${fullTok(warnAt)}` : ''}`, `Total tokens: ${fullTok(sumTok(u))}`, '']);
+  return `<span class="usage" title="${esc(title)}"><span class="${warn ? 'warn' : ''}">ctx ${fmtTok(ctx)}</span> · ${fmtTok(sumTok(u))} tok</span>`;
+}
+
+function todayHtml() {
+  const t = state.usage_today;
+  if (!t) return '';
+  const all = state.usage_total || {};
+  const title = usageTitle(t, ['Today, all sessions', '']) + `\n\nConnected sessions, all time: ${fullTok(sumTok(all))} tokens in ${fullTok(all.turns)} turns`;
+  return `<div class="today" title="${esc(title)}"><b>Today</b>
+    <div class="row"><span>Input</span><span>${fmtTok(t.input)}</span></div>
+    <div class="row"><span>Cache read</span><span>${fmtTok(t.cache_read)}</span></div>
+    <div class="row"><span>Output</span><span>${fmtTok(t.output)}</span></div>
+  </div>`;
+}
+
 function renderSide() {
   const sessions = Object.values(state.sessions);
   const urgent = urgentBySession();
@@ -236,12 +285,14 @@ function renderSide() {
           <span class="grow">
             <span class="sname">${esc(s.name)}${urgent[s.session_id] ? ' <span class="count">needs you</span>' : ''}</span>
             <span class="sub">${esc(s.branch || '')} · ${VIEW[s.view]}${s.pending ? ` · ${s.pending} queued` : ''}${s.view === 'ended' ? '' : ` · ${ago(s.last_seen)}`}</span>
+            ${usageLine(s)}
           </span>
         </button>`).join('')}
     </div>`;
   }
   if (ended.length) html += `<button class="nav ended-toggle" data-toggle-ended>${showEnded ? 'Hide ended sessions' : `Show ${ended.length} ended session${ended.length > 1 ? 's' : ''}`}</button>`;
   html += `<button class="nav archive-link ${archivedView ? 'sel' : ''}" data-archived><span class="grow">Archived (${state.archived_count || 0})</span></button>`;
+  html += todayHtml();
   html += `<div class="legend">${Object.entries(VIEW).map(([k, v]) => `<span><span class="dot ${k}"></span>${v}</span>`).join('')}</div>`;
   document.getElementById('side').innerHTML = html;
 }
