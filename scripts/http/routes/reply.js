@@ -1,5 +1,8 @@
 // POST /api/reply {session_id, text, card_id?, card_title?} -> saved to that session's inbox and the reply log.
-const { readJson, paths, safeId, appendJsonl, deliver } = require('../../lib');
+const { readJson } = require('../../core/fsx');
+const { paths, safeId } = require('../../core/paths');
+const { deliver } = require('../../store/inbox');
+const replies = require('../../store/replies');
 const { newId } = require('../../core/ids');
 const { fail } = require('../router');
 
@@ -21,7 +24,7 @@ module.exports = [
         card_title: msg.card_title ? String(msg.card_title).slice(0, 200) : null,
         text: text.slice(0, 4000),
       });
-      appendJsonl(paths.replies, reply);
+      replies.append(reply);
       return { ok: true, id: reply.id };
     },
   },

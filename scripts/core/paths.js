@@ -23,7 +23,9 @@ const paths = {
   log: (sid) => path.join(BOARD_DIR, 'logs', `${safeId(sid)}.log`),
   appLog: path.join(BOARD_DIR, 'logs', 'ddashboard.log'), // core/log
   locksDir: path.join(BOARD_DIR, 'locks'), // core/lock
-  replies: path.join(BOARD_DIR, 'replies.jsonl'),
+  replies: path.join(BOARD_DIR, 'replies.jsonl'), // 0.2.x reply log, read-only from schema 2 on
+  repliesDir: path.join(BOARD_DIR, 'replies'),
+  repliesFor: (iso) => path.join(BOARD_DIR, 'replies', `${String(iso).slice(0, 7)}.jsonl`), // replies/YYYY-MM.jsonl
   sessions: path.join(BOARD_DIR, 'sessions.json'),
   meta: path.join(BOARD_DIR, 'meta.json'), // board schema version (store/meta)
   projects: path.join(BOARD_DIR, 'projects.json'),

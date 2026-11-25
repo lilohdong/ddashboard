@@ -7,6 +7,7 @@ const {
   teamsOf, runnersOf, waitPid,
 } = require('../lib');
 const cards = require('../cards');
+const replies = require('../store/replies');
 const usage = require('../usage');
 const config = require('../core/config');
 const { view } = require('../domain/session');
@@ -64,7 +65,7 @@ function build({ reports = false } = {}) {
   return {
     teams: teams(projects, sessions),
     sessions,
-    replies: readJsonl(paths.replies, 1000),
+    replies: replies.recent(1000),
     cards: recent,
     last_by_session,
     archived_count,

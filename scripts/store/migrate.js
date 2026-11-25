@@ -17,15 +17,12 @@ const meta = require('./meta');
 const sessionsStore = require('./sessions');
 const projectsStore = require('./projects');
 
-const MIGRATIONS = [];
-const SCHEMA = () => (MIGRATIONS.length ? MIGRATIONS[MIGRATIONS.length - 1].to : 1);
-
-// Add a schema migration (store modules register theirs at load; `to` must grow by one).
-function register(m) {
-  const want = SCHEMA() + 1;
-  if (m.to !== want) throw new Error(`migration to schema ${m.to} out of order (expected ${want})`);
-  MIGRATIONS.push(m);
-}
+// Schema 1: 0.2.x (no meta.json). Modules are required inside run() (store/replies.js requires this module).
+const MIGRATIONS = [
+  // 2: replies.jsonl -> replies/YYYY-MM.jsonl (copied; replies.jsonl stays for older plugins).
+  { to: 2, files: () => [paths.replies], run: () => require('./replies').fold() },
+];
+const SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].to;
 
 function backup(file, to) {
   const bak = `${file}.bak-s${to}`;
@@ -54,7 +51,7 @@ function run() {
 let current = false;
 function ensure() {
   if (current) return [];
-  const done = meta.schema() >= SCHEMA() ? [] : run();
+  const done = meta.schema() >= SCHEMA ? [] : run();
   current = true;
   return done;
 }
@@ -86,4 +83,4 @@ function projects(migrateOne) {
 // The 0.1.0 card log, read before the monthly files (store/cards.js).
 const legacyCardFiles = () => [paths.legacyCards];
 
-module.exports = { register, run, ensure, reset, SCHEMA, MIGRATIONS, needsTeams, projects, legacyCardFiles };
+module.exports = { run, ensure, reset, SCHEMA, MIGRATIONS, needsTeams, projects, legacyCardFiles };

@@ -36,6 +36,7 @@ const orca = require('./runners/orca');
 const config = require('./core/config');
 const lifecycle = require('./app/lifecycle');
 const { createRouter } = require('./http/router');
+const migrate = require('./store/migrate');
 const routes = require('./http/routes');
 
 // Orca terminal state per handle, never blocking a request: the cached answer is returned (null = not known
@@ -111,6 +112,7 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
+try { for (const to of migrate.run()) console.log(`ddashboard: board migrated to schema ${to}`); } catch (err) { console.log(`ddashboard: migration failed: ${err.message}`); }
 liveness(null); // before the first request: a session that died while no server ran shows ended at once
 server.listen(PORT, '127.0.0.1', () => {
   writeJson(paths.serverPid, { pid: process.pid, port: PORT, started: new Date().toISOString() });
