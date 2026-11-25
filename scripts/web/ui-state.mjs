@@ -29,6 +29,7 @@ export function initialUi() {
     searchTimer: 0,
     overrides: {}, // card_id -> archived, applied optimistically until the server catches up
     openDetails: new Set(), // card ids whose Details section is expanded
+    openFolds: new Set(), // card ids whose earlier progress cards are expanded
   };
 }
 

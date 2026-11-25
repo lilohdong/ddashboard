@@ -147,6 +147,12 @@
     'runner.headless': 'headless (background)',
     'runner.orca': 'Orca terminal',
     'runner.window': 'terminal window',
+    // track A: card lifecycle (folded / stopped)
+    'status.stopped': 'Stopped',
+    'card.stoppedTitle': 'Still in progress when its session ended',
+    'card.folded': '{n} earlier progress cards',
+    'card.foldedInto': 'Earlier progress',
+    'card.foldedIntoTitle': 'Folded under a newer card of the same session; the status shown is that card’s',
   };
 
   const ko = {
@@ -292,6 +298,12 @@
     'runner.headless': 'headless (백그라운드)',
     'runner.orca': 'Orca 터미널',
     'runner.window': '터미널 창',
+    // track A: card lifecycle (folded / stopped)
+    'status.stopped': '중단됨',
+    'card.stoppedTitle': '진행 중인 상태로 세션이 끝났습니다',
+    'card.folded': '이전 진행 카드 {n}개',
+    'card.foldedInto': '이전 진행',
+    'card.foldedIntoTitle': '같은 세션의 새 카드 아래로 접혔습니다. 표시된 상태는 그 카드의 상태입니다',
   };
 
   const zh = {
@@ -437,6 +449,12 @@
     'runner.headless': 'headless（后台）',
     'runner.orca': 'Orca 终端',
     'runner.window': '终端窗口',
+    // track A: card lifecycle (folded / stopped)
+    'status.stopped': '已中断',
+    'card.stoppedTitle': '会话结束时仍在进行中',
+    'card.folded': '之前的进度卡片 {n} 张',
+    'card.foldedInto': '之前的进度',
+    'card.foldedIntoTitle': '已折叠到同一会话的较新卡片下；显示的状态是该卡片的状态',
   };
 
   const DICT = { en, ko, 'zh-CN': zh };

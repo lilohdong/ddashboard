@@ -256,8 +256,8 @@ test('BUG-004: setHtml writes only changed HTML; poll guards and scroll keeping 
 test('cardView: one place for the displayed status, answered and reply box', () => {
   const { state } = fixture();
   const cv = M.cards.cardView;
-  assert.deepEqual(cv(state.cards[1], state), { status: 'review', answered: false, open: true });
-  assert.deepEqual(cv({ ...state.cards[2], answered: true }, state), { status: 'blocked', answered: true, open: false });
+  assert.deepEqual(cv(state.cards[1], state), { status: 'review', answered: false, open: true, stopped: false, folded: [], foldedInto: '' });
+  assert.deepEqual(cv({ ...state.cards[2], answered: true }, state), { status: 'blocked', answered: true, open: false, stopped: false, folded: [], foldedInto: '' });
   assert.equal(cv({ session_id: 'nobody', status: 'done' }, state).open, false);
 });
 

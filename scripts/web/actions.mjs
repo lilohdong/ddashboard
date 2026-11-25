@@ -148,9 +148,11 @@ export function installActions({ t, load, refreshSearch, paint, paintSide, paint
 
   // Keep Details sections open across re-renders. ("toggle" doesn't bubble, so listen in the capture phase.)
   document.addEventListener('toggle', (e) => {
-    const id = e.target.dataset?.details;
-    if (!id) return;
-    if (e.target.open) ui.openDetails.add(id); else ui.openDetails.delete(id);
+    const { details, folds } = e.target.dataset || {};
+    const set = details ? ui.openDetails : folds ? ui.openFolds : null;
+    const id = details || folds;
+    if (!set) return;
+    if (e.target.open) set.add(id); else set.delete(id);
   }, true);
 
   document.addEventListener('keydown', (e) => {

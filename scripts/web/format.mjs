@@ -1,5 +1,5 @@
 // Pure text helpers shared by the render modules (no DOM, importable from Node tests).
-export const STATUS_KEYS = ['review', 'blocked', 'wip', 'done'];
+export const STATUS_KEYS = ['review', 'blocked', 'wip', 'done', 'stopped']; // stopped: computed outcome (§4.2)
 export const VIEW_KEYS = ['working', 'waiting', 'idle', 'ended'];
 export const URGENT = new Set(['review', 'blocked']);
 

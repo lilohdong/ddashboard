@@ -188,6 +188,62 @@ test('nothing is written to card files; the index picks up appended cards and re
   assert.equal(sessionsStore.get('S').state, 'ended');
 });
 
+// --- dashboard (scripts/web): cardView, folded / stopped rendering, urgency by outcome ---
+
+const WEB = path.join(ROOT, 'scripts', 'web');
+const imp = (name) => import(require('url').pathToFileURL(path.join(WEB, name)).href);
+const i18n = require('../scripts/i18n.js');
+const tr = (key, vars) => i18n.translate('en', key, vars);
+const webFixture = (W) => {
+  const sessions = { S: { session_id: 'S', name: 's', project: 'p', view: 'idle' }, E: { session_id: 'E', name: 'e', project: 'p', view: 'ended' } };
+  const w1 = { ...card('w1', 'S', 'wip'), outcome: 'review', folded_into: 'r', summary: ['step one'] };
+  const r = { ...card('r', 'S', 'review'), outcome: 'review', folded: [w1] };
+  const st = { ...card('st', 'E', 'wip'), outcome: 'stopped', stopped: true };
+  const state = { sessions, cards: [st, r], replies: [], last_by_session: { S: r, E: st }, archived_count: 0 };
+  return { state, ui: W.state.initialUi(), w1, r, st };
+};
+const loadWeb = async () => ({
+  cards: await imp('render-cards.mjs'), main: await imp('render-main.mjs'), select: await imp('select.mjs'), state: await imp('ui-state.mjs'),
+});
+
+test('web: a top card shows its folded cards collapsed; expanded when its id is in ui.openFolds', async () => {
+  const W = await loadWeb();
+  const { state, ui, r } = webFixture(W);
+  let html = W.cards.cardsHtml([r], '', state, ui, tr);
+  assert.match(html, /<details class="folds" data-folds="r"><summary>1 earlier progress cards<\/summary>/);
+  assert.match(html, /step one/);
+  ui.openFolds.add('r');
+  html = W.cards.cardsHtml([r], '', state, ui, tr);
+  assert.match(html, /data-folds="r" open>/);
+});
+
+test('web: stopped card has the Stopped badge and filter bucket; a folded search hit shows its outcome', async () => {
+  const W = await loadWeb();
+  const { state, ui, st, w1 } = webFixture(W);
+  assert.equal(W.cards.cardView(st, state).status, 'stopped');
+  assert.match(W.cards.cardsHtml([st], '', state, ui, tr), /class="badge s-stopped" title="Still in progress when its session ended">Stopped</);
+  const v = W.main.renderMain(state, ui, tr);
+  assert.match(v.filters, /data-f="stopped">Stopped 1</);
+  assert.match(v.filters, /data-f="wip">In progress 0</);
+  const hit = W.cards.cardsHtml([w1], '', state, ui, tr);
+  assert.match(hit, /badge s-review/);
+  assert.match(hit, /badge folded/);
+});
+
+test('web: urgency and answered use the outcome', async () => {
+  const W = await loadWeb();
+  const { state, ui, r } = webFixture(W);
+  assert.deepEqual(W.select.urgentBySession(state, ui), { S: 1 });
+  // A wip card folded into a review card is not urgent by itself.
+  state.last_by_session.S = { ...r, status: 'wip', outcome: 'done' };
+  assert.deepEqual(W.select.urgentBySession(state, ui), {});
+  state.last_by_session.S = { id: 'x', status: 'wip', outcome: 'review' };
+  assert.deepEqual(W.select.urgentBySession(state, ui), { S: 1 });
+  state.replies = [{ card_id: 'x', text: 'ok', ts: nextTs() }];
+  assert.deepEqual(W.select.urgentBySession(state, ui), {});
+  assert.equal(W.select.answered({ id: 'x', status: 'wip', outcome: 'review' }, new Set(['x'])), true);
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

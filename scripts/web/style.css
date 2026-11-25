@@ -157,3 +157,9 @@ details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var
   header { padding: 10px 16px; }
   #cards { padding: 12px 16px 32px; }
 }
+.s-stopped { color: var(--muted); }
+.badge.folded { color: var(--muted); font-weight: 500; }
+.folds .fold-list { margin-top: 6px; display: grid; gap: 6px; padding-left: 10px; border-left: 2px solid var(--line); }
+.fold { font-size: 13px; }
+.fold-title { font-weight: 600; }
+.fold ul { margin-top: 2px; }

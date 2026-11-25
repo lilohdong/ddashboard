@@ -8,11 +8,14 @@ export const underLead = (s) => s.team === 'member' && !s.lead_missing;
 export const staleMin = (state) => num(state.stale_min) || 60;
 export const stale = (state, s) => !s.last_seen || Date.now() - new Date(s.last_seen) > staleMin(state) * 60000;
 
+// A card's effective status: its lifecycle outcome (wip folded into a newer card, stopped), else its own status.
+export const outcome = (c) => c.outcome || c.status;
+
 // A "Needs review" or "Blocked" card counts as answered once you have replied to it.
 export const repliedIds = (state) => new Set(state.replies.map((r) => r.card_id));
-export const answered = (c, replied) => URGENT.has(c.status) && replied.has(c.id);
+export const answered = (c, replied) => URGENT.has(outcome(c)) && replied.has(c.id);
 
-// A session needs you when its latest card is "needs review" or "blocked".
+// A session needs you when its latest card's outcome is "needs review" or "blocked".
 // last_by_session covers archived and older cards too; fall back to cards for 0.1.0 servers.
 export function urgentBySession(state, ui) {
   let last = state.last_by_session;
@@ -27,7 +30,7 @@ export function urgentBySession(state, ui) {
     const archived = c.id in ui.overrides ? ui.overrides[c.id] : c.archived;
     // Member reports go to their lead, so they don't need you either.
     if (archived || c.via_lead || state.sessions[sid]?.view === 'ended') continue;
-    if (URGENT.has(c.status) && !answered(c, replied)) out[sid] = 1;
+    if (URGENT.has(outcome(c)) && !answered(c, replied)) out[sid] = 1;
   }
   return out;
 }
