@@ -172,6 +172,28 @@ test('router: fail() sets status and code; an unexpected throw is 500 internal; 
   });
 });
 
+// verify-011 F1: no Origin header is accepted on purpose (CLI and hooks send none; browsers always send one).
+test('router: a POST without an Origin header is accepted; a foreign or "null" Origin is 403', async () => {
+  const table = [{ method: 'POST', path: '/p', sameOrigin: true, body: true, handler: () => ({ ok: true }) }];
+  await withRoutes(table, async (base) => {
+    const post = (headers) => new Promise((resolve, reject) => {
+      // http.request, not fetch: it adds no headers of its own, so "no Origin" is certain.
+      const req = http.request(`${base}/p`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } }, (res) => {
+        let text = '';
+        res.on('data', (c) => (text += c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+      });
+      req.on('error', reject);
+      req.end('{}');
+    });
+    assert.deepEqual(await post({}), { status: 200, body: { ok: true } });
+    for (const origin of ['http://127.0.0.1:7357', 'http://localhost', 'http://localhost:7357']) assert.equal((await post({ Origin: origin })).status, 200, origin);
+    for (const origin of ['http://evil.example', 'null', 'https://127.0.0.1:7357', 'http://127.0.0.1.evil.example', 'file://']) {
+      assert.deepEqual(await post({ Origin: origin }), { status: 403, body: { error: 'forbidden', code: 'forbidden' } }, origin);
+    }
+  });
+});
+
 test('server: a slow orca does not block /api/state while /api/team/spawn waits for it', async () => {
   reset();
   const DELAY = 2500;

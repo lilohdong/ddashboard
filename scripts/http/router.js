@@ -30,6 +30,10 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 }
 
 // Accept same-origin requests only, so other websites cannot post through the browser.
+// A request with no Origin header is accepted on purpose: browsers always send Origin on a cross-site POST (and
+// on any fetch POST), so a missing Origin means a non-browser caller on this machine (team.js, hooks, curl), which
+// the 127.0.0.1-only listen already limits. Any Origin that is not http://127.0.0.1 or http://localhost (another
+// site, or "null" from a sandboxed page or a file:// URL) is refused with 403 forbidden.
 function sameOrigin(req) {
   const origin = req.headers.origin;
   return !origin || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin);
