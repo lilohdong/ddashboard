@@ -385,6 +385,75 @@ test('team.js show and handoff', () => {
   assert.equal(team.main(['M1', 'handoff', doc]).code, 1); // not the lead
 });
 
+// --- sidebar housekeeping and dashboard spawn (through the server) ---
+
+test('forgetSessions / markEnded', () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.E1 = session('E1', { state: 'ended', ended: 'x' });
+  s.OLD = session('OLD', { last_seen: new Date(Date.now() - 2 * 3600e3).toISOString() });
+  writeJson(paths.sessions, s);
+  fs.mkdirSync(paths.done('E1'), { recursive: true });
+  assert.deepEqual(lib.forgetSessions(['E1', 'M1']), { forgotten: ['E1'], refused: ['M1'] });
+  assert.equal(fs.existsSync(paths.inbox('E1')), false);
+  assert.equal(lib.markEnded('M1').code, 409); // seen recently
+  assert.equal(lib.markEnded('OLD').ok, true);
+  assert.equal(readJson(paths.sessions, {}).OLD.end_reason, 'marked');
+});
+
+async function withServer(fn) {
+  const port = 7400 + Math.floor(Math.random() * 500);
+  const srv = spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port) }, stdio: 'ignore' });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`${base}/api/state`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const post = async (url, body, headers = {}) => {
+      const res = await fetch(base + url, { method: 'POST', headers, body: JSON.stringify(body) });
+      return { status: res.status, body: await res.json() };
+    };
+    await fn(post, base);
+  } finally { srv.kill(); }
+}
+
+test('server: forget, mark ended, spawn from the dashboard', async () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.E1 = session('E1', { state: 'ended', ended: 'x' });
+  s.E2 = session('E2', { state: 'ended', ended: 'x' });
+  s.OLD = session('OLD', { last_seen: new Date(Date.now() - 2 * 3600e3).toISOString() });
+  writeJson(paths.sessions, s);
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  process.env.FAKE_OUT = path.join(BOARD, 'ui-spawn.json');
+  await withServer(async (post, base) => {
+    assert.equal((await post('/api/sessions/forget', { session_id: 'E1' }, { Origin: 'http://evil.example' })).status, 403);
+    assert.equal((await post('/api/sessions/forget', { session_id: 'M1' })).status, 409);
+    assert.equal((await post('/api/sessions/forget', { session_id: 'E1' })).body.forgotten, 1);
+    assert.equal((await post('/api/sessions/forget', { project: 'proj', ended: true })).body.forgotten, 1);
+    assert.equal((await post('/api/sessions/end', { session_id: 'M1' })).status, 409);
+    assert.equal((await post('/api/sessions/end', { session_id: 'OLD' })).status, 200);
+    const st = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(st.stale_min, 60);
+    assert.deepEqual(Object.keys(st.sessions).sort(), ['L1', 'M1', 'O1', 'OLD']);
+
+    assert.equal((await post('/api/team/spawn', { lead: 'O1', role: 'qa', task: 'x' })).status, 409); // not the lead
+    assert.equal((await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'x' }, { Origin: 'http://evil.example' })).status, 403);
+    const r = await post('/api/team/spawn', { lead: 'L1', role: 'qa', model: 'haiku', stay: true, task: 'Test the login\nmore lines' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const got = await waitFor(process.env.FAKE_OUT);
+    assert.equal(got.input, '[ddash role=qa lead=L1 stay=1] Test the login\nmore lines');
+    assert.ok(got.argv.includes('haiku'));
+    const note = inbox('L1').find((m) => m.from === r.body.session_id);
+    assert.equal(note.type, 'report');
+    assert.equal(note.title, `member qa ${r.body.session_id.slice(0, 8)} spawned by the user: Test the login`);
+    const s2 = readJson(paths.sessions, {});
+    s2.L1.state = 'ended';
+    writeJson(paths.sessions, s2);
+    assert.equal((await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'x' })).status, 409); // lead ended
+  });
+});
+
 // --- run ---
 
 (async () => {

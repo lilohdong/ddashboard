@@ -671,6 +671,51 @@ function performHandoff(from, to, doc, opts = {}) {
   return { ok: true, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
 }
 
+// --- Sidebar housekeeping ---
+
+const STALE_MIN = Number(process.env.DDASH_STALE_MIN) || 60;
+const isStale = (s, now = Date.now()) => !s.last_seen || now - new Date(s.last_seen).getTime() > STALE_MIN * 60000;
+
+// Remove a session's inbox dir if nothing is left in it (no pending messages, no live waiter).
+function removeEmptyInbox(sid) {
+  const dir = paths.inbox(sid);
+  if (waitPid(sid)) return;
+  try { fs.unlinkSync(path.join(dir, 'wait.lock')); } catch {}
+  try { fs.rmdirSync(paths.done(sid)); } catch {}
+  try { fs.rmdirSync(dir); } catch {}
+}
+
+// Drop ended sessions from sessions.json (cards and usage stay). Returns { forgotten, refused }:
+// sessions that are not ended are refused.
+function forgetSessions(ids) {
+  const sessions = readJson(paths.sessions, {});
+  const forgotten = [];
+  const refused = [];
+  for (const id of ids) {
+    const s = sessions[id];
+    if (!s) continue;
+    if (!isEnded(s)) { refused.push(id); continue; }
+    delete sessions[id];
+    forgotten.push(id);
+  }
+  if (forgotten.length) writeJson(paths.sessions, sessions);
+  for (const id of forgotten) removeEmptyInbox(id);
+  return { forgotten, refused };
+}
+
+// Mark a session the user considers dead as ended. Only idle, stale sessions without a live waiter.
+function markEnded(sid) {
+  const sessions = readJson(paths.sessions, {});
+  const s = sessions[sid];
+  if (!s) return { ok: false, code: 404, error: 'unknown session' };
+  if (isEnded(s)) return { ok: true };
+  if (s.state === 'working' || waitPid(sid) || !isStale(s)) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
+  const ts = new Date().toISOString();
+  Object.assign(s, { state: 'ended', ended: ts, end_reason: 'marked' });
+  writeJson(paths.sessions, sessions);
+  return { ok: true };
+}
+
 const replacedText = (s) => `[ddashboard] This session was replaced as team lead by ${s.replaced_by} (handoff). Stop working now: no more tool calls or file changes. Start a new session for other work.`;
 
 module.exports = {
@@ -682,4 +727,5 @@ module.exports = {
   DEFAULT_SPAWN, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
+  STALE_MIN, isStale, forgetSessions, markEnded,
 };

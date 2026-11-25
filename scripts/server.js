@@ -5,6 +5,9 @@
 //                     token usage (usage_total for connected sessions, usage_today), context_warn,
 //                     teams (mode and lead per project). ?reports=1 also returns member reports (via_lead cards).
 //   POST /api/mode    {project, mode: solo|team, lead?, lead_name?} -> switch a project's mode
+//   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
+//   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
+//   POST /api/team/spawn      {lead, role, model?, stay?, task} -> start a headless member for a live lead
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
 //   POST /api/archive {card_id, archived} -> archive or unarchive a card
@@ -13,9 +16,11 @@ const fs = require('fs');
 const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
+  isEnded, forgetSessions, markEnded, deliver, STALE_MIN,
 } = require('./lib');
 const cards = require('./cards');
 const usage = require('./usage');
+const team = require('./team');
 
 const CONTEXT_WARN = Number(process.env.DDASH_CONTEXT_WARN) || 150000;
 
@@ -103,6 +108,7 @@ const server = http.createServer((req, res) => {
       usage_total,
       usage_today,
       context_warn: CONTEXT_WARN,
+      stale_min: STALE_MIN,
     });
   }
 
@@ -144,6 +150,65 @@ const server = http.createServer((req, res) => {
       const r = setMode(key, msg.mode, { lead, leadName: msg.lead_name ? String(msg.lead_name) : undefined });
       if (!r.ok) return send(res, 400, { error: r.error });
       send(res, 200, r);
+    });
+  }
+
+  // Remove ended sessions from the sidebar: {session_id} or {project, ended: true}. Cards and usage stay.
+  if (req.method === 'POST' && url.pathname === '/api/sessions/forget') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const sessions = readJson(paths.sessions, {});
+      let ids;
+      if (msg.session_id) {
+        const sid = safeId(msg.session_id);
+        if (!sessions[sid]) return send(res, 404, { error: 'unknown session' });
+        if (!isEnded(sessions[sid])) return send(res, 409, { error: 'session has not ended' });
+        ids = [sid];
+      } else if (msg.project && msg.ended === true) {
+        const projects = readJson(paths.projects, {});
+        const name = String(msg.project);
+        const key = projects[name] ? name : teams(projects, sessions)[name]?.key;
+        ids = Object.values(sessions).filter((s) => isEnded(s) && (key ? s.project_key === key : s.project === name)).map((s) => s.session_id);
+      } else return send(res, 400, { error: 'session_id, or project with ended: true, required' });
+      const r = forgetSessions(ids);
+      if (msg.session_id && r.refused.length) return send(res, 409, { error: 'session has not ended' });
+      send(res, 200, { ok: true, forgotten: r.forgotten.length });
+    });
+  }
+
+  // Mark an idle, stale session the user considers dead as ended (so it can be forgotten).
+  if (req.method === 'POST' && url.pathname === '/api/sessions/end') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const r = markEnded(safeId(msg.session_id));
+      if (!r.ok) return send(res, r.code, { error: r.error });
+      send(res, 200, { ok: true });
+    });
+  }
+
+  // Start a headless member for a live lead (same code as `team.js <lead> spawn`), and tell the lead.
+  if (req.method === 'POST' && url.pathname === '/api/team/spawn') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
+    return readBody(req, res, (msg) => {
+      const sessions = readJson(paths.sessions, {});
+      const projects = readJson(paths.projects, {});
+      const leadSid = safeId(msg.lead);
+      const lead = sessions[leadSid];
+      if (!lead) return send(res, 404, { error: 'unknown lead session' });
+      if (isEnded(lead) || teamRole(lead, projects[lead.project_key]) !== 'lead') return send(res, 409, { error: 'not a live team lead' });
+      const role = String(msg.role || '').trim();
+      const task = String(msg.task || '').trim();
+      if (!role || !task) return send(res, 400, { error: 'role and task required' });
+      let r;
+      try {
+        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000) });
+      } catch (err) { return send(res, 400, { error: String(err.message || err) }); }
+      const first = task.split(/\r?\n/)[0].slice(0, 200);
+      deliver(leadSid, {
+        type: 'report', from: r.sid, role: role.slice(0, 40), status: 'wip',
+        title: `member ${role} ${r.sid.slice(0, 8)} spawned by the user: ${first}`,
+      });
+      send(res, 200, { ok: true, session_id: r.sid, pid: r.pid, log: r.log });
     });
   }
 

@@ -110,12 +110,15 @@ function spawnOptions(project, flags) {
 
 const tagValue = (v) => (/^[^\s\]"]+$/.test(v) ? v : `"${String(v).replace(/["\]]/g, '')}"`);
 
-function cmdSpawn(leadSid, argv) {
-  const { flags, words } = parseArgs(argv, ['stay']);
-  const task = words.join(' ').trim();
-  if (!flags.role || !task) throw new Error('spawn needs --role <role> and a task.');
+// Start a headless member of this lead. Used by `team.js spawn` and the dashboard (POST /api/team/spawn).
+// Returns { sid, pid, log }.
+function spawnMember(leadSid, { role, model, stay, task } = {}) {
+  role = String(role || '').trim().slice(0, 40);
+  task = String(task || '').trim();
+  if (!role || !task) throw new Error('spawn needs a role and a task.');
   const { lead, project } = context(leadSid);
   const sid = crypto.randomUUID();
+  const flags = { role, model: model ? String(model).trim() : undefined, stay: Boolean(stay) };
   const opts = spawnOptions(project, flags);
   const cwd = lead.cwd || process.cwd();
   const prompt = `[ddash role=${tagValue(flags.role)} lead=${leadSid} stay=${flags.stay ? 1 : 0}] ${task}`;
@@ -132,7 +135,14 @@ function cmdSpawn(leadSid, argv) {
   writeJson(paths.sessions, sessions);
   const pid = runClaude(sid, ['-p', '--session-id', sid, ...claudeArgs(opts)], prompt, cwd);
   setPid(sid, pid);
-  return `Spawned ${flags.role}: ${sid} (pid ${pid || '?'}). Log: ${paths.log(sid).replace(/\\/g, '/')}\nIts cards come to you as [Team report].`;
+  return { sid, pid, log: paths.log(sid).replace(/\\/g, '/') };
+}
+
+function cmdSpawn(leadSid, argv) {
+  const { flags, words } = parseArgs(argv, ['stay']);
+  if (!flags.role || !words.length) throw new Error('spawn needs --role <role> and a task.');
+  const r = spawnMember(leadSid, { role: flags.role, model: flags.model, stay: flags.stay, task: words.join(' ') });
+  return `Spawned ${flags.role}: ${r.sid} (pid ${r.pid || '?'}). Log: ${r.log}\nIts cards come to you as [Team report].`;
 }
 
 function setPid(sid, pid) {
@@ -248,7 +258,7 @@ function main(argv) {
   }
 }
 
-module.exports = { main, parseArgs, findMember, claudeArgs, spawnOptions };
+module.exports = { main, spawnMember, parseArgs, findMember, claudeArgs, spawnOptions };
 
 // Run directly, or through the fixed bin path (which requires this file).
 const viaBin = String(require.main?.filename || '').toLowerCase() === path.resolve(paths.teamBin).toLowerCase();
