@@ -925,10 +925,96 @@ function killTree(pid, table) {
     try { process.kill(-pid, 'SIGTERM'); } catch { /* not a group leader */ }
     for (const k of kids.reverse()) { try { process.kill(k, 'SIGTERM'); } catch { /* gone */ } }
     killPid(pid);
+    if (!napUntil(() => !alive(pid), 1000)) {
+      // SIGTERM ignored: force it (bug-005, nothing may stay behind).
+      for (const k of [...kids, pid]) { try { process.kill(k, 'SIGKILL'); } catch { /* gone */ } }
+    }
   }
-  const nap = new Int32Array(new SharedArrayBuffer(4));
-  for (let i = 0; i < 20 && alive(pid); i++) Atomics.wait(nap, 0, 0, 50); // up to 1 s for the exit to show
+  napUntil(() => !alive(pid), 1000); // up to 1 s for the exit to show
   return !alive(pid);
+}
+
+// Sleep in small steps (sync) until done() or ms passed. Returns done().
+function napUntil(done, ms) {
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  for (let i = 0; i < ms / 50 && !done(); i++) Atomics.wait(nap, 0, 0, 50);
+  return done();
+}
+
+// --- Orphans (bug-005) ---
+
+// The session id a command line runs the wait command for ('' if it is none). Matches every plugin version
+// (.../scripts/wait-inbox.js <sid>, ~/.ddashboard/bin/wait.js <sid>), also inside Claude's bash -c "..." wrapper.
+const WAIT_CMD = /(?:wait-inbox\.js|[\\/]bin[\\/]wait\.js)[\\"']*\s+[\\"']*([A-Za-z0-9_-]{1,80})/i;
+const waitCommandSid = (cmd) => (String(cmd || '').match(WAIT_CMD) || [])[1] || '';
+const isNodeLike = (p) => /^(node|bun)(\.exe)?$/i.test(String(p?.name || ''));
+
+// A waiter process (node running the wait command) and the shell wrappers above it that run the same command
+// (Claude starts it as bash -c "... node wait.js <sid> ..."). [] if pid is not a waiter. Waiter first.
+function waiterChain(pid, table) {
+  const p = table.get(Number(pid));
+  const sid = p && isNodeLike(p) ? waitCommandSid(p.cmd) : '';
+  if (!sid) return [];
+  const chain = [p.pid];
+  let q = table.get(p.ppid);
+  for (let i = 0; i < 10 && q && !chain.includes(q.pid) && !isClaudeProcess(q) && waitCommandSid(q.cmd) === sid; i++) {
+    chain.push(q.pid);
+    q = table.get(q.ppid);
+  }
+  return chain;
+}
+
+// Kill a waiter and its wrapper shells. Only pids whose command line is the wait command are touched.
+function killWaiterChain(pid, table) {
+  const chain = waiterChain(pid, table);
+  if (!chain.length) return false;
+  for (const k of chain) killPid(k);
+  return napUntil(() => !alive(pid), 1000);
+}
+
+// A waiter with no live Claude Code process above it (its session died; it would wait forever).
+const orphanWaiter = (pid, table) => waiterChain(pid, table).length > 0 && !findClaudePid(pid, table);
+
+// Stop the session's wait command, if it runs (pid-reuse safe: the pid must still run the wait command for
+// this session), and remove its lock files. Returns true if a waiter was stopped.
+function stopWaiter(sid, table) {
+  sid = safeId(sid);
+  let pid = 0;
+  try { pid = Number(fs.readFileSync(waitLockPath(sid), 'utf8')); } catch { /* no lock */ }
+  let stopped = false;
+  if (pid > 0 && alive(pid)) {
+    table = table || processTable();
+    if (waitCommandSid(table.get(pid)?.cmd) === sid) stopped = killWaiterChain(pid, table);
+  }
+  if (!(pid > 0) || !alive(pid)) {
+    try { if (Number(fs.readFileSync(waitLockPath(sid), 'utf8')) === pid) fs.unlinkSync(waitLockPath(sid)); } catch { /* gone */ }
+    try { if (Number(readWaitInfo(sid)?.pid) === pid) fs.unlinkSync(waitInfoPath(sid)); } catch { /* gone */ }
+  }
+  return stopped;
+}
+
+// Tool shells a dead Claude process left behind. Windows keeps the dead pid as their parent pid, so they can be
+// found; a Claude Code tool shell is recognizable by its command (bash -c "source .../shell-snapshots/snapshot-...").
+// Each is killed with everything under it. Returns the pids killed. Does nothing while claudePid is alive.
+function reapToolShells(claudePid, table) {
+  claudePid = Number(claudePid);
+  if (!(claudePid > 0) || alive(claudePid)) return [];
+  const out = [];
+  for (const p of (table || processTable()).values()) {
+    if (p.ppid === claudePid && /shell-snapshots[\\/]snapshot-/.test(p.cmd) && killTree(p.pid, table)) out.push(p.pid);
+  }
+  return out;
+}
+
+// Everything a finished session may have left running: its wait command and, if its Claude process is dead,
+// that process's tool shells. Returns { waiter, shells }.
+// True when a session may have something left to stop (a lock file, or a recorded Claude pid that is dead).
+const needsProcesses = (s) => Boolean(s?.session_id) && (fs.existsSync(waitLockPath(s.session_id)) || (Number(s.claude_pid) > 0 && !alive(Number(s.claude_pid))));
+
+function stopSessionProcesses(s, table) {
+  if (!needsProcesses(s)) return { waiter: false, shells: [] };
+  table = table || processTable();
+  return { waiter: stopWaiter(s.session_id, table), shells: reapToolShells(s.claude_pid, table) };
 }
 
 // Kill pid and its tool processes, only if it is still a Claude Code process (the pid may have been reused).
@@ -950,7 +1036,6 @@ function updateProjects(fn) {
 // Only the old lead's team changes: its lead and its members move; other teams are untouched. Moves the old lead's pending messages, marks the old lead
 // ended (reason: handoff) and stops its wait command and Claude process. opts.kill / opts.killClaude for tests.
 function performHandoff(from, to, doc, opts = {}) {
-  const kill = opts.kill || killPid;
   const stopClaude = opts.killClaude || killClaude;
   const sessions = readJson(paths.sessions, {});
   const projects = readProjects();
@@ -993,7 +1078,7 @@ function performHandoff(from, to, doc, opts = {}) {
 
   const moved = moveInbox(from, to);
   const wp = waitPid(from);
-  const waitKilled = wp ? kill(wp) : false;
+  const waitKilled = wp ? (opts.kill ? opts.kill(wp) : stopWaiter(from)) : false;
   const claudeKilled = old.claude_pid ? stopClaude(Number(old.claude_pid)) : false;
   const rules = existingLeadRules(t.team, t.name);
   return { ok: true, team: t.name, rules, members, moved, wait_killed: waitKilled, claude_killed: claudeKilled, claude_pid: old.claude_pid || 0 };
@@ -1307,10 +1392,16 @@ function forgetSessions(ids) {
     if (!s) continue;
     if (!isEnded(s)) { refused.push(id); continue; }
     delete sessions[id];
-    forgotten.push(id);
+    forgotten.push(s);
   }
   if (forgotten.length) writeJson(paths.sessions, sessions);
-  for (const id of forgotten) removeEmptyInbox(id);
+  // Nothing of a forgotten session may keep running (bug-005): its waiter, a dead Claude's tool shells.
+  let table = null;
+  for (const s of forgotten) {
+    if (needsProcesses(s)) try { stopSessionProcesses(s, (table = table || processTable())); } catch { /* best effort */ }
+    removeEmptyInbox(s.session_id);
+  }
+  return { forgotten: forgotten.map((s) => s.session_id), refused };
   return { forgotten, refused };
 }
 
@@ -1351,10 +1442,15 @@ function markEnded(sid) {
   if (isEnded(s)) return { ok: true };
   // A session whose Claude process is dead may be marked ended even while it still says "working".
   const gone = memberGone(s);
-  if (!gone && (s.state === 'working' || waitPid(sid) || !isStale(s))) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
+  // A wait command with no live Claude above it (bug-005, e.g. one from an older plugin version) is not activity.
+  let table = null;
+  const wp = waitPid(sid);
+  const waiting = wp && !orphanWaiter(wp, (table = processTable()));
+  if (!gone && (s.state === 'working' || waiting || !isStale(s))) return { ok: false, code: 409, error: 'session is active (working, waiting or seen recently)' };
   const ts = new Date().toISOString();
   Object.assign(s, { state: 'ended', ended: ts, end_reason: gone ? 'gone' : 'marked' });
   writeJson(paths.sessions, sessions);
+  try { stopSessionProcesses(s, table || undefined); } catch { /* best effort */ }
   return { ok: true };
 }
 
@@ -1501,7 +1597,8 @@ module.exports = {
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, RULES_TEXT_VER, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
-  waitLockPath, waitInfoPath, readWaitInfo, processName,
+  waitLockPath, waitInfoPath, readWaitInfo, processName, napUntil, waitCommandSid, waiterChain, killWaiterChain, orphanWaiter, stopWaiter,
+  reapToolShells, stopSessionProcesses,
   processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
   firstContext, rememberModel, clearLeadContext, envNum,

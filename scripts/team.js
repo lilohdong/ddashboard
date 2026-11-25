@@ -439,9 +439,11 @@ function endMember(leadSid, key) {
   }
   // A terminal window: its shell (recorded by orca-launch.js) and everything under it, so no empty window stays.
   if (m.runner === 'window' && windowShell(m) && lib.killTree(windowShell(m))) done.push(`closed its terminal window (pid ${m.window_shell_pid})`);
-  const wp = lib.waitPid(sid);
-  if (wp && lib.killTree(wp)) done.push('stopped its wait command');
+  if (lib.stopWaiter(sid)) done.push('stopped its wait command');
   if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude and its tool processes (pid ${m.claude_pid})`);
+  // Claude already dead (bug-005): the tool shells it left behind.
+  const shells = Number(m.claude_pid) > 0 ? lib.reapToolShells(Number(m.claude_pid)) : [];
+  if (shells.length) done.push(`stopped ${shells.length} tool process(es) left by its dead Claude`);
   if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killTree(Number(m.pid))) done.push(`stopped the headless run and its tool processes (pid ${m.pid})`);
   const now = new Date().toISOString();
   updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });

@@ -25,10 +25,16 @@ const info = lib.waitInfoPath(sid);
 ensureDir(dir);
 
 // Don't start a second waiter for the same session (a waiter whose owner died does not count: see waitPid).
+// A waiter with no live Claude above it (an orphan, e.g. from an older plugin version) is stopped instead: it
+// would take this session's messages and print them to nobody.
 const other = lib.waitPid(sid);
 if (other && other !== process.pid) {
-  console.log('Already waiting for replies. Nothing to do.');
-  process.exit(0);
+  const table = lib.processTable();
+  if (lib.orphanWaiter(other, table)) lib.stopWaiter(sid, table);
+  else {
+    console.log('Already waiting for replies. Nothing to do.');
+    process.exit(0);
+  }
 }
 
 fs.writeFileSync(lock, String(process.pid));
