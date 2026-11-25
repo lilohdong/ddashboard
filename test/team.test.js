@@ -604,6 +604,58 @@ test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed te
   } finally { orcaOff(); }
 });
 
+test('M-1c: team.js handoff --spawn: visible Orca terminal when Orca runs, --headless/--orca like spawn', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  const doc = path.join(BOARD, 'handoff.md');
+  fs.writeFileSync(doc, '# handoff');
+  try {
+    // Orca up: interactive claude (no -p) with --session-id in a terminal titled 'lead <team>'.
+    orcaEnv();
+    const r = team.main(['L1', 'handoff', doc, '--spawn', '--model', 'opus']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /Started the new lead in a visible Orca terminal \(term_fake\)/);
+    const create = orcaCalls().find((c) => c[0] === 'terminal' && c[1] === 'create');
+    assert.equal(flagOf(create, '--title'), 'lead Alpha');
+    assert.equal(flagOf(create, '--worktree'), `path:${slash(CWD)}`);
+    const spec = JSON.parse(fs.readFileSync(flagOf(create, '--command').match(/"([^"]+\.json)"$/)[1], 'utf8'));
+    assert.ok(!spec.args.includes('-p'));
+    assert.ok(flagOf(spec.args, '--session-id'));
+    assert.equal(flagOf(spec.args, '--model'), 'opus');
+    assert.match(fs.readFileSync(spec.prompt_file, 'utf8'), /^\[ddash lead-handoff from=L1 doc=.*handoff\.md\] Read only this handoff doc/);
+
+    // --headless forces claude -p even with Orca up (and implies --spawn).
+    orcaEnv();
+    process.env.FAKE_OUT = path.join(BOARD, 'lead-h.json');
+    const h = team.main(['L1', 'handoff', doc, '--headless']);
+    assert.match(h.out, /Started the new lead headless/);
+    const got = await waitFor(process.env.FAKE_OUT);
+    assert.equal(got.argv[0], '-p');
+    assert.match(got.input, /^\[ddash lead-handoff from=L1/);
+    assert.ok(!orcaCalls().some((c) => c[1] === 'create'));
+
+    // --orca with Orca down is refused before anything changes; both flags are refused.
+    orcaEnv({ up: false });
+    const conf = readJson(paths.projects, {});
+    delete conf[KEY].teams.Alpha.handoff;
+    writeJson(paths.projects, conf);
+    const o = team.main(['L1', 'handoff', doc, '--orca']);
+    assert.equal(o.code, 1);
+    assert.match(o.out, /Orca is not running/);
+    assert.equal(teamConf().handoff, undefined);
+    assert.match(team.main(['L1', 'handoff', doc, '--orca', '--headless']).out, /either --headless or --orca/);
+
+    // Orca down, no flag: headless. A failed terminal falls back to headless with a note.
+    process.env.FAKE_OUT = path.join(BOARD, 'lead-h2.json');
+    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /^Started the new lead headless/);
+    assert.equal((await waitFor(process.env.FAKE_OUT)).argv[0], '-p');
+    orcaEnv({ fail: true });
+    process.env.FAKE_OUT = path.join(BOARD, 'lead-h3.json');
+    assert.match(team.main(['L1', 'handoff', doc, '--spawn']).out, /could not open a terminal \(.*no worktree\); started headless instead\.\nStarted the new lead headless/);
+    await waitFor(process.env.FAKE_OUT);
+  } finally { orcaOff(); }
+});
+
 test('team.js send to an Orca member: inbox, typed into its terminal, or resumed', async () => {
   teamFixture();
   process.env.DDASH_CLAUDE_BIN = fakeClaude();

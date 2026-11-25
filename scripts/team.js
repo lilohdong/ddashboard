@@ -9,8 +9,10 @@
 //       typed into its terminal; else resume it (in a new Orca terminal, or claude -p --resume)
 //   node team.js <lead sid> list                 members: role, state, waiting, last card
 //   node team.js <lead sid> show <card-id>       a card in full (long report details)
-//   node team.js <lead sid> handoff <doc> [--spawn] [--model <m>]
-//       prepare a lead handoff; prints the first prompt for the new lead (--spawn starts it headless)
+//   node team.js <lead sid> handoff <doc> [--spawn] [--headless|--orca] [--model <m>]
+//       prepare a lead handoff; prints the first prompt for the new lead. --spawn starts it like a member:
+//       in a visible Orca terminal titled 'lead <team>' when Orca runs, else headless. --headless/--orca force one
+//       (and imply --spawn). The doc must be under DDASH_HANDOFF_MAX_TOKENS (6000) estimated tokens.
 //   node team.js <lead sid> group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
 //       groups of the lead's team keep shared memory in docs/teams/<team>/<g>/ of the team's worktree
 //       (brief.md, handoff-NNN.md, notes/). Nothing is committed; the lead commits the docs.
@@ -35,7 +37,7 @@ function usage() {
   send <sid|role> "<text>"
   list
   show <card-id>
-  handoff <doc-path> [--spawn] [--model <m>]
+  handoff <doc-path> [--spawn] [--headless|--orca] [--model <m>]
   group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
   next-handoff [<g>]`;
 }
@@ -342,8 +344,12 @@ function cmdShow(_leadSid, argv) {
 }
 
 function cmdHandoff(leadSid, argv) {
-  const { flags, words } = parseArgs(argv, ['spawn']);
+  const { flags, words } = parseArgs(argv, ['spawn', 'headless', 'orca']);
   if (!words[0]) throw new Error('handoff needs the path of your handoff doc.');
+  if (flags.headless && flags.orca) throw new Error('use either --headless or --orca.');
+  const runner = flags.headless ? 'headless' : flags.orca ? 'orca' : undefined;
+  // --orca / --headless imply --spawn. Check Orca before anything is written.
+  const how = flags.spawn || runner ? pickRunner(runner) : '';
   const doc = path.resolve(words.join(' ')).replace(/\\/g, '/');
   if (!fs.existsSync(doc)) throw new Error(`handoff doc not found: ${doc}`);
   const tokens = lib.estimateTokens(fs.readFileSync(doc, 'utf8'));
@@ -357,13 +363,24 @@ function cmdHandoff(leadSid, argv) {
   writeJson(paths.projects, projects);
   const prompt = `[ddash lead-handoff from=${leadSid} doc=${tagValue(doc)}] Read only this handoff doc${rules ? ` and the team rules ${rules}` : ''} (not older handoff docs), then take over as team lead. Start the wait command from your instructions.`;
   const stop = claudePid ? `this session (Claude pid ${claudePid}) is stopped` : 'this session is told to stop (its Claude process was not found)';
-  if (flags.spawn) {
+  if (how) {
     const sid = crypto.randomUUID();
     const opts = spawnOptions(project, flags);
+    let note = '';
+    if (how === 'orca') {
+      // Interactive in a visible Orca terminal (no -p), at the worktree root like members.
+      try {
+        const t = runOrca(sid, ['--session-id', sid, ...claudeArgs(opts)], prompt, orca.worktreeRoot(lead.cwd || process.cwd()), `lead ${own.name}`);
+        return `Started the new lead in a visible Orca terminal (${t.handle}): ${sid}. When it registers, ${stop}.`;
+      } catch (err) {
+        if (runner === 'orca') throw err;
+        note = `Orca could not open a terminal (${err.message}); started headless instead.\n`;
+      }
+    }
     const pid = runClaude(sid, ['-p', '--session-id', sid, ...claudeArgs(opts)], prompt, lead.cwd || process.cwd());
-    return `Started the new lead headless: ${sid} (pid ${pid || '?'}). When it registers, ${stop}. Log: ${paths.log(sid).replace(/\\/g, '/')}`;
+    return `${note}Started the new lead headless: ${sid} (pid ${pid || '?'}). When it registers, ${stop}. Log: ${paths.log(sid).replace(/\\/g, '/')}`;
   }
-  return `Handoff ready. Start the new lead (terminal, Orca, or headless with --spawn) with this first prompt:\n${prompt}\nWhen it registers, the members of team ${own.name} move to it and ${stop}.`;
+  return `Handoff ready. Start the new lead (terminal, Orca, or with --spawn: Orca when it runs, else headless) with this first prompt:\n${prompt}\nWhen it registers, the members of team ${own.name} move to it and ${stop}.`;
 }
 
 // group create|rename|delete|list|prune. Shared by the dashboard (POST /api/groups) through groupAction.

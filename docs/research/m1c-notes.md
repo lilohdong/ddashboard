@@ -1,6 +1,6 @@
 # M-1c notes: fixed-size lead handoffs, relative lead context limit
 
-Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node test/team.test.js` (56/56 pass; six `M-1c:` tests, plus updated performHandoff and `/api/state` tests).
+Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node test/team.test.js` (57/57 pass; seven `M-1c:` tests, plus updated performHandoff and `/api/state` tests).
 
 ## Handoff point (rows 5–7)
 
@@ -28,3 +28,9 @@ Implementation of plan-0.3.0 section M-1c on `feature/team-mode`. Tests: `node t
 
 - Dashboard not checked in a browser (server not restarted, plugin not installed, per instructions).
 - Not done: rows 1/3 are enforced only by instructions (the hook cannot tell whether a doc references older docs).
+
+## handoff --spawn in Orca (added by the lead)
+
+- `T handoff <doc> --spawn` picks the runner like `spawn` (`pickRunner`): Orca up → interactive `claude --session-id <sid> ...` (no `-p`) in a new Orca terminal titled `lead <team>` at the worktree root; Orca down → headless `claude -p` as before. `--orca` / `--headless` force one and imply `--spawn`; both together are refused; `--orca` with Orca down is refused before the handoff is recorded. A failed Orca terminal (no flag) falls back to headless with a note.
+- The new lead is not pre-registered (unlike members): its first-prompt hook does the takeover as before.
+- Test: `M-1c: team.js handoff --spawn: ...` (57/57 pass).

@@ -67,7 +67,7 @@ Handoff docs stay the same size however many handoffs there were:
 Steps:
 
 1. The lead writes a new handoff doc with the current state (see above).
-2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead headless instead.
+2. The lead runs `team.js <lead id> handoff <doc>`. It prints the first prompt for the new lead; `--spawn` starts the new lead instead, like a member: in a visible Orca terminal titled `lead <team>` when Orca runs, else headless (`--orca` / `--headless` force one).
 3. Start the new lead with that prompt, e.g. in a new terminal:
    ```
    claude "[ddash lead-handoff from=<old id> doc=<path>] Read only this handoff doc and the team rules <team dir>/lead-rules.md (not older handoff docs), then take over as team lead. Start the wait command from your instructions."
