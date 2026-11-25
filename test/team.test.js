@@ -11,6 +11,7 @@ const BOARD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-test-'));
 const CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-proj-')); // not a git repo: project key = the path
 process.env.DDASH_BOARD_DIR = BOARD;
 delete process.env.DDASH_NAME;
+process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests use a fake orca command
 
 const ROOT = path.join(__dirname, '..');
 const lib = require(path.join(ROOT, 'scripts', 'lib.js'));
@@ -417,6 +418,149 @@ test('team.js show and handoff', () => {
   assert.equal(team.main(['M1', 'handoff', doc]).code, 1); // not the lead
 });
 
+// --- Orca (visible members). A fake orca logs its calls; FAKE_ORCA_UP / _WRITABLE / _FAIL steer its replies. ---
+
+function fakeOrca() {
+  const file = path.join(BOARD, 'fake-orca.js');
+  fs.writeFileSync(file, `const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_ORCA_LOG, JSON.stringify(a) + '\\n');
+const out = (o) => console.log(JSON.stringify(o));
+const cmd = a.slice(0, 2).join(' ');
+if (a[0] === 'status') out({ ok: true, result: { runtime: { reachable: process.env.FAKE_ORCA_UP === '1' } } });
+else if (cmd === 'terminal create') {
+  if (process.env.FAKE_ORCA_FAIL === '1') { out({ ok: false, error: { message: 'no worktree' } }); process.exit(1); }
+  out({ ok: true, result: { terminal: { handle: 'term_fake', paneKey: 'tab:leaf' } } });
+} else if (cmd === 'terminal show') out({ ok: true, result: { terminal: { handle: a[3], writable: process.env.FAKE_ORCA_WRITABLE === '1' } } });
+else if (cmd === 'terminal send') out({ ok: true, result: { send: { accepted: true } } });
+else { out({ ok: false }); process.exit(1); }
+`);
+  return file;
+}
+
+function orcaEnv({ up = true, writable = true, fail = false } = {}) {
+  process.env.DDASH_ORCA = '';
+  process.env.DDASH_ORCA_BIN = fakeOrca();
+  process.env.FAKE_ORCA_LOG = path.join(BOARD, 'orca.log');
+  process.env.FAKE_ORCA_UP = up ? '1' : '0';
+  process.env.FAKE_ORCA_WRITABLE = writable ? '1' : '0';
+  process.env.FAKE_ORCA_FAIL = fail ? '1' : '0';
+  try { fs.unlinkSync(process.env.FAKE_ORCA_LOG); } catch {}
+}
+const orcaCalls = () => lib.readJsonl(process.env.FAKE_ORCA_LOG);
+const orcaOff = () => { process.env.DDASH_ORCA = '0'; };
+const flagOf = (argv, name) => argv[argv.indexOf(name) + 1];
+
+test('team.js spawn: visible in Orca when it runs, with the same pre-registration', () => {
+  teamFixture();
+  orcaEnv();
+  try {
+    const r = team.main(['L1', 'spawn', '--role', 'fe', '--model', 'sonnet', 'build\nthe page']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /in a visible Orca terminal \(term_fake\)/);
+    const create = orcaCalls().find((c) => c[0] === 'terminal' && c[1] === 'create');
+    assert.equal(flagOf(create, '--worktree'), `path:${CWD.replace(/\\/g, '/')}`);
+    assert.equal(flagOf(create, '--title'), 'fe');
+    const command = flagOf(create, '--command');
+    const m = command.match(/^node "(.+\/orca-launch\.js)" "(.+\.json)"$/);
+    assert.ok(m, command);
+    const spec = JSON.parse(fs.readFileSync(m[2], 'utf8'));
+    const sid = flagOf(spec.args, '--session-id');
+    assert.equal(flagOf(spec.args, '--model'), 'sonnet');
+    assert.ok(spec.args.includes('acceptEdits'));
+    assert.ok(!spec.args.includes('-p'));
+    assert.equal(fs.readFileSync(spec.prompt_file, 'utf8'), '[ddash role=fe lead=L1 stay=0] build\nthe page');
+    const s = readJson(paths.sessions, {})[sid];
+    assert.equal(s.runner, 'orca');
+    assert.equal(s.headless, false);
+    assert.equal(s.pending, true);
+    assert.equal(s.orca.handle, 'term_fake');
+    assert.match(team.main(['L1', 'list']).out, / orca/);
+  } finally { orcaOff(); }
+});
+
+test('team.js spawn: --headless forces claude -p, --orca needs Orca, a failed terminal falls back to headless', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  try {
+    orcaEnv();
+    process.env.FAKE_OUT = path.join(BOARD, 'h.json');
+    const r = team.main(['L1', 'spawn', '--headless', '--role', 'be', 'api']);
+    assert.match(r.out, /headless \(pid/);
+    assert.equal((await waitFor(process.env.FAKE_OUT)).argv[0], '-p');
+    assert.ok(!orcaCalls().some((c) => c[1] === 'create'));
+
+    orcaEnv({ up: false });
+    const before = Object.keys(readJson(paths.sessions, {})).length;
+    const r2 = team.main(['L1', 'spawn', '--orca', '--role', 'be', 'api']);
+    assert.equal(r2.code, 1);
+    assert.match(r2.out, /Orca is not running/);
+    assert.equal(Object.keys(readJson(paths.sessions, {})).length, before);
+
+    orcaEnv({ fail: true });
+    assert.equal(team.main(['L1', 'spawn', '--orca', '--role', 'be', 'api']).code, 1);
+    assert.equal(Object.keys(readJson(paths.sessions, {})).length, before);
+    process.env.FAKE_OUT = path.join(BOARD, 'h2.json');
+    const r3 = team.main(['L1', 'spawn', '--role', 'be', 'api']);
+    assert.match(r3.out, /could not open a terminal \(.*no worktree\); started headless/);
+    const got = await waitFor(process.env.FAKE_OUT);
+    assert.equal(readJson(paths.sessions, {})[flagOf(got.argv, '--session-id')].runner, 'headless');
+  } finally { orcaOff(); }
+});
+
+test('team.js send to an Orca member: inbox, typed into its terminal, or resumed', async () => {
+  teamFixture();
+  process.env.DDASH_CLAUDE_BIN = fakeClaude();
+  const s = readJson(paths.sessions, {});
+  s.V1 = session('V1', { kind: 'member', role: 'ui', lead: 'L1', runner: 'orca', headless: false, orca: { handle: 'term_v1' }, spawn: { permission_mode: 'acceptEdits', cwd: CWD } });
+  writeJson(paths.sessions, s);
+  const set = (fields) => { const all = readJson(paths.sessions, {}); Object.assign(all.V1, fields); writeJson(paths.sessions, all); };
+  try {
+    // Idle at its prompt: typed into the terminal as one line.
+    orcaEnv();
+    assert.match(team.main(['L1', 'send', 'ui', 'fix the\nheader']).out, /Typed into ui's Orca terminal/);
+    const sent = orcaCalls().find((c) => c[1] === 'send');
+    assert.equal(flagOf(sent, '--terminal'), 'term_v1');
+    assert.equal(flagOf(sent, '--text'), '[Lead instruction] fix the header');
+    assert.ok(sent.includes('--enter'));
+    assert.equal(readJson(paths.sessions, {}).V1.state, 'working');
+    // Mid-turn: into the inbox.
+    assert.match(team.main(['L1', 'send', 'ui', 'also the footer']).out, /Queued for ui/);
+    assert.equal(inbox('V1')[0].text, 'also the footer');
+    // Terminal closed: resumed in a new Orca terminal.
+    orcaEnv({ writable: false });
+    set({ state: 'idle' });
+    assert.match(team.main(['L1', 'send', 'ui', 'next']).out, /Resumed ui .*new Orca terminal/);
+    const spec = JSON.parse(fs.readFileSync(flagOf(orcaCalls().find((c) => c[1] === 'create'), '--command').match(/"([^"]+\.json)"$/)[1], 'utf8'));
+    assert.deepEqual(spec.args.slice(0, 2), ['--resume', 'V1']);
+    assert.equal(fs.readFileSync(spec.prompt_file, 'utf8'), '[Lead instruction]\nnext');
+    // Ended and Orca down: headless resume.
+    orcaEnv({ up: false });
+    set({ state: 'ended', ended: 'x' });
+    process.env.FAKE_OUT = path.join(BOARD, 'v-resume.json');
+    assert.match(team.main(['L1', 'send', 'ui', 'last']).out, /headless: Orca is not available/);
+    assert.deepEqual((await waitFor(process.env.FAKE_OUT)).argv.slice(0, 3), ['-p', '--resume', 'V1']);
+    const v = readJson(paths.sessions, {}).V1;
+    assert.equal(v.runner, 'headless');
+    assert.equal(v.ended, undefined);
+  } finally { orcaOff(); }
+});
+
+test('orca-launch: starts claude with the prompt first, then the options', () => {
+  const out = path.join(BOARD, 'launch.json');
+  const promptFile = path.join(BOARD, 'p.txt');
+  fs.writeFileSync(promptFile, '[ddash role=fe lead=L1 stay=0] two\nlines');
+  const specFile = path.join(BOARD, 'spec.json');
+  fs.writeFileSync(specFile, JSON.stringify({ args: ['--session-id', 'S1', '--allowedTools', 'Bash(git *)'], prompt_file: promptFile, cwd: CWD }));
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'orca-launch.js'), specFile], {
+    input: '', encoding: 'utf8', env: { ...process.env, DDASH_CLAUDE_BIN: fakeClaude(), FAKE_OUT: out, CLAUDECODE: '1' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.deepEqual(got.argv, ['[ddash role=fe lead=L1 stay=0] two\nlines', '--session-id', 'S1', '--allowedTools', 'Bash(git *)']);
+  assert.equal(got.nested, '');
+});
+
 // --- sidebar housekeeping and dashboard spawn (through the server) ---
 
 test('forgetSessions / markEnded', () => {
@@ -473,6 +617,7 @@ test('server: forget, mark ended, spawn from the dashboard', async () => {
     assert.equal((await post('/api/team/spawn', { lead: 'L1', role: 'qa', task: 'x' }, { Origin: 'http://evil.example' })).status, 403);
     const r = await post('/api/team/spawn', { lead: 'L1', role: 'qa', model: 'haiku', stay: true, task: 'Test the login\nmore lines' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.runner, 'headless'); // DDASH_ORCA=0
     const got = await waitFor(process.env.FAKE_OUT);
     assert.equal(got.input, '[ddash role=qa lead=L1 stay=1] Test the login\nmore lines');
     assert.ok(got.argv.includes('haiku'));

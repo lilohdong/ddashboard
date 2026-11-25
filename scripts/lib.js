@@ -337,7 +337,7 @@ function rulesText(sid) {
 function leadRulesText(sid, name) {
   const t = `node "${slash(ensureTeamBin())}" ${sid}`;
   return `${rulesText(sid)}- Team mode: you are the team lead "${name || 'lead'}". The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
-- Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] "<task>" | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
+- Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless] "<task>" (visible in Orca when it runs) | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
 - Groups (shared memory in docs/groups/<g>/: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
 `;
 }

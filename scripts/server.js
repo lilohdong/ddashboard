@@ -8,7 +8,8 @@
 //   POST /api/mode    {project, mode: solo|team, lead?, lead_name?} -> switch a project's mode
 //   POST /api/sessions/forget {session_id} | {project, ended: true} -> drop ended sessions from the sidebar
 //   POST /api/sessions/end    {session_id} -> mark an idle, stale session as ended
-//   POST /api/team/spawn      {lead, role, model?, stay?, task, group?} -> start a headless member for a live lead
+//   POST /api/team/spawn      {lead, role, model?, stay?, task, group?, runner?: orca|headless} -> start a member for a
+//                             live lead (visible in an Orca terminal when Orca runs, else headless)
 //   POST /api/groups          {project, action: create|rename|delete, name, new_name?, purge?} -> manage team groups
 //   GET  /api/search  ?q=&archived=include|only|exclude&limit=100 -> matching cards, newest first
 //   POST /api/reply   {session_id, text, card_id?, card_title?} -> saved to that session's inbox
@@ -211,7 +212,7 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  // Start a headless member for a live lead (same code as `team.js <lead> spawn`), and tell the lead.
+  // Start a member for a live lead (same code as `team.js <lead> spawn`), and tell the lead.
   if (req.method === 'POST' && url.pathname === '/api/team/spawn') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     return readBody(req, res, (msg) => {
@@ -226,14 +227,14 @@ const server = http.createServer((req, res) => {
       if (!role || !task) return send(res, 400, { error: 'role and task required' });
       let r;
       try {
-        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined });
+        r = team.spawnMember(leadSid, { role, model: msg.model || undefined, stay: msg.stay === true, task: task.slice(0, 8000), group: msg.group || undefined, runner: ['orca', 'headless'].includes(msg.runner) ? msg.runner : undefined });
       } catch (err) { return send(res, 400, { error: String(err.message || err) }); }
       const first = task.split(/\r?\n/)[0].slice(0, 200);
       deliver(leadSid, {
         type: 'report', from: r.sid, role: role.slice(0, 40), status: 'wip',
         title: `member ${role} ${r.sid.slice(0, 8)}${msg.group ? ` (group ${msg.group})` : ''} spawned by the user: ${first}`,
       });
-      send(res, 200, { ok: true, session_id: r.sid, pid: r.pid, log: r.log });
+      send(res, 200, { ok: true, session_id: r.sid, runner: r.runner, pid: r.pid, terminal: r.terminal, log: r.log, note: r.note || undefined });
     });
   }
 
