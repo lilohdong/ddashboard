@@ -28,3 +28,10 @@ Not checked: a real window on any OS (it would open a window on the user's scree
 ## Server: Orca checks without blocking (8b8cb52 follow-up)
 
 `/api/state` no longer runs the orca CLI synchronously. `server.js terminalOpen` returns the cached state (null = not known yet, so nobody is marked gone) and refreshes a stale entry (10 s) in the background with `orca.terminalOpenAsync` (execFile callback, one call per handle at a time). A closed terminal is noticed on a later poll. CLI commands (`team.js list`) keep the blocking `orca.terminalOpen`. Test: a fake orca that takes 1.5 s; `/api/state` answers in under 1 s and the member turns `ended` shortly after.
+
+## QA verify-002 fixes (BUG-002, BUG-003)
+
+- BUG-002: the window's cmd runs `cmd /k .\<script>.cmd`. With `NoDefaultCurrentDirectoryInExePath=1` (set by Claude Code, so always present when a lead runs team.js) cmd does not find a bare name in the current folder; `.\` is an explicit path and still needs no quotes. The script ends with `if errorlevel 1 (note) else exit`: a normal exit closes the window, a failure keeps it open. Test (Windows): the generated script runs under `cmd /d /c .\<script>` with the variable set, in a folder named `a&b 100%PATH%x`, and the bare name fails as in the bug.
+- BUG-003: `lib.killTree(pid)`: Windows `taskkill /PID <pid> /T /F`; elsewhere the process group (when pid leads one), then each descendant from the process table, then pid. `killClaude` (still checks the pid is Claude) and `end` (headless run, wait command) use it, so tool commands no longer stay orphaned. `performHandoff` stops the old lead the same way.
+- Window members: `orca-launch.js` records `window_launch_pid` (itself) and `window_shell_pid` (the window's cmd/sh) on the session. `end` kills the shell's tree when it is still that shell (the launcher is alive under it, or it is still a cmd/sh process), so no empty window stays.
+- `end` on an already ended member stops what is left but keeps its `ended` time and `end_reason`.

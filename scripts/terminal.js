@@ -1,7 +1,10 @@
 // OS terminal windows (runner 'window'): a new, visible terminal window that runs a program in a folder.
-//   Windows: a .cmd script (cd + program) in the logs folder, opened with cmd /c start "<title>" cmd /k <script name>.
+//   Windows: a .cmd script (cd + program) in the logs folder, opened with cmd /c start "<title>" cmd /k .\<script name>.
 //            The command line holds only the title and a plain file name, so paths with spaces, &, %, ^ or quotes
-//            never meet cmd's parser there; inside the script they are quoted and % is doubled.
+//            never meet cmd's parser there; inside the script they are quoted and % is doubled. The .\ prefix is
+//            needed: with NoDefaultCurrentDirectoryInExePath set (Claude Code sets it) cmd does not look up a bare
+//            name in the current folder. The script closes the window when the program exits normally and
+//            keeps it open (with a note) when it fails.
 //   macOS:   osascript: tell application "Terminal" to do script "cd '<cwd>' && <program>"
 //   Linux:   x-terminal-emulator -T <title> -e sh -c "cd '<cwd>' && <program> || { echo ...; read x; }" (needs a display;
 //            on failure the window stays open until Enter)
@@ -47,10 +50,13 @@ function launcher({ title, cwd, argv, name = 'window', platform = process.platfo
   }
   if (platform === 'win32') {
     const script = `${String(name).replace(/[^\w.-]/g, '_')}.cmd`;
-    const content = ['@echo off', 'chcp 65001 >nul', `cd /d ${batchQuote(cwd)}`, argv.map(batchQuote).join(' '), ''].join('\r\n');
+    const content = [
+      '@echo off', 'chcp 65001 >nul', `cd /d ${batchQuote(cwd)}`, argv.map(batchQuote).join(' '),
+      'if errorlevel 1 (echo. & echo ddashboard: the command failed ^(exit %errorlevel%^). This window stays open.) else exit', '',
+    ].join('\r\n');
     return {
       file: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/c', `start "${cleanTitle(title)}" cmd /k ${script}`],
+      args: ['/d', '/c', `start "${cleanTitle(title)}" cmd /k .\\${script}`],
       verbatim: true, script: { name: script, content }, sync: true,
     };
   }

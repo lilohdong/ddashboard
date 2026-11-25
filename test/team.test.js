@@ -895,11 +895,12 @@ test('M-1d review: window launcher never puts paths on a shell command line (&, 
   try {
     const w = term.launcher({ title: 'lead "A" & del', cwd, argv, name: 'sid.window-1', platform: 'win32' });
     assert.equal(w.verbatim, true);
-    assert.deepEqual(w.args, ['/d', '/c', 'start "lead A  del" cmd /k sid.window-1.cmd']);
+    assert.deepEqual(w.args, ['/d', '/c', 'start "lead A  del" cmd /k .\\sid.window-1.cmd']);
     assert.equal(w.script.name, 'sid.window-1.cmd');
     const lines = w.script.content.split('\r\n');
     assert.equal(lines[2], 'cd /d "C:/a&b/100%%PATH%%^x"');
     assert.equal(lines[3], '"C:/node js/node.exe" "C:/x&y/orca-launch.js" "C:/logs/50%%/s.json"');
+    assert.match(lines[4], /^if errorlevel 1 \(.*This window stays open\.\) else exit$/);
     const mac = term.launcher({ title: 't', cwd: "/a'b&c", argv: ['/n', '/l "x".js'], platform: 'darwin' });
     assert.equal(mac.args[1], 'tell application "Terminal" to do script "cd \'/a\'\\\\\'\'b&c\' && \'/n\' \'/l \\"x\\".js\'"');
     const lin = term.launcher({ title: 't', cwd: '/a&b', argv: ['/n'], platform: 'linux' });
@@ -999,7 +1000,7 @@ test('BUG-001: team.js end closes an Orca member terminal, stops a headless run,
     const close = orcaCalls().find((c) => c[0] === 'terminal' && c[1] === 'close');
     assert.equal(flagOf(close, '--terminal'), 'term_v1');
     const exited = new Promise((res) => sleeper.on('exit', res));
-    assert.match(team.main(['L1', 'end', 'H1']).out, /stopped the headless run \(pid \d+\)/);
+    assert.match(team.main(['L1', 'end', 'H1']).out, /stopped the headless run and its tool processes \(pid \d+\)/);
     await exited;
     const after = readJson(paths.sessions, {});
     for (const id of ['V1', 'H1']) {
@@ -1044,6 +1045,88 @@ test('BUG-001: the server checks Orca terminals in the background (a slow orca n
     });
     assert.equal(readJson(paths.sessions, {}).V9.end_reason, 'gone');
   } finally { delete process.env.FAKE_ORCA_SLOW_MS; orcaOff(); }
+});
+
+// A fake "shell": a node process that starts a child node (the "program") and prints the child's pid.
+function processPair() {
+  const parent = spawn(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' }); console.log(c.pid); setTimeout(() => {}, 60000);"]);
+  return new Promise((res) => parent.stdout.once('data', (d) => res({ parent, child: Number(String(d).trim()) })));
+}
+
+test('BUG-003: killTree stops a process and the processes it started', async () => {
+  const { parent, child } = await processPair();
+  assert.equal(lib.alive(child), true);
+  assert.equal(lib.killTree(parent.pid), true);
+  for (let i = 0; i < 40 && lib.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(lib.alive(child), false, 'child left running');
+  assert.equal(lib.killTree(parent.pid), false); // already gone
+});
+
+test('BUG-003: end closes a window member\'s shell with everything in it; an ended member keeps its end time', async () => {
+  teamFixture();
+  const { parent, child } = await processPair();
+  const s = readJson(paths.sessions, {});
+  s.W7 = session('W7', { kind: 'member', role: 'win', lead: 'L1', runner: 'window', headless: false, window_shell_pid: parent.pid, window_launch_pid: child });
+  s.E7 = session('E7', { kind: 'member', role: 'old', lead: 'L1', state: 'ended', ended: '2026-01-01T00:00:00.000Z', end_reason: 'gone' });
+  writeJson(paths.sessions, s);
+  try {
+    assert.match(team.main(['L1', 'end', 'win']).out, new RegExp(`closed its terminal window \\(pid ${parent.pid}\\)`));
+    for (let i = 0; i < 40 && lib.alive(child); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(lib.alive(parent.pid), false);
+    assert.equal(lib.alive(child), false);
+    assert.equal(readJson(paths.sessions, {}).W7.end_reason, 'stopped');
+    team.main(['L1', 'end', 'old']);
+    const e = readJson(paths.sessions, {}).E7;
+    assert.equal(e.ended, '2026-01-01T00:00:00.000Z');
+    assert.equal(e.end_reason, 'gone');
+  } finally { parent.kill(); try { process.kill(child); } catch {} }
+});
+
+test('BUG-003: orca-launch records the window shell and its own pid on the session', () => {
+  teamFixture();
+  const s = readJson(paths.sessions, {});
+  s.W8 = session('W8', { kind: 'member', role: 'w8', lead: 'L1', runner: 'window' });
+  writeJson(paths.sessions, s);
+  const prompt = path.join(BOARD, 'w8.prompt.txt');
+  fs.writeFileSync(prompt, 'hello');
+  const spec = path.join(BOARD, 'w8.json');
+  fs.writeFileSync(spec, JSON.stringify({ args: [], prompt_file: prompt, cwd: CWD, sid: 'W8', kind: 'window' }));
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'orca-launch.js'), spec], {
+    input: '', encoding: 'utf8', env: { ...process.env, DDASH_CLAUDE_BIN: fakeClaude(), FAKE_OUT: path.join(BOARD, 'w8-out.json') },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const w = readJson(paths.sessions, {}).W8;
+  assert.equal(w.window_shell_pid, process.pid);
+  assert.ok(w.window_launch_pid > 0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(BOARD, 'w8-out.json'), 'utf8')).argv[0], 'hello');
+});
+
+test('BUG-002: the window script runs with NoDefaultCurrentDirectoryInExePath set, in a folder with & and %', () => {
+  if (process.platform !== 'win32') return;
+  const term = require(path.join(ROOT, 'scripts', 'terminal.js'));
+  const save = process.env.DDASH_WINDOW_BIN;
+  delete process.env.DDASH_WINDOW_BIN;
+  try {
+    const dir = path.join(BOARD, 'a&b 100%PATH%x');
+    fs.mkdirSync(dir, { recursive: true });
+    const prog = path.join(BOARD, 'cwd-out.js');
+    const out = path.join(BOARD, 'cwd-out.txt');
+    fs.writeFileSync(prog, "require('fs').writeFileSync(process.argv[2], process.cwd());\n");
+    const l = term.launcher({ title: 't', cwd: dir, argv: [process.execPath, prog, out], name: 'b2.window-1', platform: 'win32' });
+    const logs = path.join(BOARD, 'win-logs');
+    fs.mkdirSync(logs, { recursive: true });
+    fs.writeFileSync(path.join(logs, l.script.name), l.script.content);
+    // What the window's cmd runs, without the window: cmd /k .\<script> -> here cmd /c .\<script>.
+    const run = l.args[2].replace(/^start "[^"]*" cmd \/k /, '');
+    assert.equal(run, '.\\b2.window-1.cmd');
+    const env = { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' };
+    const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', run], { cwd: logs, env, windowsVerbatimArguments: true, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(fs.readFileSync(out, 'utf8'), dir);
+    // A bare name is not found with that variable set (the cause of BUG-002).
+    const bare = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', l.script.name], { cwd: logs, env, windowsVerbatimArguments: true, encoding: 'utf8' });
+    assert.notEqual(bare.status, 0);
+  } finally { if (save !== undefined) process.env.DDASH_WINDOW_BIN = save; }
 });
 
 test('BUG-001: memberGone never guesses: live wait command, no pid, unknown terminal state', () => {

@@ -200,7 +200,7 @@ function launchSpec(sid, args, prompt, cwd, kind) {
   ensureDir(paths.logsDir);
   const base = path.join(paths.logsDir, `${safeId(sid)}.${kind}-${Date.now()}`);
   fs.writeFileSync(`${base}.prompt.txt`, prompt);
-  fs.writeFileSync(`${base}.json`, JSON.stringify({ args, prompt_file: `${base}.prompt.txt`, cwd }));
+  fs.writeFileSync(`${base}.json`, JSON.stringify({ args, prompt_file: `${base}.prompt.txt`, cwd, sid, kind }));
   fs.appendFileSync(paths.log(sid), `\n--- ${new Date().toISOString()} ${kind} terminal: claude ${args.join(' ')}\n`);
   return { spec: `${base}.json`, name: path.basename(base) };
 }
@@ -435,13 +435,27 @@ function endMember(leadSid, key) {
   if (m.runner === 'orca' && m.orca?.handle) {
     try { orca.closeTerminal(m.orca.handle); done.push(`closed its Orca terminal (${m.orca.handle})`); } catch (err) { done.push(`could not close its Orca terminal: ${err.message}`); }
   }
+  // A terminal window: its shell (recorded by orca-launch.js) and everything under it, so no empty window stays.
+  if (m.runner === 'window' && windowShell(m) && lib.killTree(windowShell(m))) done.push(`closed its terminal window (pid ${m.window_shell_pid})`);
   const wp = lib.waitPid(sid);
-  if (wp && lib.killPid(wp)) done.push('stopped its wait command');
-  if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude (pid ${m.claude_pid})`);
-  if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killPid(Number(m.pid))) done.push(`stopped the headless run (pid ${m.pid})`);
+  if (wp && lib.killTree(wp)) done.push('stopped its wait command');
+  if (Number(m.claude_pid) > 0 && lib.killClaude(Number(m.claude_pid))) done.push(`stopped Claude and its tool processes (pid ${m.claude_pid})`);
+  if (m.headless && Number(m.pid) > 0 && alive(Number(m.pid)) && lib.killTree(Number(m.pid))) done.push(`stopped the headless run and its tool processes (pid ${m.pid})`);
   const now = new Date().toISOString();
-  updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
+  // An already ended member keeps its end time and reason.
+  if (!lib.isEnded(m)) updateSession(sid, { state: 'ended', ended: now, end_reason: 'stopped', last_seen: now });
   return { sid, role: m.role, done };
+}
+
+// The pid of a window member's shell when it is still that shell: the launcher it started is alive under it, or
+// it is still a shell process (cmd, sh, ...). 0 otherwise (pid reused or gone).
+function windowShell(m) {
+  const shell = Number(m.window_shell_pid);
+  if (!(shell > 0) || !alive(shell)) return 0;
+  const table = lib.processTable();
+  const launcher = table.get(Number(m.window_launch_pid));
+  if (launcher && launcher.ppid === shell) return shell;
+  return /^(cmd|sh|bash|zsh|dash|fish|login)(\.exe)?$/i.test(String(table.get(shell)?.name || '')) ? shell : 0;
 }
 
 function cmdEnd(leadSid, argv) {

@@ -865,10 +865,42 @@ function killPid(pid) {
   try { process.kill(pid); return true; } catch { return false; }
 }
 
-// Kill pid only if it is still a Claude Code process (the pid may have been reused).
+// Pids below pid in a process table (children, grandchildren, ...).
+function descendants(pid, table = processTable()) {
+  const out = [];
+  const queue = [Number(pid)];
+  while (queue.length) {
+    const p = queue.shift();
+    for (const q of table.values()) if (q.ppid === p && q.pid !== p && !out.includes(q.pid)) { out.push(q.pid); queue.push(q.pid); }
+  }
+  return out;
+}
+
+// Kill pid and everything it started (tool commands of a Claude process, the program in a terminal window).
+// Windows: taskkill /T /F. Elsewhere: its process group when it leads one, then each descendant, then pid.
+// Returns true if pid was alive and is gone.
+function killTree(pid, table) {
+  pid = Number(pid);
+  if (!(pid > 0) || !alive(pid)) return false;
+  if (process.platform === 'win32') {
+    try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15000 }); } catch { /* checked below */ }
+    if (alive(pid)) killPid(pid);
+  } else {
+    const kids = descendants(pid, table || processTable());
+    try { process.kill(-pid, 'SIGTERM'); } catch { /* not a group leader */ }
+    for (const k of kids.reverse()) { try { process.kill(k, 'SIGTERM'); } catch { /* gone */ } }
+    killPid(pid);
+  }
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  for (let i = 0; i < 20 && alive(pid); i++) Atomics.wait(nap, 0, 0, 50); // up to 1 s for the exit to show
+  return !alive(pid);
+}
+
+// Kill pid and its tool processes, only if it is still a Claude Code process (the pid may have been reused).
 function killClaude(pid) {
-  if (!alive(pid) || !isClaudeProcess(processTable().get(pid))) return false;
-  return killPid(pid);
+  const table = alive(pid) ? processTable() : null;
+  if (!table || !isClaudeProcess(table.get(pid))) return false;
+  return killTree(pid, table);
 }
 
 // Read projects.json, let fn change it, write it at once (keeps changes made since an earlier read). Returns fn's result.
@@ -1433,7 +1465,7 @@ module.exports = {
   registerSession, setState, isRegistered, rulesText, takeInbox, formatReplies,
   DEFAULT_SPAWN, RUNNER_VALUES, runnersOf, setRunners, isEnded, teamRole, routeCard, rulesFor, injectRules, rulesUpdate, pendingRules, setMode,
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
-  processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killClaude, performHandoff, replacedText,
+  processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
   STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
   firstContext, rememberModel, clearLeadContext, envNum,
   leadRulesPath, ensureLeadRules, existingLeadRules,
