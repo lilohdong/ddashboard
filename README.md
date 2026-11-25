@@ -73,6 +73,35 @@ To give a project its own dashboard instead, set a different port and data direc
 
 A session's name defaults to its folder name; override it with the `DDASH_NAME` environment variable.
 
+## Solo and team mode
+
+Each project runs in one of two modes. You can switch at any time, with a command or from the dashboard (the `solo`/`team` switch next to the project name in the sidebar).
+
+| | solo (default) | team |
+|---|---|---|
+| Turn on | `/ddashboard:dashboard` (or `... solo`) | `/ddashboard:dashboard team <lead name>` in the lead session |
+| Who posts to the dashboard | every connected session | the lead only; member cards go to the lead |
+| Your replies go to | the session that posted the card | the lead |
+| Members | — | started by the lead with a tag that sets their role |
+
+**Team mode** is for one lead session that you talk to, and member sessions (planner, frontend, backend, QA…) that do parts of the work and report to the lead. Delivery between them uses the same file inbox and wait command as dashboard replies, so it costs no tokens.
+
+- **Members** start with a first prompt tag: `[ddash role=<role> lead=<lead session id> stay=0|1]`. The lead usually starts them headless (`claude -p` in the background, no terminal needed) with `team.js`; you can also paste the tagged prompt into any terminal.
+- **The lead** gets these commands (the exact command line is in its instructions; it runs from the fixed path `~/.ddashboard/bin/team.js`):
+  | Command | What it does |
+  |---|---|
+  | `spawn --role <role> [--model <m>] [--stay] "<task>"` | Starts a headless member. Output goes to `~/.ddashboard/logs/<session id>.log` |
+  | `send <session id\|role> "<text>"` | Sends an instruction: into the inbox if the member is waiting or running, otherwise resumes it with `claude -p --resume` |
+  | `list` | Members with role, state, waiting, and last card |
+  | `show <card id>` | A card in full (long report details are not copied into the report) |
+  | `handoff <doc>` | Hands the lead over to a new session (see the guide) |
+- **Member reports** reach the lead as `[Team report]`, lead instructions reach members as `[Lead instruction]`, and your replies stay `[Dashboard reply]`. Reports are kept as cards but hidden from the feed; the `Member reports` button shows them, dimmed.
+- **Headless permissions** default to `--permission-mode acceptEdits` plus `Bash(git *)`, `Bash(node *)` and `Bash(npm *)`. Change them per project in `~/.ddashboard/projects.json`: `"spawn": { "permission_mode": "...", "allowed_tools": ["..."], "model": "..." }`.
+- **Sidebar:** members are indented under their lead with a role badge. Sessions without a tag are marked `outside team` and still post directly. If the lead ends, members post directly and are marked `lead missing`.
+- **Lead handoff:** when the lead's context gets large, it writes a handoff doc and runs `team.js ... handoff <doc>`. A new session that starts with `[ddash lead-handoff from=<old id> doc=<path>]` becomes the lead, takes over the members and pending messages, and the old lead is ended and stopped.
+
+Recommended workflow: [Team mode guide](docs/team-mode-guide.md).
+
 ## How it works
 
 ```
@@ -93,9 +122,9 @@ A session's name defaults to its folder name; override it with the `DDASH_NAME` 
 
 | Hook | What it does |
 |---|---|
-| `SessionStart` | Registers new sessions in connected projects and gives them the card rules |
-| `UserPromptSubmit` | Turns the dashboard on/off, connects sessions that started earlier, marks the session "Working" |
-| `Stop` | Records cards and the turn's token usage (`usage/YYYY-MM.jsonl`), delivers waiting replies, marks the session "Idle" |
+| `SessionStart` | Registers new sessions in connected projects and gives them the card rules (team mode: on the first prompt instead, to read the member tag) |
+| `UserPromptSubmit` | Turns the dashboard on/off, switches solo/team mode, registers members and lead handoffs from their tag, connects sessions that started earlier, marks the session "Working" |
+| `Stop` | Records cards and the turn's token usage (`usage/YYYY-MM.jsonl`), sends member cards to their lead (team mode), delivers waiting messages, marks the session "Idle" |
 | `SessionEnd` | Marks the session "Ended" |
 
 No hook calls the model, and none of them print anything in sessions that aren't connected.
@@ -134,7 +163,7 @@ Delete the `~/.ddashboard` folder.
 ## Roadmap
 
 - [ ] Handle replies to closed sessions automatically with `claude -p --resume`
-- [ ] A lead session that splits work and launches sub-sessions in worktrees
+- [x] Team mode: a lead session that splits work and launches member sessions
 - [x] Archive and search cards (0.2.0)
 
 ## Contributing
