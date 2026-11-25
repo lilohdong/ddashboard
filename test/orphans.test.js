@@ -160,9 +160,28 @@ test('F-3: the waiter records its owner as the session\'s claude_pid when none i
 
 // --- F-4: ending or forgetting a session stops its waiter ---
 
+// Start node <file> <args> as an orphan, like a process whose Claude died: a launcher starts it detached and
+// exits at once, so nothing (not even a Claude running these tests) is above it. Returns its pid.
+async function startOrphan(file, args = []) {
+  const launcher = path.join(BOARD, 'launch.js');
+  fs.writeFileSync(launcher, `const { spawn } = require('child_process');
+const c = spawn(process.execPath, process.argv.slice(2), { stdio: 'ignore', detached: true });
+c.unref();
+console.log(c.pid);
+`);
+  const l = spawn(process.execPath, [launcher, file, ...args], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let out = '';
+  l.stdout.on('data', (d) => (out += d));
+  await exited(l);
+  const pid = Number(out.trim());
+  assert.ok(pid > 0, 'orphan did not start');
+  started.push({ kill: () => { try { process.kill(pid); } catch {} } });
+  return pid;
+}
+
 // A process that looks like a wait command for sid to the process table (an older-version waiter: no wait.info),
-// started by this test (no Claude above it, so it is an orphan). Optionally under a wrapper that runs the same
-// command, like Claude's bash -c "... node bin/wait.js <sid>".
+// orphaned. Optionally under an orphaned wrapper that runs the same command, like Claude's
+// bash -c "... node bin/wait.js <sid>".
 function fakeWaiterFiles() {
   const dir = path.join(BOARD, 'old', 'scripts');
   fs.mkdirSync(dir, { recursive: true });
@@ -170,32 +189,35 @@ function fakeWaiterFiles() {
   fs.writeFileSync(file, 'setInterval(() => {}, 1000);\n');
   const wrap = path.join(BOARD, 'old', 'wrap.js');
   // The wrapper's own command line names "<dir>/bin/wait.js <sid>"; it starts the waiter detached (Windows node
-  // would kill a non-detached child with it, which would hide what is being tested).
-  fs.writeFileSync(wrap, `const { spawn } = require('child_process');
+  // would kill a non-detached child with it, which would hide what is being tested) and writes its pid to a file.
+  fs.writeFileSync(wrap, `const fs = require('fs');
+const { spawn } = require('child_process');
 const c = spawn(process.execPath, [${JSON.stringify(file)}, process.argv[3]], { stdio: 'ignore', detached: true });
 c.unref();
-console.log(c.pid);
+fs.writeFileSync(process.argv[4], String(c.pid));
 setInterval(() => {}, 1000);
 `);
   return { file, wrap };
 }
-function startFakeWaiter(sid, { lock = true } = {}) {
+async function startFakeWaiter(sid, { lock = true } = {}) {
   const { file } = fakeWaiterFiles();
-  const p = track(spawn(process.execPath, [file, sid], { stdio: 'ignore' }));
+  const pid = await startOrphan(file, [sid]);
   if (lock) {
     fs.mkdirSync(paths.inbox(sid), { recursive: true });
-    fs.writeFileSync(lib.waitLockPath(sid), String(p.pid));
+    fs.writeFileSync(lib.waitLockPath(sid), String(pid));
   }
-  return p;
+  return { pid };
 }
 async function startWrappedWaiter(sid) {
   const { wrap } = fakeWaiterFiles();
-  const w = track(spawn(process.execPath, [wrap, path.join(BOARD, 'bin', 'wait.js'), sid], { stdio: ['ignore', 'pipe', 'ignore'] }));
-  const pid = await new Promise((r) => w.stdout.once('data', (d) => r(Number(String(d).trim()))));
+  const out = path.join(BOARD, `wrapped-${sid}.pid`);
+  const wrapper = await startOrphan(wrap, [path.join(BOARD, 'bin', 'wait.js'), sid, out]);
+  assert.ok(await until(() => fs.existsSync(out) && Number(fs.readFileSync(out, 'utf8')) > 0), 'wrapped waiter did not start');
+  const pid = Number(fs.readFileSync(out, 'utf8'));
   started.push({ kill: () => { try { process.kill(pid); } catch {} } });
   fs.mkdirSync(paths.inbox(sid), { recursive: true });
   fs.writeFileSync(lib.waitLockPath(sid), String(pid));
-  return { wrapper: w, pid };
+  return { wrapper: { pid: wrapper }, pid };
 }
 
 test('waitCommandSid: every plugin version and Claude\'s bash wrapper', () => {
@@ -220,7 +242,7 @@ test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kill
   assert.equal(fs.existsSync(lib.waitLockPath('X1')), false);
   // pid reuse: the lock names a live process that is not this session's wait command.
   reset({ X2: session('X2') });
-  const other = startFakeWaiter('SOMEONE-ELSE', { lock: false });
+  const other = await startFakeWaiter('SOMEONE-ELSE', { lock: false });
   const sleeper = startFakeClaude();
   await sleep(300);
   fs.mkdirSync(paths.inbox('X2'), { recursive: true });
@@ -233,7 +255,7 @@ test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kill
 
 test('forgetSessions stops an orphan waiter and removes the inbox (was: waiter kept, inbox kept)', async () => {
   reset({ X3: session('X3', { state: 'ended', ended: new Date().toISOString() }) });
-  const w = startFakeWaiter('X3');
+  const w = await startFakeWaiter('X3');
   await sleep(300);
   assert.equal(lib.waitPid('X3'), w.pid);
   assert.deepEqual(lib.forgetSessions(['X3']).forgotten, ['X3']);
@@ -244,7 +266,7 @@ test('forgetSessions stops an orphan waiter and removes the inbox (was: waiter k
 test('markEnded: an orphan waiter (older version, no wait.info) does not block it, and is stopped', async () => {
   const old = new Date(Date.now() - 2 * 3600e3).toISOString();
   reset({ X4: session('X4', { last_seen: old }) });
-  const w = startFakeWaiter('X4');
+  const w = await startFakeWaiter('X4');
   await sleep(300);
   assert.equal(lib.waitPid('X4'), w.pid); // legacy rule: the lock pid alone says waiting
   const r = lib.markEnded('X4');
@@ -260,7 +282,7 @@ test('markEnded: an orphan waiter (older version, no wait.info) does not block i
 
 test('SessionEnd hook stops the session\'s waiter', async () => {
   reset({ X6: session('X6') });
-  const w = startFakeWaiter('X6');
+  const w = await startFakeWaiter('X6');
   await sleep(300);
   const r = require('child_process').spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', 'session-end.js')], { input: JSON.stringify({ session_id: 'X6' }), env: process.env });
   assert.equal(r.status, 0);
@@ -270,7 +292,7 @@ test('SessionEnd hook stops the session\'s waiter', async () => {
 
 test('a new waiter takes over from an orphan waiter instead of saying "Already waiting"', async () => {
   reset({ X7: session('X7') });
-  const orphan = startFakeWaiter('X7');
+  const orphan = await startFakeWaiter('X7');
   await sleep(300);
   const claude = startFakeClaude();
   const w = startWaiter('X7', claude.pid);
@@ -305,6 +327,89 @@ setInterval(() => {}, 1000);
   assert.deepEqual(lib.reapToolShells(claude.pid), [shell]);
   assert.equal(lib.alive(shell), false);
   assert.equal(lib.alive(tool), true); // not a Claude tool shell: left alone
+});
+
+// --- F-9: gone detection for every kind of session ---
+
+async function withServer(fn) {
+  const port = 7800 + Math.floor(Math.random() * 90);
+  const srv = track(spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env: { ...process.env, DDASH_PORT: String(port) }, stdio: 'ignore' }));
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    assert.ok(await until(async () => { try { await fetch(`${base}/api/state`); return true; } catch { return false; } }, 10000), 'server did not start');
+    await fn(base);
+  } finally { srv.kill(); await exited(srv); }
+}
+async function deadPid() {
+  const p = startFakeClaude();
+  await sleep(100);
+  p.kill();
+  await exited(p);
+  return p.pid;
+}
+
+test('F-9: solo, lead and outside sessions whose Claude died are ended (gone) and can be forgotten', async () => {
+  const dead = await deadPid();
+  const live = startFakeClaude();
+  await sleep(200);
+  reset({
+    S1: session('S1', { claude_pid: dead }), // solo
+    L1: session('L1', { kind: 'lead', claude_pid: dead }),
+    O1: session('O1', { claude_pid: dead, state: 'working' }), // died mid-turn
+    A1: session('A1', { claude_pid: live.pid }),
+    H1: session('H1', { kind: 'member', headless: true, pid: dead, claude_pid: dead }),
+    N1: session('N1'), // no pid known: never guessed
+  });
+  await withServer(async (base) => {
+    const st = await (await fetch(`${base}/api/state`)).json();
+    const view = (sid) => st.sessions[sid]?.view;
+    for (const sid of ['S1', 'L1', 'O1']) {
+      assert.equal(view(sid), 'ended', `${sid} shown as ${view(sid)} (bug-005 RC-6)`);
+      assert.equal(st.sessions[sid].end_reason, 'gone');
+    }
+    assert.equal(view('A1'), 'idle');
+    assert.equal(view('N1'), 'idle');
+    assert.notEqual(view('H1'), 'ended'); // headless: "finished", resumable
+  });
+  assert.deepEqual(lib.forgetSessions(['S1', 'L1', 'O1']).forgotten, ['S1', 'L1', 'O1']);
+  live.kill();
+});
+
+test('F-9: a recorded pid now used by another program counts as gone only with a table newer than last_seen', () => {
+  const table = new Map([[process.pid, { pid: process.pid, ppid: 1, name: 'node.exe', cmd: 'node server.js' }]]);
+  const s = session('R1', { claude_pid: process.pid, last_seen: new Date(Date.now() - 60000).toISOString() });
+  table.taken = Date.now();
+  assert.equal(lib.sessionGone(s, null, table), true);
+  table.taken = Date.now() - 120000; // read before the session was last seen: says nothing
+  assert.equal(lib.sessionGone(s, null, table), false);
+  assert.equal(lib.sessionGone(s), false); // no table: alive pid = alive
+  table.taken = Date.now();
+  table.set(process.pid, { pid: process.pid, ppid: 1, name: 'claude.exe', cmd: 'claude' });
+  assert.equal(lib.sessionGone(s, null, table), false);
+});
+
+test('F-9: SessionStart records the Claude pid in solo mode too', async () => {
+  reset({});
+  const file = path.join(BOARD, 'claude-code', 'hook-runner.js');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `const { spawnSync } = require('child_process');
+spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'scripts', 'hooks', 'session-start.js'))}], { input: JSON.stringify({ session_id: 'P1', cwd: ${JSON.stringify(CWD)} }), stdio: ['pipe', 'ignore', 'ignore'] });
+setInterval(() => {}, 1000);
+`);
+  const claude = track(spawn(process.execPath, [file], { stdio: 'ignore' }));
+  assert.ok(await until(() => readJson(paths.sessions, {}).P1?.claude_pid === claude.pid, 15000), `claude_pid not recorded: ${JSON.stringify(readJson(paths.sessions, {}).P1)}`);
+  assert.equal(readJson(paths.projects, {})[KEY].mode, undefined); // solo
+  claude.kill();
+});
+
+test('F-9: UserPromptSubmit records a missing pid once (0 when no Claude is found)', async () => {
+  reset({ P2: session('P2') });
+  const runner = path.join(BOARD, 'prompt-runner.js');
+  fs.writeFileSync(runner, `require('child_process').spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'scripts', 'hooks', 'prompt-submit.js'))}], { input: JSON.stringify({ session_id: 'P2', cwd: ${JSON.stringify(CWD)}, prompt: 'hi' }), stdio: ['pipe', 'ignore', 'ignore'] });
+`);
+  await startOrphan(runner);
+  assert.ok(await until(() => readJson(paths.sessions, {}).P2?.claude_pid !== undefined, 15000), 'nothing recorded');
+  assert.equal(readJson(paths.sessions, {}).P2.claude_pid, 0); // no Claude above it
 });
 
 // --- run ---

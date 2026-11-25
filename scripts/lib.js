@@ -843,25 +843,51 @@ function processName(pid) {
 
 const PS_LIST = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$(($_.CommandLine -replace "[`r`n`t]", " "))" }';
 
-// pid -> { pid, ppid, name, cmd } for every process. Windows: one CIM query (~0.4 s). Empty on failure.
-function processTable() {
+// How to list every process: [file, args] (Windows: one CIM query, ~0.4 s).
+const PROC_CMD = () => (process.platform === 'win32'
+  ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_LIST]]
+  : ['ps', ['-A', '-o', 'pid=,ppid=,comm=,args=']]);
+
+// pid -> { pid, ppid, name, cmd } from the list command's output. table.taken = when the read started (ms).
+function parseProcessList(out, taken = Date.now()) {
   const table = new Map();
-  try {
-    if (process.platform === 'win32') {
-      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_LIST], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 10000 }).toString('utf8');
-      for (const line of out.split(/\r?\n/)) {
-        const [pid, ppid, name, cmd] = line.split('\t');
-        if (Number(pid)) table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), name: name || '', cmd: cmd || '' });
-      }
-    } else {
-      const out = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,comm=,args='], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }).toString('utf8');
-      for (const line of out.split('\n')) {
-        const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
-        if (m) table.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), name: path.basename(m[3]), cmd: m[4] });
-      }
+  table.taken = taken;
+  if (process.platform === 'win32') {
+    for (const line of String(out).split(/\r?\n/)) {
+      const [pid, ppid, name, cmd] = line.split('\t');
+      if (Number(pid)) table.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), name: name || '', cmd: cmd || '' });
     }
-  } catch { /* no process list */ }
+  } else {
+    for (const line of String(out).split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
+      if (m) table.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), name: path.basename(m[3]), cmd: m[4] });
+    }
+  }
   return table;
+}
+
+// pid -> { pid, ppid, name, cmd } for every process. Empty on failure (table.taken is then 0).
+function processTable() {
+  const taken = Date.now();
+  const [file, args] = PROC_CMD();
+  try {
+    const out = execFileSync(file, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 10000 }).toString('utf8');
+    return parseProcessList(out, taken);
+  } catch {
+    const empty = new Map();
+    empty.taken = 0;
+    return empty;
+  }
+}
+
+// Same without blocking (the dashboard server): cb(table).
+function processTableAsync(cb) {
+  const taken = Date.now();
+  const [file, args] = PROC_CMD();
+  require('child_process').execFile(file, args, { windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    if (err) { const empty = new Map(); empty.taken = 0; return cb(empty); }
+    cb(parseProcessList(stdout, taken));
+  });
 }
 
 // The Claude Code process: native claude(.exe), or node/bun running the claude-code package.
@@ -1405,19 +1431,27 @@ function forgetSessions(ids) {
   return { forgotten, refused };
 }
 
-// Mark a session the user considers dead as ended. Only idle, stale sessions without a live waiter.
-// True when a session is known to be gone without its SessionEnd hook having run (bug-001: an Orca terminal
-// closed by hand kills claude before the hook): its recorded Claude process is dead, or, with no recorded pid,
-// its Orca terminal is closed (isOpen(handle) -> true | false | null for unknown; left out: not checked).
-// Never guesses: a live wait command, an old record with no pid and no terminal, or an unknown terminal state
-// count as alive. Headless sessions keep their own rule (pid exited = "finished", resumable).
-function memberGone(s, isOpen) {
+// True when a session (any kind: solo, lead, member, outside) is known to be gone without its SessionEnd hook
+// having run (bug-001, bug-005: a terminal closed by hand kills claude before the hook): its recorded Claude
+// process is dead, or its pid now belongs to another program (table: a process table taken after the session was
+// last seen), or, with no recorded pid, its Orca terminal is closed (isOpen(handle) -> true | false | null for
+// unknown; left out: not checked). Never guesses: a live wait command with a live owner, an old record with no pid
+// and no terminal, or an unknown terminal state count as alive. Headless sessions keep their own rule (pid exited
+// = "finished", resumable).
+function sessionGone(s, isOpen, table) {
   if (!s || isEnded(s) || s.headless) return false;
+  const cp = Number(s.claude_pid);
+  if (cp > 0) {
+    if (!alive(cp)) return true;
+    const p = table?.get(cp);
+    const fresh = table?.taken && table.taken > new Date(s.last_seen || 0).getTime();
+    return Boolean(fresh && p && !isClaudeProcess(p));
+  }
   if (waitPid(s.session_id)) return false;
-  if (Number(s.claude_pid) > 0) return !alive(Number(s.claude_pid));
   if (isOpen && s.runner === 'orca' && s.orca?.handle) return isOpen(s.orca.handle) === false;
   return false;
 }
+const memberGone = sessionGone;
 
 // Mark these sessions ended (end_reason 'gone') in sessions.json. Returns the ids changed.
 function markGone(sids) {
@@ -1599,8 +1633,8 @@ module.exports = {
   parseTag, setMember, newId, deliver, reportMessage, formatMessages, messagesReason, moveInbox, waitPid,
   waitLockPath, waitInfoPath, readWaitInfo, processName, napUntil, waitCommandSid, waiterChain, killWaiterChain, orphanWaiter, stopWaiter,
   reapToolShells, stopSessionProcesses,
-  processTable, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
-  STALE_MIN, isStale, forgetSessions, markEnded, memberGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
+  processTable, processTableAsync, parseProcessList, isClaudeProcess, findClaudePid, recordClaudePid, killPid, killTree, descendants, killClaude, performHandoff, replacedText,
+  STALE_MIN, isStale, forgetSessions, markEnded, memberGone, sessionGone, markGone, LEAD_CONTEXT_LIMIT, LEAD_WORK_BUDGET, CONTEXT_WINDOW, HANDOFF_MAX_TOKENS, leadContextNotice, leadLimit, contextWindow, estimateTokens,
   firstContext, rememberModel, clearLeadContext, envNum,
   leadRulesPath, ensureLeadRules, existingLeadRules,
   GROUP_NAME, BRIEF_MAX_CHARS, groupSettings, groupsOf, createGroup, renameGroup, deleteGroup, handoffs, latestHandoff,

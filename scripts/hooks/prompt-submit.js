@@ -10,7 +10,7 @@
 // - After a mode switch, the next prompt gets the new instructions once.
 // - Connected sessions are marked "working". Anything else prints nothing (zero tokens).
 const {
-  paths, readJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, setState,
+  paths, readJson, writeJson, readHookInput, safeId, serverPid, projectActive, projectKey, setProject, registerSession, setState,
   isRegistered, injectRules, pendingRules, parseTag, setMember, performHandoff, recordClaudePid, replacedText,
   memberStart, addTeam, removeTeams, teamOfLead, readProjects,
 } = require('../lib');
@@ -25,6 +25,13 @@ function handoffNote(tag, res) {
   return `[ddashboard] You took over as lead of team "${res.team}" from ${tag.from}${tag.doc ? `. Read the handoff doc first: ${tag.doc}` : ''}${res.rules ? `${tag.doc ? ' and' : '. Read'} the team's fixed rules: ${res.rules}` : ''}. Read only these (not older handoff docs).
 The members (${res.members}) now report to you; ${res.moved} pending message(s) moved to your inbox; the old lead is ended and ${stopped}.
 `;
+}
+
+// Record the session's Claude pid; when none is found, remember that (claude_pid 0) so later prompts don't search again.
+function recordPidOnce(sid) {
+  if (recordClaudePid(sid)) return;
+  const sessions = readJson(paths.sessions, {});
+  if (sessions[sid] && sessions[sid].claude_pid === undefined) { sessions[sid].claude_pid = 0; writeJson(paths.sessions, sessions); }
 }
 
 (async () => {
@@ -95,8 +102,10 @@ The members (${res.members}) now report to you; ${res.moved} pending message(s) 
 
   if (!isRegistered(sid) && serverPid() && projectActive(cwd)) {
     registerSession(sid, cwd);
+    recordPidOnce(sid);
     process.stdout.write(injectRules(sid));
   } else if (me) {
+    if (me.claude_pid === undefined && !me.headless) recordPidOnce(sid); // registered before pids were recorded
     const update = pendingRules(sid);
     if (update) process.stdout.write(update);
   }

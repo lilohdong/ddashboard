@@ -28,7 +28,7 @@ const path = require('path');
 const {
   BOARD_DIR, PORT, paths, readJson, readJsonl, writeJson, appendJsonl, ensureDir, safeId, teamRole, routeCard, setMode,
   isEnded, isStale, forgetSessions, markEnded, deliver, STALE_MIN, readSettings, saveSettings, leadLimit,
-  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, memberGone, markGone,
+  readProjects, teamOfSession, teamsOf, own, runnersOf, setRunners, sessionGone, markGone, waitPid,
 } = require('./lib');
 const orca = require('./orca');
 const cards = require('./cards');
@@ -103,13 +103,11 @@ function terminalOpen(handle) {
   return hit.open;
 }
 
-function waiting(sid) {
-  try {
-    const pid = Number(fs.readFileSync(path.join(paths.inbox(sid), 'wait.lock'), 'utf8'));
-    process.kill(pid, 0);
-    return true;
-  } catch { return false; }
-}
+// A live wait command whose owner (when known) is alive: see lib.waitPid.
+const waiting = (sid) => Boolean(waitPid(sid));
+
+// The last process table (read in the background, see sweep below); null until the first read.
+let procTable = null;
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -143,8 +141,8 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/state') {
     const sessions = readJson(paths.sessions, {});
     const projects = readProjects();
-    // Members that died without their SessionEnd hook (bug-001) are marked ended.
-    const gone = markGone(Object.values(sessions).filter((s) => s.kind === 'member' && memberGone(s, terminalOpen)).map((s) => s.session_id));
+    // Sessions of any kind that died without their SessionEnd hook (bug-001, bug-005) are marked ended.
+    const gone = markGone(Object.values(sessions).filter((s) => sessionGone(s, terminalOpen, procTable)).map((s) => s.session_id));
     const ts = new Date().toISOString();
     for (const sid of gone) Object.assign(sessions[sid], { state: 'ended', ended: ts, end_reason: 'gone' });
     for (const s of Object.values(sessions)) {
