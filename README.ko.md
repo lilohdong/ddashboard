@@ -4,7 +4,7 @@
 
 **Claude Code 세션의 작업 결과를 카드 한 장으로 받아 보고, 카드에 단 답글로 그 세션에 바로 지시하는 로컬 대시보드 플러그인입니다.**
 
-![version](https://img.shields.io/badge/version-0.1.0-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
+![version](https://img.shields.io/badge/version-0.2.0-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
 
 AI는 사람이 따라가기 어려울 만큼 빠르게 개발하고, 터미널에는 읽기 벅찬 양의 글을 남깁니다. ddashboard는 그중 **사람이 알아야 할 것만** 남깁니다. 카드에는 상태, 핵심 요약 3줄, 확인할 것이 들어갑니다. 사람은 대시보드만 보고, 카드에 답글을 달아 그 세션에 다음 일을 시킵니다.
 
@@ -55,8 +55,10 @@ Claude Code 안에서 실행합니다.
   | 회색 점 (`Idle`) | 쉬는 중. 답글은 다음 턴이 끝날 때 전달됨 |
   | 빈 점 (`Ended`) | 종료 (기본으로 숨김) |
   | `needs you` | 마지막 카드가 `Needs review`(검토 필요) 또는 `Blocked`(막힘)인 세션 |
+- **검색:** 위쪽 검색창(`/` 키로 이동, `Esc`로 지우기)에서 보관된 카드까지 모든 카드를 찾습니다.
 - **필터:** 상태별로 카드를 거르고, 상태마다 개수를 보여 줍니다.
-- **카드:** 프로젝트, 세션, 브랜치, 시각, 변경 통계와 함께 요약과 확인할 것(`Check`)을 보여 줍니다. 종료된 세션의 카드에는 답글 창이 나오지 않습니다.
+- **보관:** 카드마다 Archive 버튼이 있습니다. 14일 지난 카드와 새 버전으로 교체된 카드는 자동으로 보관됩니다. 사이드바 아래 `Archived (N)`을 누르면 보관함이 열리고, 거기서 다시 꺼낼 수 있습니다.
+- **카드:** 프로젝트, 세션, 브랜치, 시각, 변경 통계와 함께 요약, 확인할 것(`Check`), 긴 내용을 접어 두는 `Details`를 보여 줍니다. 종료된 세션의 카드에는 답글 창이 나오지 않습니다.
 
 ## 여러 세션, 여러 프로젝트와 함께 쓰기
 
@@ -78,7 +80,7 @@ Claude Code 안에서 실행합니다.
  세션이 한 턴을 끝냄 ── 응답 끝에 card 블록
           │
           ▼  Stop 훅 (모델 호출 없음)
- ~/.ddashboard/cards.jsonl ── 브랜치, diff 통계 자동 첨부
+ ~/.ddashboard/cards/YYYY-MM.jsonl ── 브랜치, diff 통계 자동 첨부
           │
           ▼
  로컬 서버 + 대시보드 (127.0.0.1:7357)
@@ -107,6 +109,7 @@ Claude Code 안에서 실행합니다.
 | `DDASH_BOARD_DIR` | `~/.ddashboard` | 카드, 답글, 세션 정보 저장 위치 |
 | `DDASH_NAME` | 폴더 이름 | 대시보드에 표시할 세션 이름 |
 | `DDASH_POLL_MS` | `1500` | 대기 명령이 답글을 확인하는 주기(ms) |
+| `DDASH_RECENT_DAYS` | `14` | 이 기간이 지난 카드는 자동으로 보관 |
 
 서버만 따로 다룰 때:
 
@@ -132,7 +135,7 @@ node <플러그인 경로>/scripts/control.js start | stop | status
 
 - [ ] 닫힌 세션에 온 답글을 `claude -p --resume`으로 자동 처리
 - [ ] 팀장 세션이 작업을 나눠 worktree에 서브 세션을 띄우는 모드
-- [ ] 카드 보관(아카이브)과 검색
+- [x] 카드 보관(아카이브)과 검색 (0.2.0)
 
 ## 기여
 
