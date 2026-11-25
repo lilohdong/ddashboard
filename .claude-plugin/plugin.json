@@ -7,6 +7,7 @@
   },
   "homepage": "https://github.com/lilohdong/ddashboard",
   "repository": "https://github.com/lilohdong/ddashboard",
+  "license": "MIT",
   "keywords": [
     "dashboard",
     "hooks",

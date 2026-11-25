@@ -9,7 +9,8 @@
       "name": "ddashboard",
       "source": "./",
       "description": "See each session's results as a short card, and reply on the card to instruct that session.",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "license": "MIT"
     }
   ]
 }
