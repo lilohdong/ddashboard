@@ -82,6 +82,24 @@
   textarea { flex: 1; min-width: 0; resize: vertical; min-height: 38px; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); padding: 8px; font: inherit; }
   form button { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; border-radius: 8px; padding: 0 14px; cursor: pointer; }
   .closed { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .title { flex: 1; min-width: 0; }
+  .card-act { border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 6px; padding: 0 8px; font-size: 12px; cursor: pointer; }
+  .card-act:hover { color: var(--text); border-color: var(--muted); }
+  .badge.archived { color: var(--muted); }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .details-body { margin-top: 6px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 420px; overflow-y: auto; }
+
+  /* Search */
+  .search { position: relative; flex: 0 1 260px; min-width: 140px; }
+  .search input { width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); padding: 0 28px 0 10px; font: inherit; }
+  .search input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
+  .search kbd { position: absolute; right: 8px; top: 7px; font: 11px/16px ui-monospace, monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; pointer-events: none; }
+  .search input:focus + kbd, .search input:not(:placeholder-shown) + kbd { display: none; }
+  .mode-bar { max-width: 860px; margin: 0 auto; padding: 12px 20px 0; color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .mode-bar button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
+  .mode-bar:empty { display: none; }
+  .archive-link { margin-top: 16px; color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); text-align: center; padding: 48px 0; }
 
   /* Narrow screens: sidebar sits above the cards */
@@ -103,8 +121,13 @@
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6 3v10"/></svg>
       </button>
       <h1><span class="brand-inline">DDashboard / </span><span id="scope">All</span></h1>
+      <div class="search">
+        <input id="q" type="search" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </div>
       <div class="filters" id="filters"></div>
     </header>
+    <div class="mode-bar" id="mode"></div>
     <div id="cards"></div>
   </div>
 </div>
@@ -125,7 +148,18 @@ let scope = store.get('scope', { kind: 'all' }); // { kind: 'all' | 'project' | 
 let filter = store.get('filter', 'all');
 let showEnded = store.get('showEnded', false);
 let drafts = {};
-let state = { sessions: {}, cards: [], replies: [] };
+let state = { sessions: {}, cards: [], replies: [], last_by_session: {}, archived_count: 0 };
+
+// Search / archive view. results is null while not searching (or while the first search is loading).
+let query = '';
+let archivedView = false;
+let results = null;
+let searchError = '';
+let searchSeq = 0;
+let searchTimer = 0;
+const overrides = {};          // card_id -> archived, applied optimistically until the server catches up
+const openDetails = new Set(); // card ids whose Details section is expanded
+const searching = () => Boolean(query) || archivedView;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const time = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -144,9 +178,13 @@ function toggleSide(open) {
 }
 
 // A session needs you when its latest card is "needs review" or "blocked".
+// last_by_session covers archived and older cards too; fall back to cards for 0.1.0 servers.
 function urgentBySession() {
-  const last = {};
-  for (const c of state.cards) last[c.session_id] = c;
+  let last = state.last_by_session;
+  if (!last) {
+    last = {};
+    for (const c of state.cards) last[c.session_id] = c;
+  }
   const out = {};
   for (const [sid, c] of Object.entries(last)) if (URGENT.has(c.status)) out[sid] = 1;
   return out;
@@ -191,59 +229,174 @@ function renderSide() {
     </div>`;
   }
   if (ended.length) html += `<button class="nav ended-toggle" data-toggle-ended>${showEnded ? 'Hide ended sessions' : `Show ${ended.length} ended session${ended.length > 1 ? 's' : ''}`}</button>`;
+  html += `<button class="nav archive-link ${archivedView ? 'sel' : ''}" data-archived><span class="grow">Archived (${state.archived_count || 0})</span></button>`;
   html += `<div class="legend">${Object.entries(VIEW).map(([k, v]) => `<span><span class="dot ${k}"></span>${v}</span>`).join('')}</div>`;
   document.getElementById('side').innerHTML = html;
 }
 
-function renderMain() {
-  const scoped = state.cards.filter(inScope);
-  const counts = {};
-  for (const c of scoped) counts[c.status] = (counts[c.status] || 0) + 1;
-  document.getElementById('filters').innerHTML = [['all', 'All', scoped.length], ...Object.entries(STATUS).map(([k, v]) => [k, v, counts[k] || 0])]
-    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${v} ${n}</button>`).join('');
+// Cards for the current view, newest first.
+function viewCards() {
+  if (searching()) {
+    if (!results) return null;
+    return results
+      .map((c) => (c.id in overrides ? { ...c, archived: overrides[c.id] } : c))
+      .filter((c) => !archivedView || c.archived);
+  }
+  return state.cards.filter((c) => overrides[c.id] !== true).slice().reverse();
+}
 
-  const s = scope.kind === 'session' ? state.sessions[scope.id] : null;
-  document.getElementById('scope').textContent = scope.kind === 'all' ? 'All' : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : 'Session';
-
-  const byCard = {};
-  for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
-
-  const list = scoped.slice().reverse().filter((c) => filter === 'all' || c.status === filter);
-  document.getElementById('cards').innerHTML = list.length ? list.map((c) => {
-    const sess = state.sessions[c.session_id];
-    const open = sess && sess.view !== 'ended';
-    return `
+function cardHtml(c, byCard) {
+  const sess = state.sessions[c.session_id];
+  const open = sess && sess.view !== 'ended';
+  const details = typeof c.details === 'string' && c.details.trim() ? c.details : '';
+  return `
     <article class="card">
       <div class="card-head">
         <span class="badge s-${esc(c.status)}">${esc(STATUS[c.status] || c.status)}</span>
+        ${c.archived ? '<span class="badge archived">Archived</span>' : ''}
         <span class="title">${esc(c.title)}</span>
+        ${c.archived
+          ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="Move back to the recent list">Unarchive</button>`
+          : `<button class="card-act" data-archive="${esc(c.id)}" title="Hide from the recent list">Archive</button>`}
       </div>
       <div class="meta">${esc(sess?.project || c.project || '')} · ${esc(c.session_name)} · ${esc(c.branch)} · ${time(c.ts)}${c.diffstat ? ' · ' + esc(c.diffstat) : ''}</div>
       ${c.summary?.length ? `<ul>${c.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       ${c.review?.length ? `<div class="review"><b>Check</b><ul>${c.review.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${details ? `<details data-details="${esc(c.id)}"${openDetails.has(c.id) ? ' open' : ''}><summary>Details</summary><div class="details-body">${esc(details)}</div></details>` : ''}
       <div class="replies">${(byCard[c.id] || []).map((r) => `<div class="reply"><b>You</b> ${esc(r.text)} · ${time(r.ts)}</div>`).join('')}</div>
       ${open ? `<form data-sid="${esc(c.session_id)}" data-id="${esc(c.id)}" data-title="${esc(c.title)}">
         <textarea data-card="${esc(c.id)}" placeholder="Reply to this session…" title="Ctrl+Enter to send">${esc(drafts[c.id] || '')}</textarea>
         <button>Send</button>
       </form>` : `<div class="closed">This session has ended, so it can't receive replies.</div>`}
     </article>`;
-  }).join('') : '<div class="empty">No cards to show.</div>';
+}
+
+function renderMain() {
+  saveDrafts();
+  const all = viewCards();
+  const scoped = (all || []).filter(inScope);
+  const counts = {};
+  for (const c of scoped) counts[c.status] = (counts[c.status] || 0) + 1;
+  document.getElementById('filters').innerHTML = [['all', 'All', scoped.length], ...Object.entries(STATUS).map(([k, v]) => [k, v, counts[k] || 0])]
+    .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${v} ${n}</button>`).join('');
+
+  const s = scope.kind === 'session' ? state.sessions[scope.id] : null;
+  const scopeName = scope.kind === 'all' ? 'All' : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : 'Session';
+  document.getElementById('scope').textContent = archivedView ? `${scopeName} · Archived` : scopeName;
+
+  const list = scoped.filter((c) => filter === 'all' || c.status === filter);
+  let mode = '';
+  if (searching()) {
+    const what = archivedView ? 'archived cards' : 'all cards';
+    const status = searchError ? esc(searchError) : !all ? 'Searching…' : `${list.length} ${query ? 'result' : 'card'}${list.length === 1 ? '' : 's'}${query ? ` for “${esc(query)}”` : ''} in ${what}`;
+    mode = `<span>${status}</span>
+      ${query ? '<button data-clear-search>Clear search</button>' : ''}
+      ${archivedView ? '<button data-archived>Back to recent</button>' : ''}`;
+  }
+  document.getElementById('mode').innerHTML = mode;
+
+  const byCard = {};
+  for (const r of state.replies) (byCard[r.card_id] ||= []).push(r);
+  const empty = searching() ? (all ? (query ? 'No matching cards.' : 'No archived cards.') : '') : 'No cards to show.';
+  document.getElementById('cards').innerHTML = list.length ? list.map((c) => cardHtml(c, byCard)).join('') : empty ? `<div class="empty">${empty}</div>` : '';
+}
+
+function saveDrafts() {
+  document.querySelectorAll('textarea[data-card]').forEach((t) => (drafts[t.dataset.card] = t.value));
+}
+
+async function runSearch() {
+  if (!searching()) { results = null; searchError = ''; return; }
+  const seq = ++searchSeq;
+  const params = new URLSearchParams({ q: query, archived: archivedView ? 'only' : 'include', limit: '100' });
+  try {
+    const res = await fetch('/api/search?' + params);
+    const data = await res.json();
+    if (seq !== searchSeq) return;
+    if (!res.ok || !Array.isArray(data.cards)) throw new Error(data.error || res.status);
+    results = data.cards;
+    searchError = '';
+  } catch {
+    if (seq !== searchSeq) return;
+    results = results || [];
+    searchError = 'Search is not available. Is the dashboard server up to date?';
+  }
 }
 
 async function load() {
-  document.querySelectorAll('textarea[data-card]').forEach((t) => (drafts[t.dataset.card] = t.value));
+  saveDrafts();
   try {
     state = await (await fetch('/api/state')).json();
   } catch { return; }
   if (scope.kind === 'session' && !state.sessions[scope.id]) scope = { kind: 'all' };
+  await runSearch();
   renderSide();
   renderMain();
+}
+
+// Re-search now (new query or view), dropping results that belong to the old one.
+async function refreshSearch() {
+  clearTimeout(searchTimer);
+  results = null;
+  renderSide(); renderMain();
+  await runSearch();
+  renderMain();
+}
+
+async function setArchived(id, archived) {
+  const had = id in overrides;
+  const prev = overrides[id];
+  const delta = archived ? 1 : -1;
+  overrides[id] = archived;
+  state.archived_count = Math.max(0, (state.archived_count || 0) + delta);
+  renderSide(); renderMain();
+  try {
+    const res = await fetch('/api/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ card_id: id, archived }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (err) {
+    if (had) overrides[id] = prev; else delete overrides[id];
+    state.archived_count = Math.max(0, state.archived_count - delta);
+    renderSide(); renderMain();
+    alert(`Could not ${archived ? 'archive' : 'unarchive'}: ${err.message}`);
+    return;
+  }
+  load();
 }
 
 document.getElementById('toggle').addEventListener('click', () => toggleSide());
 narrow.addEventListener('change', applySide);
 
+const qInput = document.getElementById('q');
+qInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const next = qInput.value.trim();
+    if (next !== query) { query = next; refreshSearch(); }
+  }, 300);
+});
+function clearSearch() {
+  qInput.value = '';
+  if (query) { query = ''; refreshSearch(); } else clearTimeout(searchTimer);
+}
+
 document.addEventListener('click', (e) => {
+  const arch = e.target.closest('[data-archive], [data-unarchive]');
+  if (arch) {
+    if (arch.dataset.archive) setArchived(arch.dataset.archive, true);
+    else setArchived(arch.dataset.unarchive, false);
+    return;
+  }
+  if (e.target.closest('[data-archived]')) {
+    archivedView = !archivedView;
+    refreshSearch();
+    if (narrow.matches && archivedView) toggleSide(false);
+    return;
+  }
+  if (e.target.closest('[data-clear-search]')) { clearSearch(); return; }
   const nav = e.target.closest('[data-kind]');
   if (nav) {
     scope = nav.dataset.kind === 'all' ? { kind: 'all' } : { kind: nav.dataset.kind, id: nav.dataset.id };
@@ -260,10 +413,22 @@ document.addEventListener('click', (e) => {
   if (f) { filter = f; store.set('filter', filter); renderMain(); }
 });
 
+// Keep Details sections open across re-renders. ("toggle" doesn't bubble, so listen in the capture phase.)
+document.addEventListener('toggle', (e) => {
+  const id = e.target.dataset?.details;
+  if (!id) return;
+  if (e.target.open) openDetails.add(id); else openDetails.delete(id);
+}, true);
+
 document.addEventListener('keydown', (e) => {
   const typing = e.target.matches('textarea, input');
-  if (e.key === 'Enter' && e.ctrlKey && typing) e.target.form.requestSubmit();
-  else if (e.key === '[' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) toggleSide();
+  const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (e.target === qInput && e.key === 'Escape') {
+    e.preventDefault();
+    if (qInput.value) clearSearch(); else qInput.blur();
+  } else if (e.key === 'Enter' && e.ctrlKey && e.target.form) e.target.form.requestSubmit();
+  else if (e.key === '/' && !typing && plain) { e.preventDefault(); qInput.focus(); qInput.select(); }
+  else if (e.key === '[' && !typing && plain) toggleSide();
 });
 
 document.addEventListener('submit', async (e) => {
