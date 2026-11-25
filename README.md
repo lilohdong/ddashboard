@@ -4,7 +4,7 @@
 
 **A local dashboard for Claude Code: see each session's results as a short card, and reply on the card to instruct that session.**
 
-![version](https://img.shields.io/badge/version-0.1.0-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
+![version](https://img.shields.io/badge/version-0.2.0-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
 
 AI writes code faster than people can follow, and leaves more text in the terminal than anyone wants to read. ddashboard keeps only **what you need to know**: a status, a three-line summary, and what you should check. You watch the dashboard, and reply on a card to tell that session what to do next.
 
@@ -53,8 +53,10 @@ To turn it off, type `/ddashboard:dashboard off`. The server stops once no proje
   | Gray dot | Idle — a reply is delivered when the next turn ends |
   | Hollow dot | Ended (hidden by default) |
   | `needs you` | The session's latest card is "Needs review" or "Blocked" |
+- **Search:** the search box at the top (`/` to focus, `Esc` to clear) searches every card, archived ones included.
 - **Filters:** narrow cards by status, with a count for each.
-- **Cards:** project, session, branch, time, and diff stats, plus the summary and what to check. Cards from ended sessions don't show a reply box.
+- **Archive:** each card has an Archive button. Cards older than 14 days, and cards replaced by a newer version, are archived automatically. `Archived (N)` at the bottom of the sidebar opens the archive, where you can unarchive.
+- **Cards:** project, session, branch, time, and diff stats, plus the summary, what to check, and a collapsible `Details` section for longer content. Cards from ended sessions don't show a reply box.
 
 ## Multiple sessions and projects
 
@@ -76,7 +78,7 @@ A session's name defaults to its folder name; override it with the `DDASH_NAME` 
  A session ends its turn ── card block at the end of the reply
           │
           ▼  Stop hook (no model calls)
- ~/.ddashboard/cards.jsonl ── branch and diff stats attached automatically
+ ~/.ddashboard/cards/YYYY-MM.jsonl ── branch and diff stats attached automatically
           │
           ▼
  Local server + dashboard (127.0.0.1:7357)
@@ -105,6 +107,7 @@ No hook calls the model, and none of them print anything in sessions that aren't
 | `DDASH_BOARD_DIR` | `~/.ddashboard` | Where cards, replies, and session info are stored |
 | `DDASH_NAME` | folder name | Session name shown on the dashboard |
 | `DDASH_POLL_MS` | `1500` | How often the wait command checks for replies (ms) |
+| `DDASH_RECENT_DAYS` | `14` | Cards older than this are archived automatically |
 
 To manage the server directly:
 
@@ -130,7 +133,7 @@ Delete the `~/.ddashboard` folder.
 
 - [ ] Handle replies to closed sessions automatically with `claude -p --resume`
 - [ ] A lead session that splits work and launches sub-sessions in worktrees
-- [ ] Archive and search cards
+- [x] Archive and search cards (0.2.0)
 
 ## Contributing
 
