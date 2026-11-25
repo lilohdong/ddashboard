@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Local dashboard server (no model calls)
-//   GET  /            dashboard page (GET /i18n.js: its text in en, ko, zh-CN)
+//   GET  /            dashboard page (web/index.html); static files: /i18n.js (its text in en, ko, zh-CN),
+//                     /web/<name>.mjs, /web/style.css (whitelist, nothing else)
 //   GET  /api/settings, POST /api/settings {lang: en|ko|zh-CN|null} -> dashboard and card language
 //                     POST /api/settings {project, runner_lead?, runner_member?: headless|orca|window} -> how a
 //                     project's new leads (handoff --spawn) and members start (projects.json spawn)
@@ -41,8 +42,17 @@ const team = require('./team');
 
 const CONTEXT_WARN = Number(process.env.DDASH_CONTEXT_WARN) || 150000;
 
-const HTML = path.join(__dirname, 'dashboard.html');
-const I18N = path.join(__dirname, 'i18n.js');
+// Static files: the page, its text table, and the web/ modules and style sheet. Names are matched, never joined
+// from the URL as given, so nothing outside this list is served.
+const WEB = path.join(__dirname, 'web');
+const JS = 'text/javascript; charset=utf-8';
+function staticFile(pathname) {
+  if (pathname === '/') return [path.join(WEB, 'index.html'), 'text/html; charset=utf-8'];
+  if (pathname === '/i18n.js') return [path.join(__dirname, 'i18n.js'), JS];
+  if (pathname === '/web/style.css') return [path.join(WEB, 'style.css'), 'text/css; charset=utf-8'];
+  const m = /^\/web\/([a-z0-9-]+\.mjs)$/.exec(pathname);
+  return m ? [path.join(WEB, m[1]), JS] : null;
+}
 const MAX_BODY = 64 * 1024;
 
 function send(res, code, body, type = 'application/json; charset=utf-8') {
@@ -134,12 +144,11 @@ function sweep() {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
-  if (req.method === 'GET' && url.pathname === '/') {
-    return send(res, 200, fs.readFileSync(HTML, 'utf8'), 'text/html; charset=utf-8');
-  }
-
-  if (req.method === 'GET' && url.pathname === '/i18n.js') {
-    return send(res, 200, fs.readFileSync(I18N, 'utf8'), 'text/javascript; charset=utf-8');
+  const file = req.method === 'GET' && staticFile(url.pathname);
+  if (file) {
+    let body;
+    try { body = fs.readFileSync(file[0], 'utf8'); } catch { return send(res, 404, { error: 'not found' }); }
+    return send(res, 200, body, file[1]);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {

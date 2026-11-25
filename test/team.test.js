@@ -1827,14 +1827,7 @@ test('i18n: every key in every language, and every key the page uses exists', ()
       assert.equal(vars(i18n.DICT[lang][k]), vars(i18n.DICT.en[k]), `placeholders of ${lang} ${k}`);
     }
   }
-  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
-  const used = new Set([
-    ...[...html.matchAll(/\bt\('([\w.]+)'/g)].map((m) => m[1]),
-    ...[...html.matchAll(/data-i18n-\w+="([\w.]+)"/g)].map((m) => m[1]),
-    ...['review', 'blocked', 'wip', 'done'].map((k) => `status.${k}`),
-    ...['working', 'waiting', 'idle', 'ended'].map((k) => `view.${k}`),
-  ]);
-  for (const k of used) assert.ok(k in i18n.DICT.en, `missing key ${k}`);
+  // The keys the page uses are checked in test/web.test.js.
   assert.equal(i18n.translate('ko', 'ago.m', { n: 3 }), '3분 전');
   assert.equal(i18n.translate('zh-CN', 'nope.key'), 'nope.key');
   assert.equal(i18n.translate('ko', 'card.send'), '보내기');
@@ -2041,38 +2034,7 @@ test('rules: a running session gets the instructions again once when the instruc
   assert.equal(readJson(paths.sessions, {}).S1.text_ver, lib.RULES_TEXT_VER);
 });
 
-// Ported from method C.
-test('dashboard: key tag carries the project and its click uses the exact key filter; i18n in all languages', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
-  assert.match(html, /badge key/);
-  assert.match(html, /data-key-project=/);
-  assert.match(html, /params\.set\('key', keyFilter\.key\)/);
-  const i18n = fs.readFileSync(path.join(ROOT, 'scripts', 'i18n.js'), 'utf8');
-  assert.equal((i18n.match(/'card\.keyTitle'/g) || []).length, 3);
-  assert.equal((i18n.match(/'card\.keyPrev'/g) || []).length, 3);
-});
-
-// BUG-004: polling must not drop a text selection or reset scroll positions.
-test('dashboard: polls leave unchanged DOM alone, keep scroll, and wait while text is selected', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'dashboard.html'), 'utf8');
-  // Every polled region goes through setHtml (no direct innerHTML on them).
-  for (const id of ['side', 'filters', 'mode', 'cards']) {
-    assert.doesNotMatch(html, new RegExp(`getElementById\('${id}'\)\.innerHTML\s*=`), id);
-  }
-  assert.ok(html.includes('data-id="${esc(c.id)}"'), 'article data-id');
-  assert.match(html, /if \(busy\(\)\) \{ pendingLoad = true; return; \}/);
-  assert.match(html, /addEventListener\('selectionchange', runPending\)/);
-  assert.match(html, /scrolls\[el\.parentElement\.dataset\.details\] = el\.scrollTop/);
-  // setHtml itself: the same HTML twice touches the DOM once.
-  const src = html.match(/function setHtml\(el, html\) \{[\s\S]*?\n\}/)[0];
-  const setHtml = new Function(`${src}; return setHtml;`)();
-  let writes = 0;
-  const el = { set innerHTML(v) { writes++; this._v = v; }, get innerHTML() { return this._v; } };
-  assert.equal(setHtml(el, '<b>a</b>'), true);
-  assert.equal(setHtml(el, '<b>a</b>'), false);
-  assert.equal(setHtml(el, '<b>b</b>'), true);
-  assert.equal(writes, 2);
-});
+// The dashboard page tests (key tag, BUG-004 polling) live in test/web.test.js.
 
 // --- run ---
 

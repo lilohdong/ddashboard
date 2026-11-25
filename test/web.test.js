@@ -253,6 +253,57 @@ test('BUG-004: setHtml writes only changed HTML; poll guards and scroll keeping 
   }
 });
 
+test('cardView: one place for the displayed status, answered and reply box', () => {
+  const { state } = fixture();
+  const cv = M.cards.cardView;
+  assert.deepEqual(cv(state.cards[1], state), { status: 'review', answered: false, open: true });
+  assert.deepEqual(cv({ ...state.cards[2], answered: true }, state), { status: 'blocked', answered: true, open: false });
+  assert.equal(cv({ session_id: 'nobody', status: 'done' }, state).open, false);
+});
+
+// Moved from team.test.js (method C port): the key tag's i18n in all languages.
+test('key tag: title and history count translated in every language', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'i18n.js'), 'utf8');
+  assert.equal((src.match(/'card\.keyTitle'/g) || []).length, 3);
+  assert.equal((src.match(/'card\.keyPrev'/g) || []).length, 3);
+  assert.match(fs.readFileSync(path.join(WEB, 'select.mjs'), 'utf8'), /params\.set\('key', ui\.keyFilter\.key\)/);
+});
+
+test('server: serves the page, i18n.js, every web module and the style sheet with the right MIME; nothing else', async () => {
+  const os = require('os');
+  const { spawn } = require('child_process');
+  const board = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-web-'));
+  const port = 7900 + Math.floor(Math.random() * 300);
+  const env = { ...process.env, DDASH_PORT: String(port), DDASH_BOARD_DIR: board, DDASH_ORCA: '0', DDASH_WINDOW: '0' };
+  const srv = spawn(process.execPath, [path.join(ROOT, 'scripts', 'server.js')], { env, stdio: 'ignore' });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`${base}/api/settings`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const get = async (u) => { const r = await fetch(base + u); return { status: r.status, type: r.headers.get('content-type') || '', body: await r.text() }; };
+    const page = await get('/');
+    assert.equal(page.status, 200);
+    assert.match(page.type, /^text\/html/);
+    assert.equal(page.body, fs.readFileSync(path.join(WEB, 'index.html'), 'utf8'));
+    assert.match((await get('/i18n.js')).type, /^text\/javascript/);
+    const css = await get('/web/style.css');
+    assert.equal(css.status, 200);
+    assert.match(css.type, /^text\/css/);
+    for (const f of fs.readdirSync(WEB).filter((x) => x.endsWith('.mjs'))) {
+      const r = await get(`/web/${f}`);
+      assert.equal(r.status, 200, f);
+      assert.match(r.type, /^text\/javascript/, f);
+      assert.equal(r.body, fs.readFileSync(path.join(WEB, f), 'utf8'), f);
+    }
+    for (const u of ['/web/index.html', '/web/nope.mjs', '/web/', '/web/../server.js', '/web/%2e%2e%2fserver.js', '/web/..%5cserver.js', '/dashboard.html', '/server.js', '/lib.js', '/web/Main.mjs']) {
+      const r = await get(u);
+      assert.equal(r.status, 404, u);
+      assert.doesNotMatch(r.body, /require\(/, u);
+    }
+  } finally { srv.kill(); }
+});
+
 (async () => {
   M = {
     state: await imp('ui-state.mjs'),
@@ -260,6 +311,7 @@ test('BUG-004: setHtml writes only changed HTML; poll guards and scroll keeping 
     select: await imp('select.mjs'),
     side: await imp('render-side.mjs'),
     main: await imp('render-main.mjs'),
+    cards: await imp('render-cards.mjs'),
   };
   let failed = 0;
   for (const { name, fn } of tests) {

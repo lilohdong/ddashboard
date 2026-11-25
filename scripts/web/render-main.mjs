@@ -2,7 +2,7 @@
 import { STATUS_KEYS, esc, statusName } from './format.mjs';
 import { teams, repliedIds, answered, inScope, viewCards } from './select.mjs';
 import { modeBarHtml, emptyText } from './render-search.mjs';
-import { cardsHtml } from './render-cards.mjs';
+import { cardsHtml, cardView } from './render-cards.mjs';
 
 export function renderMain(state, ui, t) {
   const { scope, filter, keyFilter } = ui;
@@ -12,7 +12,8 @@ export function renderMain(state, ui, t) {
     .map((c) => ({ ...c, answered: answered(c, replied) }));
   const label = keyFilter ? `#${keyFilter.key}` : ui.query;
   const counts = {};
-  for (const c of scoped) if (!c.answered) counts[c.status] = (counts[c.status] || 0) + 1;
+  const status = (c) => cardView(c, state).status;
+  for (const c of scoped) if (!c.answered) counts[status(c)] = (counts[status(c)] || 0) + 1;
   const filters = [['all', t('all'), scoped.length], ...STATUS_KEYS.map((k) => [k, statusName(k, t), counts[k] || 0])]
     .map(([k, v, n]) => `<button class="${filter === k ? 'on' : ''}" data-f="${k}">${esc(v)} ${n}</button>`).join('');
 
@@ -20,7 +21,7 @@ export function renderMain(state, ui, t) {
   const scopeName = scope.kind === 'all' ? t('all') : scope.kind === 'project' ? scope.id : s ? `${s.project} / ${s.name}` : t('scope.session');
   const title = ui.archivedView ? t('scope.archived', { scope: scopeName }) : scopeName;
 
-  const list = scoped.filter((c) => filter === 'all' || (c.status === filter && !c.answered));
+  const list = scoped.filter((c) => filter === 'all' || (status(c) === filter && !c.answered));
   const mode = modeBarHtml(state, ui, t, { all, label, n: list.length });
   const reports = {
     hidden: !Object.values(teams(state)).some((x) => x.mode === 'team'),

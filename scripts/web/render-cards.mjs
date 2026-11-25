@@ -2,9 +2,22 @@
 // (track A adds folded / stopped cards in this module).
 import { esc, time, statusName } from './format.mjs';
 
+// A card's displayed state, decided in this one place: the status badge and filter bucket, answered, whether it
+// can take a reply. Track A: the lifecycle outcome (wip folded into a newer card, 'stopped') belongs here.
+export function cardView(c, state) {
+  const sess = state.sessions[c.session_id];
+  return {
+    status: c.status, // badge s-<status>, its label, and the status filter
+    answered: Boolean(c.answered), // urgent card you replied to (set by render-main)
+    open: Boolean(sess && sess.view !== 'ended'), // its session can still take a reply
+  };
+}
+
+// One card. Every per-card decision comes from cardView.
 export function cardHtml(c, byCard, state, ui, t) {
   const sess = state.sessions[c.session_id];
-  const open = sess && sess.view !== 'ended';
+  const v = cardView(c, state);
+  const open = v.open;
   const details = typeof c.details === 'string' && c.details.trim() ? c.details : '';
   const leadName = c.via_lead ? state.sessions[c.via_lead]?.name || t('tag.lead') : '';
   const replyBox = c.via_lead
@@ -16,7 +29,7 @@ export function cardHtml(c, byCard, state, ui, t) {
   return `
     <article class="card${c.via_lead ? ' report' : ''}" data-id="${esc(c.id)}">
       <div class="card-head">
-        <span class="badge s-${esc(c.status)}${c.answered ? ' answered' : ''}">${esc(statusName(c.status, t))}</span>${c.answered ? `<span class="badge replied">${esc(t('card.replied'))}</span>` : ''}
+        <span class="badge s-${esc(v.status)}${v.answered ? ' answered' : ''}">${esc(statusName(v.status, t))}</span>${v.answered ? `<span class="badge replied">${esc(t('card.replied'))}</span>` : ''}
         ${c.archived ? `<span class="badge archived">${esc(t('card.archived'))}</span>` : ''}
         ${c.via_lead ? `<span class="badge report">${esc(t('card.reportTo', { name: leadName }))}</span>` : ''}
         ${c.lead_missing ? `<span class="badge warn" title="${esc(t('card.leadMissingTitle'))}">${esc(t('card.leadMissing'))}</span>` : ''}
