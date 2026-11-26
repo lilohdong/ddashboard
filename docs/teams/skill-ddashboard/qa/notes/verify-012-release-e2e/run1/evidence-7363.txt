@@ -1,0 +1,88 @@
+root C:/Users/rhkdr/AppData/Local/Temp/qa012-Y0JBM0
+src files: .claude-plugin,.git,.gitattributes,assets,docs,hooks,LICENSE,README.ko.md,README.md,scripts,skills,test
+repo HEAD: 5db405f docs(qa): verify-010 team features after the refactor
+--- A. activation from an empty board
+PASS A0 board dir empty before activation
+PASS A1 activation prompt starts the server and prints the rules (card block, wait command) :: Dashboard started: http://127.0.0.1:7363 [ddashboard] The us
+PASS A2 wait.js installed in the board bin/
+PASS A3 fresh board: zero cards, one session, no teams :: cards=0 (solo project row only) teams={"proj":{"key":"c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-y0jbm0\\proj\\.git","mode":"solo","mode_ver":0,"teams":{},"runner_lead":"headless","runner_member":"headless"}}
+PASS A4 SessionStart of a new session in a connected solo project registers it and prints the rules :: [ddashboard] The user follows your progress on a dashboard (
+PASS A5 SessionStart in a project that is not connected prints nothing (zero tokens)
+PASS A6 four sessions registered, models.json written :: S1,S2,S3,S4
+--- B. cards through the Stop hook
+PASS B1 wip 1 folded under wip 2 (one top card, folded list of 1) :: [["Login wip 2",1]]
+PASS B2 a done card folds both wips and takes the outcome (folded 2, one top card) :: [["Login done","done",2]]
+PASS B3 details with real newlines kept :: line one line two
+PASS B4 done/review/blocked on the board (wip: B1, B8) :: done,review,blocked,done
+PASS B5 key replacement: "Payments" -> payments; the older same-key card of another session leaves the board :: Login done | Review me | Blocked on key | New payments card
+PASS B6 new keyed card has key=payments and key_prev=1 :: ["payments",1]
+PASS B7 replaces:last retires the previous card of that session :: Login done | Review me | Blocked on key | New payments card | Fresh draft
+PASS B8 open wip card of a live session is wip, not stopped :: ["wip",null]
+PASS B9 a turn without a card block adds no card :: 6 -> 6
+PASS B10 malformed card JSON still yields a card from the raw lines (no crash) :: Login done | Review me | Blocked on key | New payments card | Fresh draft | Half done work | {not json at all
+PASS B11 the same card again (reply-driven turn) is not duplicated
+--- C. stopped
+PASS C1 SessionEnd on a session with an open wip card -> the card is stopped :: ["wip","stopped",true]
+PASS C2 S4 is ended :: ended
+--- D. archive / restore / search
+PASS D1 archive a card: leaves the board, archived_count+1 :: count 2->3
+PASS D2 archived-only search finds it :: Blocked on key
+PASS D3 restore: back on the board :: count 2
+PASS D4 archive unknown card 404; non-boolean 400 :: 404
+PASS D5 search "login" finds the folded wip cards too (3 cards, 2 folded) :: Login done|Login wip 2(folded)|Login wip 1(folded)
+PASS D6 search also finds the replaced old keyed card :: New payments card|Old payments card
+PASS D7 key search (click on #key) returns exactly the 2 payments cards :: 2
+PASS D8 search matches inside details
+PASS D9 no match -> empty list
+--- E. dashboard reply reaches wait.js / the Stop hook
+PASS E1 wait.js is waiting (still running, no output)
+PASS E2 POST /api/reply ok :: {"ok":true,"id":"1795677665607-gizzn"}
+PASS E3 wait.js printed the reply text and exited 0 :: exit=0 out=[Dashboard reply] | - [card: Login done] Please also fix the logout bug ✓ | | (Start this wait command again in the background now, in the same response as your first tool calls for it.) | 
+PASS E4 reply is in state.replies (card shows "replied") :: 1
+PASS E5 no waiter: the Stop hook hands the reply over (decision block + text) :: {"decision":"block","reason":"[Dashboard reply]\n- Reply for the Stop hook"}
+PASS E6 empty reply 400, unknown session 404, ended session 409
+PASS E7 cross-origin POST refused (403)
+--- F. usage / token meter
+usage_total {"input":1400,"cache_read":14000,"cache_write":700,"output":280,"turns":14} usage_today {"input":1400,"cache_read":14000,"cache_write":700,"output":280,"turns":14} expected 16380
+PASS F1 usage_total equals the sum of the fixture turns :: 16380 vs 16380
+PASS F2 usage_today equals usage_total (all turns happened today)
+PASS F3 per-session usage and context recorded (S1: 3 turns, last_context>0) :: {"input":300,"cache_read":3000,"cache_write":150,"output":60,"turns":3} ctx 1150
+--- G. settings / language
+PASS G1 fresh board: lang null :: {"lang":null}
+PASS G2 set lang ko: POST ok, GET and state.settings agree :: [{"ok":true,"lang":"ko"},{"lang":"ko"},{"lang":"ko"}]
+PASS G2 set lang zh-CN: POST ok, GET and state.settings agree :: [{"ok":true,"lang":"zh-CN"},{"lang":"zh-CN"},{"lang":"zh-CN"}]
+PASS G2 set lang en: POST ok, GET and state.settings agree :: [{"ok":true,"lang":"en"},{"lang":"en"},{"lang":"en"}]
+PASS G3 bad language 400; empty body 400 and keeps lang; non-object body 400
+PASS G4 with lang=ko the injected rules ask for Korean cards :: [ddashboard] The user follows your progress on a dashboard (http://127.0.0.1:7363). Session ID: S3 | - Only on turns with a result the user should know about, end your reply with this block (JSON, at most 3 summary lines, 
+--- H. solo -> team -> solo
+PASS H1 "/dashboard team Alpha": team added, S1 is its lead :: Dashboard is already running: http://127.0.0.1:7363 Team "Alpha" was added to this project; this session is its lead. Ot
+PASS H2 state: mode team, lead S1, S1 tagged lead, S2 outside :: ["team","lead","outside"]
+PASS H3 after the switch the next prompt gets the new instructions once (second prompt: nothing) :: first 1318 chars, second 0
+PASS H4 outside session still posts its own card in team mode
+PASS H5 POST /api/mode solo: project solo, no teams :: {"ok":true,"removed":["Alpha"],"mode":"solo","mode_ver":2}
+PASS H6 POST /api/mode team with lead S1: team again :: {"ok":true,"team":"Alpha","mode":"team","mode_ver":3,"lead":"S1"}
+PASS H7 mode errors: unknown project 404, bad mode 400, lead from elsewhere 400, ended lead 409
+--- I. groups
+PASS I1 API create g2
+PASS I2 API rename g2 -> g3 (folder renamed)
+PASS I3 duplicate name (case-insensitive) refused 400
+PASS I4 API delete g3: folder archived, group gone
+PASS I5 bad action 400, unknown project 404
+PASS I6 CLI group create g1 :: Created group g1: C:/Users/rhkdr/AppData/Local/Temp/qa012-Y0JBM0/proj/docs/teams
+PASS I7 CLI group list shows g1
+--- J. members: spawn / hooks / reports
+PASS J1 CLI spawn qa-a in g1 (headless, fake claude) :: Spawned qa-a in g1: dcfae24b-0465-48ea-b2d4-833ce8288b26 headless (pid 13384). Log: C:/Users/rhkdr/AppData/Local/Temp/qa012-Y0JBM0/board/logs/dcfae24b-0465-48ea-b2d4-833ce8288b26.log | Its cards come 
+PASS J2 fake claude got --session-id, permission-mode, and the first prompt tag with role/lead/group :: ["-p","--session-id","dcfae24b-0465-48ea-b2d4-833ce8288b26","--permission-mode","auto","--allowedTools","Bash(git *)","Bash(node *)","Bash(npm *)"] IN:[ddash role=qa-a lead=S1 stay=0 group=g1] do the thing
+PASS J3 HTTP spawn qa-b ok; bad runner 400; unknown lead 404; missing task 400 :: {"ok":true,"session_id":"691b8753-2e84-40b4-979a-779afff6df83","runner":"headless","pid":17032,"terminal":"","log":"C:/U
+PASS J4 member SessionStart injects the group brief and the member rules :: [ddashboard] Group "g1" brief (C:/Users/rhkdr/AppData/Local/Temp/qa012-Y0JBM0/proj/docs/teams/Alpha/g1/brief.md): | # g1 b
+PASS J5 sidebar: A is member in group g1 under lead S1, B member without group :: ["member","g1","S1",null]
+PASS J6 member card is a report: hidden from the default board, visible with reports=1 (via_lead S1), key dropped :: [["S1",null]]
+PASS J7 lead's Stop hook hands over the report as [Team report] :: {"decision":"block","reason":"[Team report]\n- qa-b (691b8753) wip: member qa-b 691b8753 spawned by the user: second task\n- qa-a (dcfae24b) review: qa-a report\n done checking\n check: look\n\n[dda
+PASS J8 list shows both members working with roles and group :: dcfae24b-0465-48ea-b2d4-833ce8288b26 qa-a [g1] idle headless | last: review "qa-a report" | 691b8753-2e84-40b4-979a-779afff6df83 qa-b working headless | 
+--- K. send / resume / end
+PASS K1 send to a running member is queued :: Queued for qa-a (dcfae24b): it gets it when its current turn ends.
+PASS K2 sidebar data shows pending 1 for A :: 1
+PASS K3 member Stop hook receives the lead instruction :: {"decision":"block","reason":"[Lead instruction]\n- please add tests"}
+B record keys: session_id,name,cwd,branch,project,project_key,kind,role,lead,stay,headless,runner,spawn,log,state,started,last_seen,pid,claude_pid,rules_ver,lang_ver,text_ver,start_rules pid=17032
+PASS K4 killed headless member B shows finished (resumable) :: dcfae24b-0465-48ea-b2d4-833ce8288b26 qa-a [g1] working headless | last: review "qa-a report" | 691b8753-2e84-40b4-979a-779afff6df83 qa-b finished headless | 
+PASS K5 send to a finished member resumes it (--resume <sid>, text on stdin) :: Resumed qa-b (691b8753, pid 18828). Log: C:/Users/rhkdr/AppData/Local/Temp/qa012-Y0JBM0/board/logs/6 ARGV ["-p","--resume","691b8753-2e84-40b4-979a-779afff6df83","--model","haiku","--permission-mode","auto","--allowedTools","B

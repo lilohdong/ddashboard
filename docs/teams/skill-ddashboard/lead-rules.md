@@ -35,6 +35,7 @@ Fixed rules for every lead of this team. Handoff docs hold only the current stat
 
 ## Members and terminals
 
+- Spawn members with `--orca` so the master can watch them in Orca (the runner setting defaults to headless; don't pass `--headless`).
 - `T send` text arrives as an instruction, never as a slash command; use `T end <sid|role>` to stop a member.
 - In Git Bash, prefix commands whose arguments start with `/` with `MSYS_NO_PATHCONV=1`.
 - New Orca worktrees: `orca worktree create --repo id:<repo> --name <n> --base-branch <branch> --branch <branch> --setup skip` (with `--agent` the launch check fails). Then `orca terminal create --worktree path:<dir> --command "claude ..."`; a new folder shows a trust prompt (send Down, then Enter).
@@ -44,3 +45,4 @@ Fixed rules for every lead of this team. Handoff docs hold only the current stat
 
 - One QA member per verification target. Each runs its own server from the target worktree with `DDASH_PORT` (7358+) and a temp `DDASH_BOARD_DIR`; never the installed copy on 7357.
 - One-off QA members are ended after their report.
+- Tell every QA/test member: never kill processes by image name, window title or pattern (Claude runs as node.exe; a `taskkill /FI "IMAGENAME eq node.exe"` killed a QA member mid-run). Kill only PIDs it recorded itself.
