@@ -5,7 +5,7 @@ Status: approved by the master 2026-11-26 (design and all §7 recommendations). 
 BUG-005 design in `docs/qa/bug-005-orphan-processes.md` (on the `notes` branch) (F-1..F-9), which is assumed to land first.
 
 Since 0.3.2 the plugin runtime lives under `plugin/` (`plugin/scripts/`, `plugin/hooks/`, `plugin/skills/`,
-`plugin/.claude-plugin/plugin.json`); paths below are relative to it.
+`plugin/.claude-plugin/plugin.json`). Section 1 describes the code as it was before the refactor (file names such as `lib.js` no longer exist).
 
 Contents: 1 current state · 2 problems · 3 target architecture · 4 state machines · 5 data model · 6 refactor plan ·
 7 open questions.
@@ -18,23 +18,23 @@ Contents: 1 current state · 2 problems · 3 target architecture · 4 state mach
 
 | File | Lines | What it does today |
 |---|---|---|
-| `scripts/lib.js` | 1,513 | Everything shared: paths, JSON/JSONL I/O, git, project/session registry, transcript parsing + token usage, `bin/` shims, settings + language, **rules text** (solo/lead/member/outside) + version stamping, teams (add/remove/migrate), tag parsing, inbox (deliver/take/move), report formatting, waiter lock, **process table / kill / Claude pid**, handoff, groups (create/rename/delete/prune/briefs/handoff files), sidebar housekeeping (forget/markEnded/markGone/memberGone), lead context limit |
-| `scripts/team.js` | 630 | Lead CLI (`spawn/send/list/end/show/handoff/group/next-handoff`) **and** the member services the server calls (`spawnMember`, `endMember`, `groupAction`), runner choice, `claude` command discovery, headless runs |
-| `scripts/server.js` | 370 | HTTP server: one `if` chain of 13 routes, state assembly for `/api/state`, Orca terminal cache, gone detection (writes!), own `waiting()` |
-| `scripts/cards.js` | 177 | In-memory card index (incremental tail read of JSONL), `replaces`/`key` retirement, archive overlay, search |
-| `scripts/usage.js` | 89 | In-memory usage index (same tail-read approach) |
-| `scripts/hooks/stop-card.js` | 210 | Card parsing (lenient JSON, fences), card routing (board vs lead), usage recording, group prune, brief check, lead context notice, inbox hand-over, session state write |
-| `scripts/hooks/prompt-submit.js` | 104 | `/ddashboard:dashboard [team|solo|off]`, member/handoff tags, late registration, rules re-injection, `working` |
-| `scripts/hooks/session-start.js` | 26 | Register + inject rules (deferred in team mode), remember model, record Claude pid |
-| `scripts/hooks/session-end.js` | 7 | `setState(ended)` |
-| `scripts/wait-inbox.js` | 100 | The waiter (`bin/wait.js`): polls the inbox, owner watch (BUG-005 F-1..F-3) |
-| `scripts/control.js` | 48 | start/stop/status of the server (detached spawn) |
-| `scripts/orca.js` | 103 | Orca CLI adapter (status, terminal create/show/send/close) |
-| `scripts/terminal.js` | 104 | OS terminal window adapter (Windows `.cmd`, macOS osascript, Linux x-terminal-emulator) |
-| `scripts/orca-launch.js` | 34 | Started inside a terminal: reads a spec file, runs interactive `claude`; records window pids |
-| `scripts/i18n.js` | 461 | Dashboard strings en/ko/zh-CN (UMD: page global + CommonJS for tests) |
-| `scripts/dashboard.html` | 964 | One file: 160 lines CSS, markup, ~770 lines of global-scope JS |
-| `skills/dashboard/SKILL.md` | — | Skill text; falls back to `control.js start` |
+| `plugin/scripts/lib.js` | 1,513 | Everything shared: paths, JSON/JSONL I/O, git, project/session registry, transcript parsing + token usage, `bin/` shims, settings + language, **rules text** (solo/lead/member/outside) + version stamping, teams (add/remove/migrate), tag parsing, inbox (deliver/take/move), report formatting, waiter lock, **process table / kill / Claude pid**, handoff, groups (create/rename/delete/prune/briefs/handoff files), sidebar housekeeping (forget/markEnded/markGone/memberGone), lead context limit |
+| `plugin/scripts/team.js` | 630 | Lead CLI (`spawn/send/list/end/show/handoff/group/next-handoff`) **and** the member services the server calls (`spawnMember`, `endMember`, `groupAction`), runner choice, `claude` command discovery, headless runs |
+| `plugin/scripts/server.js` | 370 | HTTP server: one `if` chain of 13 routes, state assembly for `/api/state`, Orca terminal cache, gone detection (writes!), own `waiting()` |
+| `plugin/scripts/cards.js` | 177 | In-memory card index (incremental tail read of JSONL), `replaces`/`key` retirement, archive overlay, search |
+| `plugin/scripts/usage.js` | 89 | In-memory usage index (same tail-read approach) |
+| `plugin/scripts/hooks/stop-card.js` | 210 | Card parsing (lenient JSON, fences), card routing (board vs lead), usage recording, group prune, brief check, lead context notice, inbox hand-over, session state write |
+| `plugin/scripts/hooks/prompt-submit.js` | 104 | `/ddashboard:dashboard [team|solo|off]`, member/handoff tags, late registration, rules re-injection, `working` |
+| `plugin/scripts/hooks/session-start.js` | 26 | Register + inject rules (deferred in team mode), remember model, record Claude pid |
+| `plugin/scripts/hooks/session-end.js` | 7 | `setState(ended)` |
+| `plugin/scripts/wait-inbox.js` | 100 | The waiter (`bin/wait.js`): polls the inbox, owner watch (BUG-005 F-1..F-3) |
+| `plugin/scripts/control.js` | 48 | start/stop/status of the server (detached spawn) |
+| `plugin/scripts/orca.js` | 103 | Orca CLI adapter (status, terminal create/show/send/close) |
+| `plugin/scripts/terminal.js` | 104 | OS terminal window adapter (Windows `.cmd`, macOS osascript, Linux x-terminal-emulator) |
+| `plugin/scripts/orca-launch.js` | 34 | Started inside a terminal: reads a spec file, runs interactive `claude`; records window pids |
+| `plugin/scripts/i18n.js` | 461 | Dashboard strings en/ko/zh-CN (UMD: page global + CommonJS for tests) |
+| `plugin/scripts/dashboard.html` | 964 | One file: 160 lines CSS, markup, ~770 lines of global-scope JS |
+| `plugin/skills/dashboard/SKILL.md` | — | Skill text; falls back to `control.js start` |
 
 ### 1.2 Data under `~/.ddashboard` (`DDASH_BOARD_DIR`)
 
@@ -72,7 +72,7 @@ Lead's team.js (CLI, run via Bash) → claude -p | orca terminal create → cmd 
 server.js → (in request path) team.spawnMember → orca CLI / spawn claude; endMember → taskkill / kill
 ```
 
-### 1.4 Hook entry points (`hooks/hooks.json`)
+### 1.4 Hook entry points (`plugin/hooks/hooks.json`)
 
 SessionStart → `session-start.js`; UserPromptSubmit → `prompt-submit.js`; Stop → `stop-card.js`; SessionEnd →
 `session-end.js`. All gate on `serverPid() && projectActive(cwd)` or on the session being registered.
@@ -147,8 +147,8 @@ selection/pointer guards (BUG-004).
   objects. Files and processes are touched only by the store and the supervisor. Hooks, CLI, HTTP are adapters.
 - **Every write goes through one store with a lock.** No module calls `fs.writeFileSync` on board files directly.
 - **Entry file paths stay stable** (`hooks.json`, `bin/` shims, skill text and old shims reference them):
-  `scripts/hooks/*.js`, `scripts/wait-inbox.js`, `scripts/team.js`, `scripts/control.js`, `scripts/server.js`,
-  `scripts/orca-launch.js` remain, but shrink to a few lines each.
+  `plugin/scripts/hooks/*.js`, `plugin/scripts/wait-inbox.js`, `plugin/scripts/team.js`, `plugin/scripts/control.js`, `plugin/scripts/server.js`,
+  `plugin/scripts/orca-launch.js` remain, but shrink to a few lines each.
 - **Backward compatible on disk**: additive fields only, so an older plugin version running in an old session keeps
   working (§5).
 
@@ -476,8 +476,8 @@ test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared
 `stop-card.js` (B first, then A), `dashboard.html` / `web/*` (D, then A's card UI).
 
 **Track A — cards** (steps 6, 7; on the 0.3.0 path)
-- Owns: `scripts/domain/card.js`, `scripts/cards.js` (→ `store/cards.js` + lifecycle use), `scripts/domain/rules.js`,
-  card parsing in `scripts/hooks/stop-card.js`, `web/render-cards.mjs` (after D) or the card part of
+- Owns: `plugin/scripts/domain/card.js`, `plugin/scripts/cards.js` (→ `store/cards.js` + lifecycle use), `plugin/scripts/domain/rules.js`,
+  card parsing in `plugin/scripts/hooks/stop-card.js`, `web/render-cards.mjs` (after D) or the card part of
   `dashboard.html` (if D has not landed).
 - Tests: `test/cards.test.js` (all §4.2 cases: wip→done fold, wip→wip→review chain, ended → stopped, resume after
   stopped, key beats stopped, archive override, urgency uses outcome, parseCard fixtures), `test/rules.test.js`
@@ -487,8 +487,8 @@ test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared
   card files; rules texts live only in `domain/rules.js`, version stamping in one function.
 
 **Track B — lifecycle** (steps 4, 5, 10; on the 0.3.0 path)
-- Owns: `scripts/domain/session.js`, `scripts/proc/supervisor.js`, `scripts/app/server-state.js`, `scripts/app/hooks.js`,
-  the state/gone parts of `scripts/server.js`, `scripts/hooks/*.js` (state writes; card part stays A's).
+- Owns: `plugin/scripts/domain/session.js`, `plugin/scripts/proc/supervisor.js`, `plugin/scripts/app/server-state.js`, `plugin/scripts/app/hooks.js`,
+  the state/gone parts of `plugin/scripts/server.js`, `plugin/scripts/hooks/*.js` (state writes; card part stays A's).
 - Tests: `test/session.test.js` (table-driven transitions incl. illegal events; `view()` parity with old
   server/`team list` output), `test/supervisor.test.js` (fake process table: gone within one tick, sweep of any
   plugin version, identity check before kill), `/api/state` leaves `sessions.json` mtime unchanged, `test/hooks.test.js`
@@ -498,9 +498,9 @@ test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared
   ≤ 15 lines each.
 
 **Track C — team** (steps 8, 9)
-- Owns: `scripts/domain/{team,tags,messages,lead-context}.js`, `scripts/app/{members,handoff,groups}.js`,
-  `scripts/runners/*` (from `orca.js`, `terminal.js`, headless and claude-command code in `team.js`), `scripts/team.js`,
-  `scripts/orca-launch.js`, the team/group routes' calls in `server.js`.
+- Owns: `plugin/scripts/domain/{team,tags,messages,lead-context}.js`, `plugin/scripts/app/{members,handoff,groups}.js`,
+  `plugin/scripts/runners/*` (from `orca.js`, `terminal.js`, headless and claude-command code in `team.js`), `plugin/scripts/team.js`,
+  `plugin/scripts/orca-launch.js`, the team/group routes' calls in `server.js`.
 - Tests: `test/groups.test.js` (group and handoff tests moved out of `team.test.js` unchanged), `test/members.test.js`
   (spawn/send/end per runner through `app/members.js` with the fake orca/window launchers), layer test: no entry point
   requires another.
@@ -509,7 +509,7 @@ test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared
   B is not done yet, call the step-3 `proc/kill` and leave a TODO for B).
 
 **Track D — front end** (step 12; may start right after step 0)
-- Owns: `scripts/web/*` (new), `scripts/dashboard.html` (deleted at the end), the static-file route in `server.js`.
+- Owns: `plugin/scripts/web/*` (new), `plugin/scripts/dashboard.html` (deleted at the end), the static-file route in `server.js`.
 - Tests: `test/web.test.js` (`import()` each pure render module, fixtures: folded card, urgent, ended session,
   search results), server serves `/`, `/i18n.js`, every `/web/*.mjs` and `/web/style.css` with the right MIME and
   nothing outside the whitelist; the BUG-004 repro (`docs/teams/skill-ddashboard/qa/notes/verify-007-repro-b.mjs` on the `notes` branch)
