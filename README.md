@@ -15,9 +15,9 @@ AI writes code faster than people can follow, and leaves more text in the termin
 
 ## Features
 
-- **Almost no extra tokens.** Hooks and local scripts record cards, refresh the page, and wait for replies. The model only adds a short card block at the end of a reply, plus about 200 tokens of instructions once per session.
+- **Almost no extra tokens.** Hooks and local scripts record cards, refresh the page, and wait for replies. The model only adds a short card block at the end of a reply, plus one block of instructions per connected session (about 1,200 characters, roughly 300 tokens; about 550 for a team lead).
 - **Replies go straight to the right session.** An idle session wakes up when a reply arrives; a busy one picks it up as soon as it finishes its current turn.
-- **Only where you turn it on.** Sessions in other projects are untouched (no output, no tokens). Worktrees of the same repository are connected together, so you can follow several sessions on one screen.
+- **Only where you turn it on.** Sessions in other projects get no hook output and no instructions. The only cost there is the skill's one-line description, which Claude Code lists in every session while the plugin is installed (roughly 90 tokens). Worktrees of the same repository are connected together, so you can follow several sessions on one screen.
 - **Everything stays on your machine.** Nothing is sent to an external service. The server listens on `127.0.0.1` only, and data lives in `~/.ddashboard`.
 - **No dependencies.** Node 18 or later is all you need.
 
@@ -172,7 +172,7 @@ node <plugin path>/scripts/control.js start | stop | status
 ## FAQ
 
 **Does it really cost no tokens?**
-The dashboard itself never calls the model. What's added is about 200 tokens of instructions per session and the card block on turns that report a result (usually 100–200 tokens). Handling a reply costs the same as typing it into the terminal.
+The dashboard itself never calls the model. What's added is one block of instructions per connected session (about 1,200 characters, roughly 300 tokens; about 550 for a team lead, 200 for a member), the skill's description that Claude Code lists in every session while the plugin is installed (roughly 90 tokens, also in projects where the dashboard is off), and the card block on turns that report a result (usually 100–200 tokens). Handling a reply costs the same as typing it into the terminal.
 
 **What if I reply after closing a session?**
 You can't: cards from ended sessions show no reply box, and the server refuses a reply to an ended session (`409 session_ended`). Reply to sessions with a green dot (listening) for instant delivery. In team mode, the lead can still resume an ended member with `team.js send`. Automatic resume of closed sessions is on the roadmap.
