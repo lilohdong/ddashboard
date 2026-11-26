@@ -9,8 +9,8 @@
 AI writes code faster than people can follow, and leaves more text in the terminal than anyone wants to read. ddashboard keeps only **what you need to know**: a status, a three-line summary, and what you should check. You watch the dashboard, and reply on a card to tell that session what to do next.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
-  <img alt="ddashboard: live sessions grouped by project in the sidebar, and result cards with reply boxes" src="assets/screenshot-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lilohdong/ddashboard/media/en/screenshot-dark.png">
+  <img alt="ddashboard: sessions grouped by project in the sidebar, one project in team mode with a lead, a member group and role badges; result cards with review items, folded earlier progress cards, a reply and reply boxes" src="https://raw.githubusercontent.com/lilohdong/ddashboard/media/en/screenshot-light.png">
 </picture>
 
 ## Features

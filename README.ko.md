@@ -9,8 +9,8 @@
 AI는 사람이 따라가기 어려울 만큼 빠르게 개발하고, 터미널에는 읽기 벅찬 양의 글을 남깁니다. ddashboard는 그중 **사람이 알아야 할 것만** 남깁니다. 카드에는 상태, 핵심 요약 3줄, 확인할 것이 들어갑니다. 사람은 대시보드만 보고, 카드에 답글을 달아 그 세션에 다음 일을 시킵니다.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
-  <img alt="ddashboard: 사이드바에 프로젝트별로 묶인 세션, 오른쪽에 답글 창이 달린 결과 카드" src="assets/screenshot-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lilohdong/ddashboard/media/ko/screenshot-dark.png">
+  <img alt="ddashboard: 사이드바에 프로젝트별로 묶인 세션(팀 모드 프로젝트의 리드, 멤버 그룹, 역할 배지), 오른쪽에 확인할 것, 접힌 이전 진행 카드, 답글과 답글 창이 달린 결과 카드" src="https://raw.githubusercontent.com/lilohdong/ddashboard/media/ko/screenshot-light.png">
 </picture>
 
 ## 특징
