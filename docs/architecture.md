@@ -2,7 +2,7 @@
 
 Status: approved by the master 2026-11-26 (design and all §7 recommendations). Author: role `arch`, branch
 `feature/team-mode`. Written against commit 95f4866 plus the
-BUG-005 design in `docs/qa/bug-005-orphan-processes.md` (F-1..F-9), which is assumed to land first.
+BUG-005 design in `docs/qa/bug-005-orphan-processes.md` (on the `notes` branch) (F-1..F-9), which is assumed to land first.
 
 Contents: 1 current state · 2 problems · 3 target architecture · 4 state machines · 5 data model · 6 refactor plan ·
 7 open questions.
@@ -509,7 +509,7 @@ test file; follow the layer rules in §3.2 (`test/layers.test.js` warns). Shared
 - Owns: `scripts/web/*` (new), `scripts/dashboard.html` (deleted at the end), the static-file route in `server.js`.
 - Tests: `test/web.test.js` (`import()` each pure render module, fixtures: folded card, urgent, ended session,
   search results), server serves `/`, `/i18n.js`, every `/web/*.mjs` and `/web/style.css` with the right MIME and
-  nothing outside the whitelist; the BUG-004 repro (`docs/teams/skill-ddashboard/qa/notes/verify-007-repro-b.mjs`)
+  nothing outside the whitelist; the BUG-004 repro (`docs/teams/skill-ddashboard/qa/notes/verify-007-repro-b.mjs` on the `notes` branch)
   still passes.
 - Done when: no inline script left; render modules are pure (`(state, ui, t) -> html`), no global mutable state
   outside `ui-state.mjs`; the dashboard looks and behaves the same (light and dark screenshots compared by hand).

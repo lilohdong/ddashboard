@@ -1,0 +1,10 @@
+# Internal docs live on the `notes` branch
+docs/teams/
+docs/qa/
+docs/handoff/
+docs/research/
+docs/groups/
+docs/plan-0.2.0.md
+docs/plan-0.3.0.md
+docs/brief-token-meter.md
+docs/evaluation.md
