@@ -4,6 +4,9 @@ Status: approved by the master 2026-11-26 (design and all §7 recommendations). 
 `feature/team-mode`. Written against commit 95f4866 plus the
 BUG-005 design in `docs/qa/bug-005-orphan-processes.md` (on the `notes` branch) (F-1..F-9), which is assumed to land first.
 
+Since 0.3.2 the plugin runtime lives under `plugin/` (`plugin/scripts/`, `plugin/hooks/`, `plugin/skills/`,
+`plugin/.claude-plugin/plugin.json`); paths below are relative to it.
+
 Contents: 1 current state · 2 problems · 3 target architecture · 4 state machines · 5 data model · 6 refactor plan ·
 7 open questions.
 

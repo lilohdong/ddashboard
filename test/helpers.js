@@ -6,7 +6,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const SERVER = path.join(__dirname, '..', 'scripts', 'server.js');
+const SERVER = path.join(__dirname, '..', 'plugin', 'scripts', 'server.js');
 
 // A TCP port on 127.0.0.1 that nothing listens on (the OS picks it: listen on port 0, read it, close).
 function freePort() {

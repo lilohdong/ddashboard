@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 process.env.DDASH_HANDOFF_MAX_TOKENS = '8000'; // fixed for the snapshot
-const rules = require('../scripts/domain/rules');
+const rules = require('../plugin/scripts/domain/rules');
 
 const SNAPSHOT = { ver: 2, hash: 'b8a7430f4e2ce5b9' };
 
@@ -81,7 +81,7 @@ test('stamp / needsUpdate: mode first, then language, then text version', () => 
 });
 
 test('rules texts and version stamping live only in domain/rules.js', () => {
-  const SCRIPTS = path.join(__dirname, '..', 'scripts');
+  const SCRIPTS = path.join(__dirname, '..', 'plugin', 'scripts');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
   for (const f of walk(SCRIPTS).filter((x) => /\.(c|m)?js$/.test(x) && !x.endsWith(path.join('domain', 'rules.js')))) {
     const src = fs.readFileSync(f, 'utf8');

@@ -17,17 +17,17 @@ delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
-const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
-const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
-const procWaiter = require(path.join(ROOT, 'scripts', 'proc', 'waiter.js'));
-const storeInbox = require(path.join(ROOT, 'scripts', 'store', 'inbox.js'));
-const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
-const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
+const corePaths = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'fsx.js'));
+const procTable = require(path.join(ROOT, 'plugin', 'scripts', 'proc', 'table.js'));
+const procWaiter = require(path.join(ROOT, 'plugin', 'scripts', 'proc', 'waiter.js'));
+const storeInbox = require(path.join(ROOT, 'plugin', 'scripts', 'store', 'inbox.js'));
+const appSessions = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'projects.js'));
 const { paths } = corePaths;
 const { readJson, writeJson } = coreFsx;
 const KEY = appProjects.projectKey(CWD);
-const WAIT = path.join(ROOT, 'scripts', 'wait-inbox.js');
+const WAIT = path.join(ROOT, 'plugin', 'scripts', 'wait-inbox.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const started = [];
@@ -317,7 +317,7 @@ test('SessionEnd hook stops the session\'s waiter', async () => {
   reset({ X6: session('X6') });
   const w = await startFakeWaiter('X6');
   await sleep(300);
-  const r = require('child_process').spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', 'session-end.js')], { input: JSON.stringify({ session_id: 'X6' }), env: process.env });
+  const r = require('child_process').spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', 'session-end.js')], { input: JSON.stringify({ session_id: 'X6' }), env: process.env });
   assert.equal(r.status, 0);
   assert.equal(readJson(paths.sessions, {}).X6.state, 'ended');
   assert.ok(await until(() => !procTable.alive(w.pid)), 'waiter left running after SessionEnd');
@@ -423,7 +423,7 @@ test('F-9: SessionStart records the Claude pid in solo mode too', async () => {
   const file = path.join(BOARD, 'claude-code', 'hook-runner.js');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `const { spawnSync } = require('child_process');
-spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'scripts', 'hooks', 'session-start.js'))}], { input: JSON.stringify({ session_id: 'P1', cwd: ${JSON.stringify(CWD)} }), stdio: ['pipe', 'ignore', 'ignore'] });
+spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'hooks', 'session-start.js'))}], { input: JSON.stringify({ session_id: 'P1', cwd: ${JSON.stringify(CWD)} }), stdio: ['pipe', 'ignore', 'ignore'] });
 setInterval(() => {}, 1000);
 `);
   const claude = track(spawn(process.execPath, [file], { stdio: 'ignore' }));
@@ -435,7 +435,7 @@ setInterval(() => {}, 1000);
 test('F-9: UserPromptSubmit records a missing pid once (0 when no Claude is found)', async () => {
   reset({ P2: session('P2') });
   const runner = path.join(BOARD, 'prompt-runner.js');
-  fs.writeFileSync(runner, `require('child_process').spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'scripts', 'hooks', 'prompt-submit.js'))}], { input: JSON.stringify({ session_id: 'P2', cwd: ${JSON.stringify(CWD)}, prompt: 'hi' }), stdio: ['pipe', 'ignore', 'ignore'] });
+  fs.writeFileSync(runner, `require('child_process').spawnSync(process.execPath, [${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'hooks', 'prompt-submit.js'))}], { input: JSON.stringify({ session_id: 'P2', cwd: ${JSON.stringify(CWD)}, prompt: 'hi' }), stdio: ['pipe', 'ignore', 'ignore'] });
 `);
   await startOrphan(runner);
   assert.ok(await until(() => readJson(paths.sessions, {}).P2?.claude_pid !== undefined, 15000), 'nothing recorded');
@@ -560,7 +560,7 @@ test('F-6: control.start runs the server outside the session folder', async () =
   // control.start waits for the server's pid file (written once it listens); a port taken between freePort and the
   // server's listen makes it fail, so try another free port.
   const runner = path.join(BOARD, 'start-runner.js');
-  fs.writeFileSync(runner, `require(${JSON.stringify(path.join(ROOT, 'scripts', 'control.js'))}).start().then((m) => console.log(m));
+  fs.writeFileSync(runner, `require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'control.js'))}).start().then((m) => console.log(m));
 `);
   let r;
   for (let i = 0; i < 3; i++) {

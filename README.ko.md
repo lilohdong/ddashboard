@@ -169,6 +169,8 @@ Claude Code 안에서 실행합니다.
 node <플러그인 경로>/scripts/control.js start | stop | status
 ```
 
+`<플러그인 경로>`는 설치된 플러그인 폴더(`~/.claude/plugins/cache/` 아래)이고, 이 저장소를 clone했다면 `plugin/`입니다.
+
 ## 자주 묻는 질문
 
 **토큰이 정말 안 드나요?**

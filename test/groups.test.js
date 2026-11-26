@@ -18,19 +18,19 @@ process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests 
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
-const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
-const domTeam = require(path.join(ROOT, 'scripts', 'domain', 'team.js'));
-const domTags = require(path.join(ROOT, 'scripts', 'domain', 'tags.js'));
-const domRules = require(path.join(ROOT, 'scripts', 'domain', 'rules.js'));
-const storeInbox = require(path.join(ROOT, 'scripts', 'store', 'inbox.js'));
-const storeCards = require(path.join(ROOT, 'scripts', 'store', 'cards.js'));
-const appTeams = require(path.join(ROOT, 'scripts', 'app', 'teams.js'));
-const appHandoff = require(path.join(ROOT, 'scripts', 'app', 'handoff.js'));
-const appTeamFiles = require(path.join(ROOT, 'scripts', 'app', 'team-files.js'));
-const appRules = require(path.join(ROOT, 'scripts', 'app', 'rules.js'));
-const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
-const team = require(path.join(ROOT, 'scripts', 'team.js'));
+const corePaths = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'fsx.js'));
+const domTeam = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'team.js'));
+const domTags = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'tags.js'));
+const domRules = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'rules.js'));
+const storeInbox = require(path.join(ROOT, 'plugin', 'scripts', 'store', 'inbox.js'));
+const storeCards = require(path.join(ROOT, 'plugin', 'scripts', 'store', 'cards.js'));
+const appTeams = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'teams.js'));
+const appHandoff = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'handoff.js'));
+const appTeamFiles = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'team-files.js'));
+const appRules = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'rules.js'));
+const appProjects = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'projects.js'));
+const team = require(path.join(ROOT, 'plugin', 'scripts', 'team.js'));
 const { paths } = corePaths;
 const { readJson, writeJson } = coreFsx;
 
@@ -81,7 +81,7 @@ function teamFixture() {
 }
 
 function runHook(name, input, env = {}) {
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', name)], {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', name)], {
     input: JSON.stringify(input), env: { ...process.env, ...env }, encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
@@ -548,7 +548,7 @@ test('M-1b: handoff numbers never collide (exclusive create, next number on a cl
   fs.writeFileSync(path.join(dir, 'handoff-002.md'), 'h2');
   assert.equal(path.basename(appTeamFiles.reserveHandoff(dir)), 'handoff-003.md');
   // Eight members finishing at once each get their own file.
-  const code = `const { reserveHandoff } = require(${JSON.stringify(path.join(ROOT, 'scripts', 'app', 'team-files.js'))}); console.log(reserveHandoff(process.argv[1]));`;
+  const code = `const { reserveHandoff } = require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'app', 'team-files.js'))}); console.log(reserveHandoff(process.argv[1]));`;
   const run = () => new Promise((resolve) => {
     const c = spawn(process.execPath, ['-e', code, dir], { env: process.env });
     let out = '';

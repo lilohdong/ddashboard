@@ -8,9 +8,9 @@ const path = require('path');
 
 process.env.DDASH_BOARD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-proc-')); // never the real board
 
-const table = require('../scripts/proc/table');
-const { identityOf, same } = require('../scripts/proc/identity');
-const kill = require('../scripts/proc/kill');
+const table = require('../plugin/scripts/proc/table');
+const { identityOf, same } = require('../plugin/scripts/proc/identity');
+const kill = require('../plugin/scripts/proc/kill');
 
 
 const tests = [];
@@ -113,7 +113,7 @@ test('killTree stops a real process tree; killClaude refuses a pid that is not C
 });
 
 test('lib.js is gone: no module re-exports the process functions', () => {
-  assert.equal(fs.existsSync(path.join(__dirname, '..', 'scripts', 'lib.js')), false);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'plugin', 'scripts', 'lib.js')), false);
 });
 
 (async () => {

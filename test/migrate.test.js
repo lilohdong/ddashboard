@@ -11,16 +11,16 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-migrate-'));
 const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 
-const { paths } = require('../scripts/core/paths');
-const { readJson, writeJson, readJsonl } = require('../scripts/core/fsx');
-const meta = require('../scripts/store/meta');
-const migrate = require('../scripts/store/migrate');
-const replies = require('../scripts/store/replies');
-const sessionsStore = require('../scripts/store/sessions');
-const projectsStore = require('../scripts/store/projects');
-const { readProjects } = require('../scripts/app/teams');
-const cards = require('../scripts/app/cards');
-const { view } = require('../scripts/domain/session');
+const { paths } = require('../plugin/scripts/core/paths');
+const { readJson, writeJson, readJsonl } = require('../plugin/scripts/core/fsx');
+const meta = require('../plugin/scripts/store/meta');
+const migrate = require('../plugin/scripts/store/migrate');
+const replies = require('../plugin/scripts/store/replies');
+const sessionsStore = require('../plugin/scripts/store/sessions');
+const projectsStore = require('../plugin/scripts/store/projects');
+const { readProjects } = require('../plugin/scripts/app/teams');
+const cards = require('../plugin/scripts/app/cards');
+const { view } = require('../plugin/scripts/domain/session');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -98,7 +98,7 @@ test('migrate: schema 2 copies replies.jsonl into replies/YYYY-MM.jsonl, keeps r
   assert.equal(m.schema, 2);
   assert.equal(m.migrated.length, 1);
   assert.equal(m.migrated[0].to, 2);
-  assert.equal(m.migrated[0].by_version, require('../.claude-plugin/plugin.json').version);
+  assert.equal(m.migrated[0].by_version, require('../plugin/.claude-plugin/plugin.json').version);
 });
 
 test('migrate: idempotent (run twice, ensure, a lost meta.json, a fold after migration change nothing)', () => {

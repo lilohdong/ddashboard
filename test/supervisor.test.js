@@ -13,13 +13,13 @@ const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 process.env.DDASH_ORCA = '0';
 
-const supervisor = require('../scripts/proc/supervisor');
-const waiter = require('../scripts/proc/waiter');
-const lifecycle = require('../scripts/app/lifecycle');
-const sessions = require('../scripts/store/sessions');
-const { writeJson, readJson } = require('../scripts/core/fsx');
-const { paths } = require('../scripts/core/paths');
-const { alive } = require('../scripts/proc/table');
+const supervisor = require('../plugin/scripts/proc/supervisor');
+const waiter = require('../plugin/scripts/proc/waiter');
+const lifecycle = require('../plugin/scripts/app/lifecycle');
+const sessions = require('../plugin/scripts/store/sessions');
+const { writeJson, readJson } = require('../plugin/scripts/core/fsx');
+const { paths } = require('../plugin/scripts/core/paths');
+const { alive } = require('../plugin/scripts/proc/table');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });

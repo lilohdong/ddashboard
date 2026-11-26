@@ -13,12 +13,12 @@ const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 process.env.DDASH_ORCA = '0';
 
-const hooks = require('../scripts/app/hooks');
-const sessions = require('../scripts/store/sessions');
-const { writeJson } = require('../scripts/core/fsx');
-const { paths } = require('../scripts/core/paths');
-const storeInbox = require('../scripts/store/inbox');
-const appProjects = require('../scripts/app/projects');
+const hooks = require('../plugin/scripts/app/hooks');
+const sessions = require('../plugin/scripts/store/sessions');
+const { writeJson } = require('../plugin/scripts/core/fsx');
+const { paths } = require('../plugin/scripts/core/paths');
+const storeInbox = require('../plugin/scripts/store/inbox');
+const appProjects = require('../plugin/scripts/app/projects');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -105,7 +105,7 @@ test('onSessionEnd: ended with reason exit, prints nothing; onSessionStart print
 
 test('runHook: a failing use case exits 0, prints nothing and logs one line with the hook name and session id', () => {
   reset();
-  const script = `require(${JSON.stringify(path.join(ROOT, 'scripts', 'app', 'hooks.js'))}).runHook('stop-card', () => { throw new Error('boom in hook'); });`;
+  const script = `require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'app', 'hooks.js'))}).runHook('stop-card', () => { throw new Error('boom in hook'); });`;
   const r = spawnSync(process.execPath, ['-e', script], { input: JSON.stringify({ session_id: 'ERR1' }), encoding: 'utf8', env: process.env });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
@@ -117,7 +117,7 @@ test('runHook: a failing use case exits 0, prints nothing and logs one line with
 test('runHook: a real hook file with garbage input exits 0 and prints nothing', () => {
   reset();
   for (const f of ['session-start', 'prompt-submit', 'stop-card', 'session-end']) {
-    const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', `${f}.js`)], { input: '{not json', encoding: 'utf8', env: process.env });
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', `${f}.js`)], { input: '{not json', encoding: 'utf8', env: process.env });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
     assert.equal(r.stdout, '', f);
   }
@@ -132,7 +132,7 @@ test('runHook: empty, non-JSON or session-less stdin registers nothing, prints n
   const bad = ['', '   \n', '{not json', 'null', '[]', '123', JSON.stringify({ cwd: TMP }), JSON.stringify({ session_id: 123, cwd: TMP }), JSON.stringify({ session_id: '  ', cwd: TMP })];
   for (const f of ['session-start', 'prompt-submit', 'stop-card', 'session-end']) {
     for (const input of bad) {
-      const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', `${f}.js`)], { input, cwd: TMP, encoding: 'utf8', env: process.env });
+      const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', `${f}.js`)], { input, cwd: TMP, encoding: 'utf8', env: process.env });
       assert.equal(r.status, 0, `${f} ${input}: ${r.stderr}`);
       assert.equal(r.stdout, '', `${f} ${input}`);
       assert.equal(r.stderr, '', `${f} ${input}`);
@@ -146,7 +146,7 @@ test('runHook: empty, non-JSON or session-less stdin registers nothing, prints n
   assert.match(lines.join('\n'), /hook prompt-submit: ignored: stdin is not a JSON object/);
   assert.match(lines.join('\n'), /hook session-end: ignored: no session_id/);
   // control: the same setup with a real session id registers it
-  const ok = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', 'session-start.js')], { input: JSON.stringify({ session_id: 'REAL1', cwd: TMP }), cwd: TMP, encoding: 'utf8', env: process.env });
+  const ok = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', 'session-start.js')], { input: JSON.stringify({ session_id: 'REAL1', cwd: TMP }), cwd: TMP, encoding: 'utf8', env: process.env });
   assert.equal(ok.status, 0);
   assert.ok(sessions.get('REAL1'), 'a real hook call still registers');
   assert.ok(ok.stdout.length > 0, 'and prints its instructions');
@@ -165,7 +165,7 @@ test('parseHookInput: only a JSON object with a string session_id is a hook call
 });
 
 test('hook files are thin (at most 15 lines, one runHook call)', () => {
-  const dir = path.join(ROOT, 'scripts', 'hooks');
+  const dir = path.join(ROOT, 'plugin', 'scripts', 'hooks');
   for (const f of fs.readdirSync(dir)) {
     const text = fs.readFileSync(path.join(dir, f), 'utf8');
     assert.ok(text.trimEnd().split('\n').length <= 15, `${f} has more than 15 lines`);

@@ -10,10 +10,10 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-retain-'));
 const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 
-const { paths } = require('../scripts/core/paths');
-const { writeJson, readJson, readJsonl } = require('../scripts/core/fsx');
-const retention = require('../scripts/store/retention');
-const migrate = require('../scripts/store/migrate');
+const { paths } = require('../plugin/scripts/core/paths');
+const { writeJson, readJson, readJsonl } = require('../plugin/scripts/core/fsx');
+const retention = require('../plugin/scripts/store/retention');
+const migrate = require('../plugin/scripts/store/migrate');
 
 const DAY = retention.DAY_MS;
 const NOW = Date.now();

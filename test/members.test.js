@@ -16,7 +16,7 @@ process.env.DDASH_WINDOW = '0';
 process.env.DDASH_ORCA = '0';
 
 const ROOT = path.join(__dirname, '..');
-const SCRIPTS = path.join(ROOT, 'scripts');
+const SCRIPTS = path.join(ROOT, 'plugin', 'scripts');
 const { paths } = require(path.join(SCRIPTS, 'core', 'paths.js'));
 const { readJson, writeJson, readJsonl } = require(path.join(SCRIPTS, 'core', 'fsx.js'));
 const members = require(path.join(SCRIPTS, 'app', 'members.js'));

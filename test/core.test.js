@@ -9,18 +9,18 @@ const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-core-'));
 process.env.DDASH_BOARD_DIR = path.join(TMP, 'board');
 
-const config = require('../scripts/core/config');
-const fsx = require('../scripts/core/fsx');
-const { git, gitOrNull } = require('../scripts/core/git');
-const { newId } = require('../scripts/core/ids');
-const { log, bestEffort } = require('../scripts/core/log');
-const { paths, BOARD_DIR, safeId } = require('../scripts/core/paths');
+const config = require('../plugin/scripts/core/config');
+const fsx = require('../plugin/scripts/core/fsx');
+const { git, gitOrNull } = require('../plugin/scripts/core/git');
+const { newId } = require('../plugin/scripts/core/ids');
+const { log, bestEffort } = require('../plugin/scripts/core/log');
+const { paths, BOARD_DIR, safeId } = require('../plugin/scripts/core/paths');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
 // Every source file of the plugin, for the config coverage check.
-function sources(dir = path.join(ROOT, 'scripts')) {
+function sources(dir = path.join(ROOT, 'plugin', 'scripts')) {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
@@ -43,7 +43,7 @@ test('config: the table covers every DDASH_* name used in the code', () => {
 });
 
 test('config: only core/config reads process.env.DDASH_*', () => {
-  const own = path.join(ROOT, 'scripts', 'core', 'config.js');
+  const own = path.join(ROOT, 'plugin', 'scripts', 'core', 'config.js');
   const readers = sources().filter((f) => f !== own && /process\.env\.DDASH_|process\.env\[['"]DDASH_/.test(fs.readFileSync(f, 'utf8')));
   assert.deepEqual(readers.map((f) => path.relative(ROOT, f).replace(/\\/g, '/')), []);
 });

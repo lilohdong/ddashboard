@@ -18,27 +18,27 @@ process.env.DDASH_ORCA = '0'; // never open real Orca terminals; the Orca tests 
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
-const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
-const coreConfig = require(path.join(ROOT, 'scripts', 'core', 'config.js'));
-const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
-const procKill = require(path.join(ROOT, 'scripts', 'proc', 'kill.js'));
-const domTeam = require(path.join(ROOT, 'scripts', 'domain', 'team.js'));
-const domTags = require(path.join(ROOT, 'scripts', 'domain', 'tags.js'));
-const domMessages = require(path.join(ROOT, 'scripts', 'domain', 'messages.js'));
-const domRules = require(path.join(ROOT, 'scripts', 'domain', 'rules.js'));
-const domLeadContext = require(path.join(ROOT, 'scripts', 'domain', 'lead-context.js'));
-const domTranscript = require(path.join(ROOT, 'scripts', 'domain', 'transcript.js'));
-const storeInbox = require(path.join(ROOT, 'scripts', 'store', 'inbox.js'));
-const storeCards = require(path.join(ROOT, 'scripts', 'store', 'cards.js'));
-const appTeams = require(path.join(ROOT, 'scripts', 'app', 'teams.js'));
-const appHandoff = require(path.join(ROOT, 'scripts', 'app', 'handoff.js'));
-const appRules = require(path.join(ROOT, 'scripts', 'app', 'rules.js'));
-const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
-const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
-const appSettings = require(path.join(ROOT, 'scripts', 'app', 'settings.js'));
-const appLeadContext = require(path.join(ROOT, 'scripts', 'app', 'lead-context.js'));
-const team = require(path.join(ROOT, 'scripts', 'team.js'));
+const corePaths = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'fsx.js'));
+const coreConfig = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'config.js'));
+const procTable = require(path.join(ROOT, 'plugin', 'scripts', 'proc', 'table.js'));
+const procKill = require(path.join(ROOT, 'plugin', 'scripts', 'proc', 'kill.js'));
+const domTeam = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'team.js'));
+const domTags = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'tags.js'));
+const domMessages = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'messages.js'));
+const domRules = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'rules.js'));
+const domLeadContext = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'lead-context.js'));
+const domTranscript = require(path.join(ROOT, 'plugin', 'scripts', 'domain', 'transcript.js'));
+const storeInbox = require(path.join(ROOT, 'plugin', 'scripts', 'store', 'inbox.js'));
+const storeCards = require(path.join(ROOT, 'plugin', 'scripts', 'store', 'cards.js'));
+const appTeams = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'teams.js'));
+const appHandoff = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'handoff.js'));
+const appRules = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'rules.js'));
+const appSessions = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'projects.js'));
+const appSettings = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'settings.js'));
+const appLeadContext = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'lead-context.js'));
+const team = require(path.join(ROOT, 'plugin', 'scripts', 'team.js'));
 const { paths } = corePaths;
 const { readJson, writeJson } = coreFsx;
 
@@ -89,7 +89,7 @@ function teamFixture() {
 }
 
 function runHook(name, input, env = {}) {
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'hooks', name)], {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'hooks', name)], {
     input: JSON.stringify(input), env: { ...process.env, ...env }, encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
@@ -873,7 +873,7 @@ test('M-1d: setRunners validates; /api/settings with a project saves runners, /a
 test('M-1d review: window launcher never puts paths on a shell command line (&, %, ^, quotes)', () => {
   const save = process.env.DDASH_WINDOW_BIN;
   delete process.env.DDASH_WINDOW_BIN;
-  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
+  const term = require(path.join(ROOT, 'plugin', 'scripts', 'runners', 'window.js'));
   const cwd = 'C:/a&b/100%PATH%^x';
   const argv = ['C:/node js/node.exe', 'C:/x&y/orca-launch.js', 'C:/logs/50%/s.json'];
   try {
@@ -894,7 +894,7 @@ test('M-1d review: window launcher never puts paths on a shell command line (&, 
 });
 
 test('M-1d review: openWindow refuses a missing folder and a failing launcher (so spawn falls back to headless)', async () => {
-  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
+  const term = require(path.join(ROOT, 'plugin', 'scripts', 'runners', 'window.js'));
   teamFixture(); // resets the board: before the fake launchers are written
   windowEnv();
   try {
@@ -957,7 +957,7 @@ test('M-1d review: handoff keeps project settings changed while it ran; /api/tea
   teamFixture();
   const doc = path.join(BOARD, 'handoff.md');
   fs.writeFileSync(doc, '# handoff');
-  const members = require(path.join(ROOT, 'scripts', 'app', 'members.js')); // the handoff use case (step 9)
+  const members = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'members.js')); // the handoff use case (step 9)
   const orig = members.recordClaudePid;
   members.recordClaudePid = (...a) => { appTeams.setRunners(KEY, { runner_member: 'orca' }); return orig(...a); }; // a dashboard change mid-handoff
   try { assert.equal(team.main(['L1', 'handoff', doc]).code, 0); } finally { members.recordClaudePid = orig; }
@@ -1082,7 +1082,7 @@ test('BUG-003: orca-launch records the window shell and its own pid on the sessi
   fs.writeFileSync(prompt, 'hello');
   const spec = path.join(BOARD, 'w8.json');
   fs.writeFileSync(spec, JSON.stringify({ args: [], prompt_file: prompt, cwd: CWD, sid: 'W8', kind: 'window' }));
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'orca-launch.js'), spec], {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'orca-launch.js'), spec], {
     input: '', encoding: 'utf8', env: { ...process.env, DDASH_CLAUDE_BIN: fakeClaude(), FAKE_OUT: path.join(BOARD, 'w8-out.json') },
   });
   assert.equal(r.status, 0, r.stderr);
@@ -1094,7 +1094,7 @@ test('BUG-003: orca-launch records the window shell and its own pid on the sessi
 
 test('BUG-002: the window script runs with NoDefaultCurrentDirectoryInExePath set, in a folder with & and %', () => {
   if (process.platform !== 'win32') return;
-  const term = require(path.join(ROOT, 'scripts', 'runners', 'window.js'));
+  const term = require(path.join(ROOT, 'plugin', 'scripts', 'runners', 'window.js'));
   const save = process.env.DDASH_WINDOW_BIN;
   delete process.env.DDASH_WINDOW_BIN;
   try {
@@ -1174,7 +1174,7 @@ test('orca-launch: starts claude with the prompt first, then the options', () =>
   fs.writeFileSync(promptFile, '[ddash role=fe lead=L1 stay=0] two\nlines');
   const specFile = path.join(BOARD, 'spec.json');
   fs.writeFileSync(specFile, JSON.stringify({ args: ['--session-id', 'S1', '--allowedTools', 'Bash(git *)'], prompt_file: promptFile, cwd: CWD }));
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'orca-launch.js'), specFile], {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'plugin', 'scripts', 'orca-launch.js'), specFile], {
     input: '', encoding: 'utf8', env: { ...process.env, DDASH_CLAUDE_BIN: fakeClaude(), FAKE_OUT: out, CLAUDECODE: '1' },
   });
   assert.equal(r.status, 0, r.stderr);
@@ -1275,7 +1275,7 @@ test('server: unresponsive marker and lead handoff point in /api/state', async (
 
 // --- language (settings.json, card language, dashboard dictionary) ---
 
-const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
+const i18n = require(path.join(ROOT, 'plugin', 'scripts', 'i18n.js'));
 
 test('i18n: every key in every language, and every key the page uses exists', () => {
   const keys = Object.keys(i18n.DICT.en);
@@ -1334,7 +1334,7 @@ test('server: settings API', async () => {
 
 // --- card keys ---
 
-const cardsIndex = () => { const c = require(path.join(ROOT, 'scripts', 'app', 'cards.js')); c.reset(); return c; };
+const cardsIndex = () => { const c = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'cards.js')); c.reset(); return c; };
 const post = (sid, c) => runHook('stop-card.js', { session_id: sid, cwd: CWD, last_assistant_message: cardText(c) });
 
 test('key: valid keys are stored with project_key; invalid keys are dropped, the card is kept', () => {
@@ -1419,7 +1419,7 @@ test('key: the card instructions explain keys in every card language, for solo a
     assert.doesNotMatch(appRules.rulesFor(sessions.M1, p), /"key"/);
   }
   appSettings.saveSettings({ lang: '' });
-  const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
+  const i18n = require(path.join(ROOT, 'plugin', 'scripts', 'i18n.js'));
   for (const lang of ['en', 'ko', 'zh-CN']) {
     assert.ok(i18n.DICT[lang]['card.keyTitle'], lang);
     assert.match(i18n.DICT[lang]['card.keyPrev'], /\{n\}/, lang);

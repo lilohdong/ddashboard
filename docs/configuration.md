@@ -1,8 +1,8 @@
 # Configuration
 
-<!-- Generated from scripts/core/config.js: node scripts/core/config.js --doc > docs/configuration.md -->
+<!-- Generated from plugin/scripts/core/config.js: node plugin/scripts/core/config.js --doc > docs/configuration.md -->
 
-Environment variables, read by `scripts/core/config.js` only. Dashboard choices (language) live in
+Environment variables, read by `plugin/scripts/core/config.js` only. Dashboard choices (language) live in
 `settings.json`, per-project choices (runners, team rules) in `projects.json`. An empty value means the default.
 
 | Variable | Type | Default | Meaning |

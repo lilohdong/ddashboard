@@ -10,12 +10,12 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-cards-'));
 const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 
-const { parseCard, lifecycle } = require('../scripts/domain/card');
-const store = require('../scripts/store/cards');
-const cards = require('../scripts/app/cards');
-const sessionsStore = require('../scripts/store/sessions');
-const { writeJson } = require('../scripts/core/fsx');
-const { paths } = require('../scripts/core/paths');
+const { parseCard, lifecycle } = require('../plugin/scripts/domain/card');
+const store = require('../plugin/scripts/store/cards');
+const cards = require('../plugin/scripts/app/cards');
+const sessionsStore = require('../plugin/scripts/store/sessions');
+const { writeJson } = require('../plugin/scripts/core/fsx');
+const { paths } = require('../plugin/scripts/core/paths');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -190,9 +190,9 @@ test('nothing is written to card files; the index picks up appended cards and re
 
 // --- dashboard (scripts/web): cardView, folded / stopped rendering, urgency by outcome ---
 
-const WEB = path.join(ROOT, 'scripts', 'web');
+const WEB = path.join(ROOT, 'plugin', 'scripts', 'web');
 const imp = (name) => import(require('url').pathToFileURL(path.join(WEB, name)).href);
-const i18n = require('../scripts/i18n.js');
+const i18n = require('../plugin/scripts/i18n.js');
 const tr = (key, vars) => i18n.translate('en', key, vars);
 const webFixture = (W) => {
   const sessions = { S: { session_id: 'S', name: 's', project: 'p', view: 'idle' }, E: { session_id: 'E', name: 'e', project: 'p', view: 'ended' } };

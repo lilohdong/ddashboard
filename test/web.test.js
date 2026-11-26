@@ -7,8 +7,8 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const WEB = path.join(ROOT, 'scripts', 'web');
-const i18n = require(path.join(ROOT, 'scripts', 'i18n.js'));
+const WEB = path.join(ROOT, 'plugin', 'scripts', 'web');
+const i18n = require(path.join(ROOT, 'plugin', 'scripts', 'i18n.js'));
 const imp = (name) => import(require('url').pathToFileURL(path.join(WEB, name)).href);
 
 const tests = [];
@@ -264,7 +264,7 @@ test('cardView: one place for the displayed status, answered and reply box', () 
 
 // Moved from team.test.js (method C port): the key tag's i18n in all languages.
 test('key tag: title and history count translated in every language', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'i18n.js'), 'utf8');
+  const src = fs.readFileSync(path.join(ROOT, 'plugin', 'scripts', 'i18n.js'), 'utf8');
   assert.equal((src.match(/'card\.keyTitle'/g) || []).length, 3);
   assert.equal((src.match(/'card\.keyPrev'/g) || []).length, 3);
   assert.match(fs.readFileSync(path.join(WEB, 'select.mjs'), 'utf8'), /params\.set\('key', ui\.keyFilter\.key\)/);

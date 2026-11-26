@@ -20,7 +20,7 @@ process.env.DDASH_ORCA = '0';
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const SCRIPTS = path.join(ROOT, 'scripts');
+const SCRIPTS = path.join(ROOT, 'plugin', 'scripts');
 const { paths } = require(path.join(SCRIPTS, 'core', 'paths.js'));
 const { readJson, writeJson } = require(path.join(SCRIPTS, 'core', 'fsx.js'));
 const { projectKey } = require(path.join(SCRIPTS, 'app', 'projects.js'));

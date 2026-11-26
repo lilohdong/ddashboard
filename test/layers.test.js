@@ -8,7 +8,7 @@ const path = require('path');
 
 const STRICT = true;
 const ROOT = path.join(__dirname, '..');
-const SCRIPTS = path.join(ROOT, 'scripts');
+const SCRIPTS = path.join(ROOT, 'plugin', 'scripts');
 const rel = (f) => path.relative(SCRIPTS, f).replace(/\\/g, '/');
 
 const ENTRIES = new Set(['team.js', 'control.js', 'wait-inbox.js', 'orca-launch.js', 'server.js']);

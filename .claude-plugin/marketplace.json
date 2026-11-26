@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "ddashboard",
-      "source": "./",
+      "source": "./plugin",
       "description": "See each session's results as a short card, and reply on the card to instruct that session.",
       "version": "0.3.1",
       "license": "MIT"

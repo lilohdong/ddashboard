@@ -169,6 +169,8 @@ To manage the server directly:
 node <plugin path>/scripts/control.js start | stop | status
 ```
 
+`<plugin path>` is the installed plugin folder (under `~/.claude/plugins/cache/`), or `plugin/` in a clone of this repository.
+
 ## FAQ
 
 **Does it really cost no tokens?**

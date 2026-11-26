@@ -9,9 +9,9 @@ const path = require('path');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-session-'));
 process.env.DDASH_BOARD_DIR = path.join(TMP, 'board');
 
-const { transition, view, phase, isEnded } = require('../scripts/domain/session');
-const lifecycle = require('../scripts/app/lifecycle');
-const sessions = require('../scripts/store/sessions');
+const { transition, view, phase, isEnded } = require('../plugin/scripts/domain/session');
+const lifecycle = require('../plugin/scripts/app/lifecycle');
+const sessions = require('../plugin/scripts/store/sessions');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -133,7 +133,7 @@ test('lifecycle.apply: writes through the store, refusals write nothing', () => 
 });
 
 test('every state write in scripts/ goes through domain/session (no direct state/ended/end_reason assignment)', () => {
-  const SCRIPTS = path.join(__dirname, '..', 'scripts');
+  const SCRIPTS = path.join(__dirname, '..', 'plugin', 'scripts');
   const bad = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {

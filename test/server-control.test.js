@@ -10,7 +10,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const BOARD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-control-'));
-const CONTROL = path.join(__dirname, '..', 'scripts', 'control.js');
+const CONTROL = path.join(__dirname, '..', 'plugin', 'scripts', 'control.js');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -40,8 +40,8 @@ test('start on a port in use fails with the reason (EADDRINUSE) in one line', as
 
 test('failReason: the last error line written after the offset, without the ddashboard: prefix', () => {
   process.env.DDASH_BOARD_DIR = BOARD;
-  const { paths } = require('../scripts/core/paths');
-  const { failReason } = require('../scripts/app/server-control');
+  const { paths } = require('../plugin/scripts/core/paths');
+  const { failReason } = require('../plugin/scripts/app/server-control');
   fs.mkdirSync(path.dirname(paths.serverLog), { recursive: true });
   fs.writeFileSync(paths.serverLog, 'ddashboard: old error from before\n');
   const from = fs.statSync(paths.serverLog).size;

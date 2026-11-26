@@ -11,11 +11,11 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-store-'));
 const BOARD = path.join(TMP, 'board');
 process.env.DDASH_BOARD_DIR = BOARD;
 
-const { withLock, lockFile } = require('../scripts/core/lock');
-const sessions = require('../scripts/store/sessions');
-const projects = require('../scripts/store/projects');
-const { paths } = require('../scripts/core/paths');
-const { readJson, writeJson } = require('../scripts/core/fsx');
+const { withLock, lockFile } = require('../plugin/scripts/core/lock');
+const sessions = require('../plugin/scripts/store/sessions');
+const projects = require('../plugin/scripts/store/projects');
+const { paths } = require('../plugin/scripts/core/paths');
+const { readJson, writeJson } = require('../plugin/scripts/core/fsx');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -31,7 +31,7 @@ function deadPid() {
 }
 
 const WORKER = `
-const sessions = require(${JSON.stringify(path.join(ROOT, 'scripts', 'store', 'sessions.js'))});
+const sessions = require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'store', 'sessions.js'))});
 const [, , w, n] = process.argv;
 for (let i = 0; i < Number(n); i++) {
   sessions.patch('S', { ['w' + w + '_' + i]: i });
@@ -101,8 +101,8 @@ test('a held lock makes another process wait until it is released', async () => 
   writeJson(paths.sessions, { S: { session_id: 'S', n: 0 } });
   const script = path.join(TMP, 'holder.js');
   fs.writeFileSync(script, `
-const sessions = require(${JSON.stringify(path.join(ROOT, 'scripts', 'store', 'sessions.js'))});
-const { sleep } = require(${JSON.stringify(path.join(ROOT, 'scripts', 'core', 'fsx.js'))});
+const sessions = require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'store', 'sessions.js'))});
+const { sleep } = require(${JSON.stringify(path.join(ROOT, 'plugin', 'scripts', 'core', 'fsx.js'))});
 sessions.update((m) => { console.log('locked'); sleep(600); m.S.n += 1; m.S.holder = true; });
 `);
   const p = spawn(process.execPath, [script], { env: process.env, stdio: ['ignore', 'pipe', 'inherit'] });
@@ -180,7 +180,7 @@ test('an exception inside update leaves the file unchanged and releases the lock
 
 test('app/sessions writers go through the store: setState / markGone / forgetSessions keep a concurrent field', () => {
   reset();
-  const lib = require('../scripts/app/sessions');
+  const lib = require('../plugin/scripts/app/sessions');
   writeJson(paths.sessions, { A: { session_id: 'A', state: 'idle' }, B: { session_id: 'B', state: 'idle' } });
   sessions.update((m) => {
     // Nested: app/sessions calls inside an update work on the same map.

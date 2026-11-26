@@ -17,12 +17,12 @@ delete process.env.DDASH_NAME;
 
 const ROOT = path.join(__dirname, '..');
 const { startServer, freePort } = require('./helpers');
-const corePaths = require(path.join(ROOT, 'scripts', 'core', 'paths.js'));
-const coreFsx = require(path.join(ROOT, 'scripts', 'core', 'fsx.js'));
-const procTable = require(path.join(ROOT, 'scripts', 'proc', 'table.js'));
-const appSessions = require(path.join(ROOT, 'scripts', 'app', 'sessions.js'));
-const appProjects = require(path.join(ROOT, 'scripts', 'app', 'projects.js'));
-const team = require(path.join(ROOT, 'scripts', 'team.js'));
+const corePaths = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'paths.js'));
+const coreFsx = require(path.join(ROOT, 'plugin', 'scripts', 'core', 'fsx.js'));
+const procTable = require(path.join(ROOT, 'plugin', 'scripts', 'proc', 'table.js'));
+const appSessions = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'sessions.js'));
+const appProjects = require(path.join(ROOT, 'plugin', 'scripts', 'app', 'projects.js'));
+const team = require(path.join(ROOT, 'plugin', 'scripts', 'team.js'));
 const { paths } = corePaths;
 const { readJson, writeJson } = coreFsx;
 const KEY = appProjects.projectKey(CWD);
