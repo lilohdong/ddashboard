@@ -1,0 +1,540 @@
+{
+ "sessions": {
+  "s-alpha-solo": {
+   "session_id": "s-alpha-solo",
+   "name": "alpha",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/alpha",
+   "branch": "main",
+   "project": "alpha",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\alpha\\.git",
+   "state": "working",
+   "started": "2026-11-26T05:20:18.737Z",
+   "last_seen": "2026-11-26T05:20:26.897Z",
+   "last_card": "{\"status\":\"blocked\",\"title\":\"blocked card\",\"summary\":[\"need input\"],\"review\":[\"answer?\"]}",
+   "last_card_id": "1795670426095-52mhl",
+   "last_status": "blocked",
+   "last_title": "blocked card",
+   "pending": 0,
+   "waiting": false,
+   "view": "working"
+  },
+  "s-beta-solo": {
+   "session_id": "s-beta-solo",
+   "name": "beta",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/beta",
+   "branch": "main",
+   "project": "beta",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\beta\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:18.987Z",
+   "last_seen": "2026-11-26T05:20:26.279Z",
+   "last_card": "{\"status\":\"review\",\"title\":\"review card\",\"summary\":[\"please look\"],\"review\":[\"r1\",\"r2\"]}",
+   "last_card_id": "1795670426231-isool",
+   "last_status": "review",
+   "last_title": "review card",
+   "pending": 1,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-gamma-solo": {
+   "session_id": "s-gamma-solo",
+   "name": "gamma",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/gamma",
+   "branch": "main",
+   "project": "gamma",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\gamma\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:19.221Z",
+   "last_seen": "2026-11-26T05:20:25.470Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-gamma-solo wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670425403-aqn7p",
+   "last_status": "wip",
+   "last_title": "s-gamma-solo wip plan v2",
+   "pending": 0,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-alpha-lead": {
+   "session_id": "s-alpha-lead",
+   "name": "lead-alpha",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/alpha",
+   "branch": "main",
+   "project": "alpha",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\alpha\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:19.761Z",
+   "last_seen": "2026-11-26T05:20:22.579Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-alpha-lead wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670422530-qfwh7",
+   "last_status": "wip",
+   "last_title": "s-alpha-lead wip plan v2",
+   "pending": 0,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-alpha-fe": {
+   "session_id": "s-alpha-fe",
+   "name": "fe",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/alpha",
+   "branch": "main",
+   "project": "alpha",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\alpha\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:20.016Z",
+   "last_seen": "2026-11-26T05:20:23.075Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-alpha-fe wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670423027-lxfe0",
+   "last_status": "wip",
+   "last_title": "s-alpha-fe wip plan v2",
+   "pending": 0,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-alpha-be": {
+   "session_id": "s-alpha-be",
+   "name": "be",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/alpha",
+   "branch": "main",
+   "project": "alpha",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\alpha\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:20.268Z",
+   "last_seen": "2026-11-26T05:20:23.539Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-alpha-be wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670423491-cgzbp",
+   "last_status": "wip",
+   "last_title": "s-alpha-be wip plan v2",
+   "pending": 0,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-alpha-wt": {
+   "session_id": "s-alpha-wt",
+   "name": "alpha-wt",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/alpha-wt",
+   "branch": "feat-x",
+   "project": "alpha",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\alpha\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:20.523Z",
+   "last_seen": "2026-11-26T05:20:24.023Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-alpha-wt wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670423974-15o8j",
+   "last_status": "wip",
+   "last_title": "s-alpha-wt wip plan v2",
+   "pending": 0,
+   "waiting": false,
+   "view": "idle"
+  },
+  "s-beta-ended": {
+   "session_id": "s-beta-ended",
+   "name": "beta",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/beta",
+   "branch": "main",
+   "project": "beta",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\beta\\.git",
+   "state": "ended",
+   "started": "2026-11-26T05:20:21.030Z",
+   "last_seen": "2026-11-26T05:20:26.940Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-beta-ended wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670424923-52ylv",
+   "last_status": "wip",
+   "last_title": "s-beta-ended wip plan v2",
+   "ended": "2026-11-26T05:20:26.940Z",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended"
+  },
+  "s-gamma-m": {
+   "session_id": "s-gamma-m",
+   "name": "qa-x",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa013-vCt0/proj/gamma",
+   "branch": "main",
+   "project": "gamma",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa013-vct0\\proj\\gamma\\.git",
+   "state": "idle",
+   "started": "2026-11-26T05:20:21.560Z",
+   "last_seen": "2026-11-26T05:20:25.975Z",
+   "last_card": "{\"status\":\"wip\",\"title\":\"s-gamma-m wip plan v2\",\"summary\":[\"revised\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795670425921-goa2b",
+   "last_status": "wip",
+   "last_title": "s-gamma-m wip plan v2",
+   "pending": 1,
+   "waiting": false,
+   "view": "idle"
+  }
+ },
+ "replies": [
+  {
+   "id": "1795670426802-wr9vx",
+   "ts": "2026-11-26T05:20:26.802Z",
+   "session_id": "s-alpha-solo",
+   "card_id": null,
+   "card_title": null,
+   "text": "reply one"
+  },
+  {
+   "id": "1795670426807-d7wql",
+   "ts": "2026-11-26T05:20:26.807Z",
+   "session_id": "s-alpha-solo",
+   "card_id": null,
+   "card_title": null,
+   "text": "reply two 한글"
+  },
+  {
+   "id": "1795670426810-zimo3",
+   "ts": "2026-11-26T05:20:26.810Z",
+   "session_id": "s-beta-solo",
+   "card_id": null,
+   "card_title": null,
+   "text": "beta reply"
+  },
+  {
+   "id": "1795670426812-5qsgy",
+   "ts": "2026-11-26T05:20:26.812Z",
+   "session_id": "s-gamma-m",
+   "card_id": null,
+   "card_title": null,
+   "text": "member reply"
+  }
+ ],
+ "cards": [
+  {
+   "id": "1795670421697-crh7a",
+   "ts": "2026-11-26T05:20:21.697Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓"
+  },
+  {
+   "id": "1795670422032-707wb",
+   "ts": "2026-11-26T05:20:22.032Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670421860-xbto9"
+  },
+  {
+   "id": "1795670422188-mjqni",
+   "ts": "2026-11-26T05:20:22.188Z",
+   "session_id": "s-alpha-lead",
+   "session_name": "lead-alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-lead first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓"
+  },
+  {
+   "id": "1795670422530-qfwh7",
+   "ts": "2026-11-26T05:20:22.530Z",
+   "session_id": "s-alpha-lead",
+   "session_name": "lead-alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-lead wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670422340-dgwhw"
+  },
+  {
+   "id": "1795670423027-lxfe0",
+   "ts": "2026-11-26T05:20:23.027Z",
+   "session_id": "s-alpha-fe",
+   "session_name": "fe",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-fe wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670422853-dxrkb"
+  },
+  {
+   "id": "1795670423181-thcdn",
+   "ts": "2026-11-26T05:20:23.181Z",
+   "session_id": "s-alpha-be",
+   "session_name": "be",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-be first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓"
+  },
+  {
+   "id": "1795670423491-cgzbp",
+   "ts": "2026-11-26T05:20:23.491Z",
+   "session_id": "s-alpha-be",
+   "session_name": "be",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-be wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670423334-qe2xr"
+  },
+  {
+   "id": "1795670423974-15o8j",
+   "ts": "2026-11-26T05:20:23.974Z",
+   "session_id": "s-alpha-wt",
+   "session_name": "alpha-wt",
+   "project": "alpha",
+   "branch": "feat-x",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-wt wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670423802-h1fhc"
+  },
+  {
+   "id": "1795670424126-hzjp7",
+   "ts": "2026-11-26T05:20:24.126Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-beta-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓"
+  },
+  {
+   "id": "1795670424439-wbn7x",
+   "ts": "2026-11-26T05:20:24.439Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670424282-fvdsu"
+  },
+  {
+   "id": "1795670424923-52ylv",
+   "ts": "2026-11-26T05:20:24.923Z",
+   "session_id": "s-beta-ended",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-ended wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670424748-3gffh"
+  },
+  {
+   "id": "1795670425080-13ej0",
+   "ts": "2026-11-26T05:20:25.080Z",
+   "session_id": "s-gamma-solo",
+   "session_name": "gamma",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-gamma-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓"
+  },
+  {
+   "id": "1795670425403-aqn7p",
+   "ts": "2026-11-26T05:20:25.403Z",
+   "session_id": "s-gamma-solo",
+   "session_name": "gamma",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670425233-78ftb"
+  },
+  {
+   "id": "1795670425921-goa2b",
+   "ts": "2026-11-26T05:20:25.921Z",
+   "session_id": "s-gamma-m",
+   "session_name": "qa-x",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-m wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670425750-7vcw6"
+  },
+  {
+   "id": "1795670426095-52mhl",
+   "ts": "2026-11-26T05:20:26.095Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "blocked",
+   "title": "blocked card",
+   "summary": [
+    "need input"
+   ],
+   "review": [
+    "answer?"
+   ]
+  },
+  {
+   "id": "1795670426231-isool",
+   "ts": "2026-11-26T05:20:26.231Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "review",
+   "title": "review card",
+   "summary": [
+    "please look"
+   ],
+   "review": [
+    "r1",
+    "r2"
+   ]
+  }
+ ],
+ "last_by_session": {
+  "s-alpha-solo": {
+   "id": "1795670426095-52mhl",
+   "status": "blocked",
+   "title": "blocked card",
+   "ts": "2026-11-26T05:20:26.095Z"
+  },
+  "s-alpha-lead": {
+   "id": "1795670422530-qfwh7",
+   "status": "wip",
+   "title": "s-alpha-lead wip plan v2",
+   "ts": "2026-11-26T05:20:22.530Z"
+  },
+  "s-alpha-fe": {
+   "id": "1795670423027-lxfe0",
+   "status": "wip",
+   "title": "s-alpha-fe wip plan v2",
+   "ts": "2026-11-26T05:20:23.027Z"
+  },
+  "s-alpha-be": {
+   "id": "1795670423491-cgzbp",
+   "status": "wip",
+   "title": "s-alpha-be wip plan v2",
+   "ts": "2026-11-26T05:20:23.491Z"
+  },
+  "s-alpha-wt": {
+   "id": "1795670423974-15o8j",
+   "status": "wip",
+   "title": "s-alpha-wt wip plan v2",
+   "ts": "2026-11-26T05:20:23.974Z"
+  },
+  "s-beta-solo": {
+   "id": "1795670426231-isool",
+   "status": "review",
+   "title": "review card",
+   "ts": "2026-11-26T05:20:26.231Z"
+  },
+  "s-beta-ended": {
+   "id": "1795670424923-52ylv",
+   "status": "wip",
+   "title": "s-beta-ended wip plan v2",
+   "ts": "2026-11-26T05:20:24.923Z"
+  },
+  "s-gamma-solo": {
+   "id": "1795670425403-aqn7p",
+   "status": "wip",
+   "title": "s-gamma-solo wip plan v2",
+   "ts": "2026-11-26T05:20:25.403Z"
+  },
+  "s-gamma-m": {
+   "id": "1795670425921-goa2b",
+   "status": "wip",
+   "title": "s-gamma-m wip plan v2",
+   "ts": "2026-11-26T05:20:25.921Z"
+  },
+  "s-old": {
+   "id": "sep-1",
+   "status": "wip",
+   "title": "september wip",
+   "ts": "2026-09-05T10:00:00.000Z"
+  }
+ },
+ "archived_count": 16
+}

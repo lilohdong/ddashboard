@@ -1,0 +1,18 @@
+registered ["s1","s2","s3","s4","s5","s6"]
+1_fold {"a":{"outcome":"review","folded_into":"1795646695856-5ztn7","archived":false},"b":{"outcome":"review","folded_into":"1795646695856-5ztn7","archived":false},"review_id":"1795646695856-5ztn7","top":{"outcome":"review","archived":false}}
+2_stopped {"s2":{"outcome":"stopped","stopped":true,"archived":false},"s3":{"outcome":"stopped","stopped":true,"archived":false}}
+forget_s3 {"ok":true,"forgotten":1}
+2_forgotten_still_stopped {"outcome":"stopped","stopped":true,"archived":false}
+2_resume_folds {"old":{"outcome":"done","folded_into":"1795646697412-tofc9","archived":false},"new_id":"1795646697412-tofc9"}
+state_top_folded {"n":2,"titles":["S1 wip a","S1 wip b"]}
+state_active_has_folded_toplevel 0
+3_before_replace {"outcome":"stopped","stopped":true,"archived":false}
+3_after_replace {"old":{"outcome":"wip","replaced":true,"archived":true},"neu":{"outcome":"wip","archived":false}}
+3_archive {"ok":true}
+3_archived_view {"archived":true,"inActive":false,"count":2}
+3_unarchive {"archived":false,"outcome":"stopped"}
+5_mtime {"same":true,"m0":1795646697925.9802,"m1":1795646697925.9802,"content_same":true,"dead_state_after_gets":"idle"}
+5_view_of_dead {"view":"idle","state":"idle"}
+7_bad {"allExit0":true,"n":24,"rows":[{"h":"session-start","lab":"notjson","code":0,"stdout":1130,"stderr":0},{"h":"session-start","lab":"empty","code":0,"stdout":1130,"stderr":0},{"h":"session-start","lab":"null","code":0,"stdout":1130,"stderr":0},{"h":"session-start","lab":"array","code":0,"stdout":1130,"stderr":0},{"h":"session-start","lab":"numsid","code":0,"stdout":1122,"stderr":0}]}
+7_log {"exists":true,"hookLines":2,"sample":["2026-11-25T22:45:01.637Z [22440] hook session-start: etcx: TypeError [ERR_INVALID_ARG_TYPE]: The \"paths[0]\" argument must be of type string. Received type number (5)","2026-11-25T22:45:02.667Z [18760] hook prompt-submit: etcx: TypeError [ERR_INVALID_ARG_TYPE]: The \"paths[0]\" argument must be of type string. Received type number (5)"]}
+dashboard_ready true
