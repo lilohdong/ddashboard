@@ -173,6 +173,20 @@ test('hook files are thin (at most 15 lines, one runHook call)', () => {
   }
 });
 
+test('onPrompt: only "/ddashboard:dashboard" activates; a bare "/dashboard off" (another plugin) is ignored', async () => {
+  reset({});
+  const other = path.join(TMP, 'other-proj');
+  fs.mkdirSync(other, { recursive: true });
+  appProjects.setProject(other, true); // keeps a project connected, so "off" never stops a server
+  appProjects.setProject(TMP, true);
+  assert.equal((await hooks.onPrompt({ session_id: 'A1', cwd: TMP, prompt: '/dashboard off' })).stdout, '');
+  assert.equal(appProjects.projectActive(TMP), true);
+  const r = await hooks.onPrompt({ session_id: 'A1', cwd: TMP, prompt: '/ddashboard:dashboard off' });
+  assert.match(r.stdout, /Disconnected this project/);
+  assert.equal(appProjects.projectActive(TMP), false);
+  appProjects.setProject(other, false);
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

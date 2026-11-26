@@ -12,7 +12,7 @@
 //
 // Events (ctx.ts: ISO time, default now):
 //   spawn     ctx.fields: the new record's fields                       (none) -> pending
-//   register  SessionStart / first prompt / /dashboard                  any -> working|idle (revives an ended
+//   register  SessionStart / first prompt / /ddashboard:dashboard       any -> working|idle (revives an ended
 //                                                                       session, except a handoff, which stays ended)
 //   prompt    a prompt was submitted / the waiter delivered messages    non-ended -> working
 //   stop      Stop hook; ctx.busy: messages or a notice were handed over non-ended -> working (busy) | idle

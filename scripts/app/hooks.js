@@ -65,7 +65,7 @@ const onSessionStart = collect(async (input, write) => {
 
 // --- UserPromptSubmit ---
 // UserPromptSubmit hook
-// - "/ddashboard:dashboard" (or "/dashboard"): start the server, connect this project, register this session.
+// - "/ddashboard:dashboard": start the server, connect this project, register this session.
 //   "... team <name>": add a team named <name> with this session as its lead (other teams stay; a name in use
 //   is refused). "... solo": remove the team this session leads; the project is solo when no team is left.
 // - "... off": disconnect this project; stop the server when no project is left.
@@ -75,7 +75,8 @@ const onSessionStart = collect(async (input, write) => {
 // - After a mode switch, the next prompt gets the new instructions once.
 // - Connected sessions are marked "working". Anything else prints nothing (zero tokens).
 // Record the session's Claude pid; when none is found, remember that (claude_pid 0) so later prompts don't search again.
-const ACTIVATE = /^\s*\/(?:ddashboard:)?dashboard\b(.*)$/i;
+// Only the namespaced command: a bare "/dashboard ..." may belong to another plugin.
+const ACTIVATE = /^\s*\/ddashboard:dashboard\b(.*)$/i;
 
 function handoffNote(tag, res) {
   if (!res.ok) return `[ddashboard] Lead handoff failed: ${res.error}. You are registered as an ordinary session.\n`;
