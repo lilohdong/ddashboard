@@ -14,6 +14,7 @@ function serverPid() {
 }
 
 const SERVER = path.join(__dirname, '..', 'server.js');
+const START_WAIT_MS = 3000;
 
 // The reason a start failed, in one line: the last line the server wrote to its log after `from` (its error
 // message, e.g. "could not start the server (EADDRINUSE)"), or '' when it wrote nothing.
@@ -48,13 +49,21 @@ async function start() {
   child.on('exit', () => { exited = true; });
   child.unref();
   fs.closeSync(log);
-  // Wait briefly for the server to write its pid file; stop waiting as soon as it exits.
-  for (let i = 0; i < 30 && !exited; i++) {
-    if (serverPid()) return `Dashboard started: ${URL}`;
+  // Wait up to 3 s for the server to write its pid file. When it exits early, stop waiting, unless it lost a
+  // race for the port (EADDRINUSE): another session may be starting the server at the same moment and write its
+  // pid file a little later, so keep polling until the deadline before reporting a failure.
+  const deadline = Date.now() + START_WAIT_MS;
+  let why = null;
+  while (Date.now() < deadline) {
+    if (serverPid()) return why == null ? `Dashboard started: ${URL}` : `Dashboard is already running: ${URL}`;
+    if (exited && why == null) {
+      why = failReason(from);
+      if (!/EADDRINUSE/.test(why)) break;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
-  if (serverPid()) return `Dashboard started: ${URL}`;
-  const why = failReason(from);
+  if (serverPid()) return `Dashboard ${why == null ? 'started' : 'is already running'}: ${URL}`;
+  if (why == null) why = failReason(from);
   return `Could not start the dashboard${why ? `: ${why}` : ''}. Log: ${paths.serverLog}`;
 }
 

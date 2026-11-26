@@ -7,7 +7,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const BOARD = fs.mkdtempSync(path.join(os.tmpdir(), 'ddash-control-'));
 const CONTROL = path.join(__dirname, '..', 'plugin', 'scripts', 'control.js');
@@ -22,7 +22,15 @@ const control = (args, port) => spawnSync(process.execPath, [CONTROL, ...args], 
   timeout: 20000,
 });
 
-test('start on a port in use fails with the reason (EADDRINUSE) in one line', async () => {
+// The same, without blocking this process (the race test writes a pid file while start() waits).
+const controlAsync = (args, port) => new Promise((resolve) => {
+  const p = spawn(process.execPath, [CONTROL, ...args], { env: { ...process.env, DDASH_BOARD_DIR: BOARD, DDASH_PORT: String(port) } });
+  let out = '';
+  p.stdout.on('data', (d) => { out += d; });
+  p.on('close', (status) => resolve({ status, stdout: out }));
+});
+
+test('start on a port in use: keeps waiting for another server until the deadline, then says why in one line', async () => {
   const holder = net.createServer();
   await new Promise((r) => holder.listen(0, '127.0.0.1', r));
   const { port } = holder.address();
@@ -32,10 +40,35 @@ test('start on a port in use fails with the reason (EADDRINUSE) in one line', as
     const out = r.stdout.trim();
     assert.equal(out.split('\n').length, 1, out);
     assert.match(out, /^Could not start the dashboard: could not start the server \(EADDRINUSE\)\..*Log: /);
-    assert.ok(Date.now() - t0 < 2900, 'stops waiting once the server exits');
+    assert.ok(Date.now() - t0 >= 2900, 'waited for a racing server until the deadline');
   } finally {
     holder.close();
   }
+});
+
+test('two sessions start at once: the one that loses the port (EADDRINUSE) reports the winner as running', async () => {
+  const holder = net.createServer(); // the winner's server, before it has written its pid file
+  await new Promise((r) => holder.listen(0, '127.0.0.1', r));
+  const { port } = holder.address();
+  const pidFile = path.join(BOARD, 'server.pid');
+  try {
+    const run = controlAsync(['start'], port);
+    await new Promise((r) => setTimeout(r, 1200)); // the loser's server has exited with EADDRINUSE by now
+    fs.writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port })); // the winner is up
+    const r = await run;
+    assert.match(r.stdout.trim(), /^Dashboard is already running: /);
+  } finally {
+    holder.close();
+    fs.rmSync(pidFile, { force: true });
+  }
+});
+
+test('start that fails for another reason stops waiting as soon as the server exits', () => {
+  const t0 = Date.now();
+  const r = control(['start'], 99999); // invalid port: the server exits at once, not EADDRINUSE
+  assert.match(r.stdout.trim(), /^Could not start the dashboard/);
+  assert.doesNotMatch(r.stdout, /EADDRINUSE/);
+  assert.ok(Date.now() - t0 < 2500, 'did not wait for the deadline');
 });
 
 test('failReason: the last error line written after the offset, without the ddashboard: prefix', () => {
