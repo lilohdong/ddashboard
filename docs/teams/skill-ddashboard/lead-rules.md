@@ -28,10 +28,18 @@ Fixed rules for every lead of this team. Handoff docs hold only the current stat
 
 ## Install and restart
 
-- Install from committed HEAD only (another member may have uncommitted edits in the worktree):
-  `git archive HEAD scripts skills/dashboard/SKILL.md README.md README.ko.md` → extract → copy into `~/.claude/plugins/cache/ddashboard/ddashboard/0.2.0` (scripts/, skills/dashboard/SKILL.md, READMEs).
-- Restart from the installed scripts: `node -e "const c=require('./control');(async()=>{c.stop();console.log(await c.start())})()"`
+- Released versions: install with `claude plugin marketplace update ddashboard && claude plugin update ddashboard@ddashboard` (a versioned dir under `~/.claude/plugins/cache/ddashboard/ddashboard/<ver>`). Restart the server from that dir's `scripts/`.
+- Unreleased builds for testing: copy from committed HEAD only (`git archive HEAD ...`), never from a worktree with uncommitted edits.
+- Restart: `node -e "const c=require('./control');(async()=>{c.stop();console.log(await c.start())})()"` from the installed `scripts/`.
 - Run `node test/team.test.js` first, not at the same time as a restart (a timing test can fail then).
+
+## Repo layout (since 0.3.1)
+
+- main/develop/release carry only the plugin runtime, `test/` and the public docs. Internal docs (`docs/teams/ docs/qa/ docs/handoff/ docs/research/ docs/plan-*.md`) are gitignored there and live on the orphan branch `notes`. To save them, rebuild `notes` with a temp `GIT_INDEX_FILE` (read-tree --empty, update-index from the files, write-tree, commit-tree with parent `notes`, update-ref) and push `notes`.
+
+## External posting
+
+- Claude in Chrome blocks reddit.com (safety restriction): the master posts on Reddit. GeekNews posting needs an account older than a week.
 
 ## Members and terminals
 
