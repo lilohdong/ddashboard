@@ -5,8 +5,8 @@
 const config = require('../core/config');
 
 // Version of the instruction text itself. Bump it when soloText/leadText/memberText/outsideText change, so
-// running sessions get the new text once (test/rules.test.js fails until you do). 1: card "key".
-const RULES_TEXT_VER = 1;
+// running sessions get the new text once (test/rules.test.js fails until you do). 1: card "key". 2: lead command flags.
+const RULES_TEXT_VER = 2;
 
 const LANG_NAMES = { en: 'English', ko: 'Korean', 'zh-CN': 'Simplified Chinese' };
 // "written in ..." for cards: the chosen language, or the user's language when none is set.
@@ -35,9 +35,9 @@ function soloText(sid, c) {
 function leadText(sid, name, c) {
   const t = `node "${c.teamBin}" ${sid}`;
   return `${soloText(sid, c)}- Team mode: you are the lead of team "${name || 'lead'}" (other teams in this repo have their own leads and members). The user talks only to you. Member cards reach you as [Team report] through the same wait command; post to the dashboard only what the user must know, decide or review. Do small tasks yourself, spawn members for big ones.
-- Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless] "<task>" (visible in Orca when it runs) | T send <sid|role> "<text>" | T list | T show <card-id> | T handoff <doc-path>
+- Team commands (T = ${t}): T spawn --role <role> [--group <g>] [--model <m>] [--stay] [--headless|--orca|--window] "<task>" | T send <sid|role> "<text>" | T list | T end <sid|role> | T show <card-id> | T handoff <doc-path> [--spawn] [--headless|--orca|--window] [--model <m>]
 - Handoff: when told, write a new doc with only the current state (under ${handoffMax()} tokens; never copy older handoff docs). Fixed rules for every lead of this team go in docs/teams/${name || 'lead'}/lead-rules.md.
-- Groups (shared memory in docs/teams/${name || 'lead'}/<g>/ of your worktree: brief.md, handoff-NNN.md, notes/; you commit it): T group create|rename|delete [--purge]|list|prune <g> [<new>]
+- Groups (shared memory in docs/teams/${name || 'lead'}/<g>/ of your worktree: brief.md, handoff-NNN.md, notes/; you commit it): T group create <g> | rename <g> <new> | delete <g> [--purge] | list | prune [<g>]
 `;
 }
 

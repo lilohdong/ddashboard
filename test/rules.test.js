@@ -11,7 +11,7 @@ const path = require('path');
 process.env.DDASH_HANDOFF_MAX_TOKENS = '8000'; // fixed for the snapshot
 const rules = require('../scripts/domain/rules');
 
-const SNAPSHOT = { ver: 1, hash: 'a6a088816e969c37' };
+const SNAPSHOT = { ver: 2, hash: 'b8a7430f4e2ce5b9' };
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
