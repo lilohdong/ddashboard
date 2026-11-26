@@ -316,6 +316,24 @@ test('style: every status badge has its own colour token in light and dark', asy
   for (const k of STATUS_KEYS) assert.ok(css.includes(`.s-${k} { color: var(--${k}); }`), k);
 });
 
+test('card meta: a session name equal to the project is shown once; same-name sessions get a short id', () => {
+  const { cardWho } = M.format;
+  const sessions = {
+    'aaaaaaaa-1': { project: 'proj', name: 'proj' },
+    'bbbbbbbb-2': { project: 'proj', name: 'proj' },
+    'cccccccc-3': { project: 'proj', name: 'fix' },
+  };
+  assert.equal(cardWho('proj', 'proj', 'aaaaaaaa-1', sessions), 'proj · aaaaaaaa');
+  assert.equal(cardWho('proj', 'fix', 'cccccccc-3', sessions), 'proj · fix');
+  assert.equal(cardWho('proj', 'proj', 'aaaaaaaa-1', { 'aaaaaaaa-1': sessions['aaaaaaaa-1'] }), 'proj');
+  const { state, ui } = fixture();
+  state.sessions.A.name = 'proj';
+  state.cards[0].session_name = 'proj';
+  const v = M.main.renderMain(state, ui, t);
+  assert.match(v.cards, /<div class="meta">proj · main · /);
+  assert.doesNotMatch(v.cards, /proj · proj/);
+});
+
 (async () => {
   M = {
     state: await imp('ui-state.mjs'),

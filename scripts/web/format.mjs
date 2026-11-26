@@ -13,6 +13,15 @@ export const ago = (iso, t) => {
   return m < 1 ? t('ago.now') : m < 60 ? t('ago.m', { n: m }) : m < 1440 ? t('ago.h', { n: Math.round(m / 60) }) : t('ago.d', { n: Math.round(m / 1440) });
 };
 export const shortId = (sid) => String(sid).slice(0, 8);
+// "Who" part of a card's meta line: the project, then the session name unless it repeats the project, then a short
+// id when another session of that project has the same name (sessions in one folder all get the folder's name).
+export function cardWho(project, name, sid, sessions = {}) {
+  const same = Object.values(sessions).filter((s) => s.project === project && s.name === name).length;
+  const parts = [project];
+  if (name && name !== project) parts.push(name);
+  if (same > 1 || (same === 1 && !sessions[sid])) parts.push(shortId(sid));
+  return parts.filter(Boolean).join(' · ');
+}
 
 // Token usage (recorded by the Stop hook, no model calls).
 export const num = (v) => Number(v) || 0;

@@ -1,5 +1,5 @@
 // One card and the card list. Pure: (state, ui, t) -> html. Card rendering lives only here.
-import { esc, time, statusName } from './format.mjs';
+import { esc, time, statusName, cardWho } from './format.mjs';
 import { outcome } from './select.mjs';
 
 // A card's displayed state, decided in this one place: the status badge and filter bucket, answered, whether it
@@ -54,7 +54,7 @@ export function cardHtml(c, byCard, state, ui, t) {
           ? `<button class="card-act" data-unarchive="${esc(c.id)}" title="${esc(t('card.unarchiveTitle'))}">${esc(t('card.unarchive'))}</button>`
           : `<button class="card-act" data-archive="${esc(c.id)}" title="${esc(t('card.archiveTitle'))}">${esc(t('card.archive'))}</button>`}
       </div>
-      <div class="meta">${esc(sess?.project || c.project || '')} · ${esc(c.session_name)} · ${esc(c.branch)} · ${time(c.ts, ui.lang)}${c.diffstat ? ' · ' + esc(c.diffstat) : ''}</div>
+      <div class="meta">${esc(cardWho(sess?.project || c.project || '', c.session_name, c.session_id, state.sessions))} · ${esc(c.branch)} · ${time(c.ts, ui.lang)}${c.diffstat ? ' · ' + esc(c.diffstat) : ''}</div>
       ${c.summary?.length ? `<ul>${c.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       ${c.review?.length ? `<div class="review"><b>${esc(t('card.check'))}</b><ul>${c.review.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${details ? `<details data-details="${esc(c.id)}"${ui.openDetails.has(c.id) ? ' open' : ''}><summary>${esc(t('card.details'))}</summary><div class="details-body">${esc(details)}</div></details>` : ''}
