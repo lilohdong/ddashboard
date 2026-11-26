@@ -39,7 +39,8 @@ ensureDir(dir);
 const other = waitPid(sid);
 if (other && other !== process.pid) {
   const table = processTable();
-  if (orphanWaiter(other, table)) stopWaiter(sid, table);
+  // One that exited before the table was read is missing from it (not an orphan to orphanWaiter): gone, not waiting.
+  if (orphanWaiter(other, table) || !alive(other)) stopWaiter(sid, table);
   else {
     console.log('Already waiting for replies. Nothing to do.');
     process.exit(0);

@@ -88,6 +88,19 @@ const lockOf = (sid) => { try { return Number(fs.readFileSync(procWaiter.waitLoc
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
+// The fake orphan waiters below look exactly like real ones, so any other dashboard server on this machine that
+// runs without DDASH_BOARD_DIR (the user's own, a QA copy) stops them in its sweep (every minute, unscoped). That is
+// correct for that server and outside this test's control. A test calls need(pid, ...) where it relies on its own
+// orphans still running; if one was stopped from outside, the test starts over with fresh processes (up to TRIES).
+// Every assert stays as strict: need() never checks what this test's own code under test did.
+// Swept is also thrown when a "dead" pid (deadPid) was reused by a new process mid-test (Windows reuses pids fast).
+class Swept extends Error {}
+const TRIES = 4;
+function need(...pids) {
+  const gone = pids.filter((pid) => !procTable.alive(pid));
+  if (gone.length) throw new Swept(`stopped from outside this test: ${gone.join(', ')}`);
+}
+
 // --- F-1 / F-2 / F-3: the wait command watches its owner ---
 
 test('F-1: the waiter exits by itself when its Claude process dies, and removes its lock', async () => {
@@ -246,17 +259,21 @@ test('stopWaiter: stops the waiter and its wrapper, removes the lock; never kill
   reset({ X1: session('X1') });
   const { wrapper, pid } = await startWrappedWaiter('X1');
   const table = procTable.processTable();
+  need(pid, wrapper.pid); // alive after the read, so in the table
   assert.deepEqual(procWaiter.waiterChain(pid, table), [pid, wrapper.pid]);
   const top = table.get(wrapper.pid);
   assert.equal(procWaiter.orphanWaiter(pid, table), true, `not an orphan: wrapper ${JSON.stringify(top)}, its parent ${JSON.stringify(table.get(top?.ppid))}`);
   const alive = procTable.alive(pid);
-  assert.equal(procWaiter.stopWaiter('X1'), true, `not stopped (alive before: ${alive}, after: ${procTable.alive(pid)})`);
+  const stopped = procWaiter.stopWaiter('X1');
+  if (!stopped) need(pid); // not stopped by stopWaiter and gone anyway: someone else stopped it
+  assert.equal(stopped, true, `not stopped (alive before: ${alive}, after: ${procTable.alive(pid)})`);
   assert.equal(procTable.alive(pid), false);
   assert.ok(await until(() => !procTable.alive(wrapper.pid)), 'wrapper shell left running');
   assert.equal(fs.existsSync(procWaiter.waitLockPath('X1')), false);
   // pid reuse: the lock names a live process that is not this session's wait command.
   reset({ X2: session('X2') });
-  const other = await startFakeWaiter('SOMEONE-ELSE', { lock: false });
+  // Hosted by this test (a live parent that is not Claude): no sweep calls it an orphan, so it must stay alive.
+  const other = track(spawn(process.execPath, [fakeWaiterFiles().file, 'SOMEONE-ELSE'], { stdio: 'ignore' }));
   const sleeper = startFakeClaude();
   await sleep(300);
   fs.mkdirSync(paths.inbox('X2'), { recursive: true });
@@ -271,6 +288,7 @@ test('forgetSessions stops an orphan waiter and removes the inbox (was: waiter k
   reset({ X3: session('X3', { state: 'ended', ended: new Date().toISOString() }) });
   const w = await startFakeWaiter('X3');
   await sleep(300);
+  need(w.pid);
   assert.equal(procWaiter.waitPid('X3'), w.pid);
   assert.deepEqual(appSessions.forgetSessions(['X3']).forgotten, ['X3']);
   assert.ok(await until(() => !procTable.alive(w.pid)), 'waiter of a forgotten session still runs (bug-005)');
@@ -282,6 +300,7 @@ test('markEnded: an orphan waiter (older version, no wait.info) does not block i
   reset({ X4: session('X4', { last_seen: old }) });
   const w = await startFakeWaiter('X4');
   await sleep(300);
+  need(w.pid);
   assert.equal(procWaiter.waitPid('X4'), w.pid); // legacy rule: the lock pid alone says waiting
   const r = appSessions.markEnded('X4');
   assert.equal(r.ok, true, r.error);
@@ -434,6 +453,7 @@ test('F-3: /api/state does not show "waiting" for a waiter whose owner is dead (
   fs.writeFileSync(procWaiter.waitInfoPath('V2'), JSON.stringify({ pid: process.pid, owner: process.pid }));
   await withServer(async (base) => {
     const st = await (await fetch(`${base}/api/state`)).json();
+    if (procTable.alive(dead)) throw new Swept(`dead owner pid ${dead} was reused`);
     assert.equal(st.sessions.V1.waiting, false);
     assert.equal(st.sessions.V1.view, 'idle');
     assert.equal(st.sessions.V2.view, 'waiting');
@@ -483,9 +503,11 @@ test('sweepWaiters: stops orphan waiters of any version, keeps live ones, remove
   const { file } = fakeWaiterFiles();
   const hosted = track(spawn(process.execPath, [file, 'Y5'], { stdio: 'ignore' })); // live parent (this test): kept
   fs.mkdirSync(paths.inbox('Y4'), { recursive: true });
-  fs.writeFileSync(procWaiter.waitLockPath('Y4'), String(await deadPid())); // stale lock
+  const y4dead = await deadPid();
+  fs.writeFileSync(procWaiter.waitLockPath('Y4'), String(y4dead)); // stale lock
   await sleep(300);
   const r = procWaiter.sweepWaiters(procTable.processTable());
+  if (procTable.alive(y4dead)) throw new Swept(`stale lock pid ${y4dead} was reused`);
   const killed = r.killed.map((k) => k.pid);
   // Another server running its sweep at the same time (e.g. a parallel test run) may have stopped them first.
   for (const pid of [orphan.pid, wrapped]) assert.ok(killed.includes(pid) || !procTable.alive(pid), `not stopped: ${pid} ${JSON.stringify(r.killed)}`);
@@ -510,8 +532,10 @@ test('sweepWaiters with DDASH_BOARD_DIR set leaves an orphan waiter outside that
   try {
     await sleep(300);
     const table = procTable.processTable();
+    need(pid); // alive after the read, so in the table
     assert.equal(procWaiter.orphanWaiter(pid, table), true); // it is an orphan...
     assert.deepEqual(procWaiter.sweepWaiters(table).killed.filter((k) => k.pid === pid), []); // ...but out of scope
+    need(pid); // gone although this sweep did not stop it: another server's sweep did
     assert.equal(procTable.alive(pid), true);
   } finally {
     try { process.kill(pid); } catch {}
@@ -562,12 +586,16 @@ test('F-6: control.start runs the server outside the session folder', async () =
 (async () => {
   let failed = 0;
   for (const t of tests) {
-    try {
-      await t.fn();
-      console.log(`ok   ${t.name}`);
-    } catch (err) {
-      failed++;
-      console.log(`FAIL ${t.name}\n${err.stack}`);
+    for (let i = 1; ; i++) {
+      try {
+        await t.fn();
+        console.log(`ok   ${t.name}`);
+      } catch (err) {
+        if (err instanceof Swept && i < TRIES) { console.log(`again ${t.name} (${err.message})`); continue; }
+        failed++;
+        console.log(`FAIL ${t.name}\n${err.stack}`);
+      }
+      break;
     }
   }
   for (const p of started) { try { p.kill(); } catch {} }

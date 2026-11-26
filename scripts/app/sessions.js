@@ -6,7 +6,7 @@ const config = require('../core/config');
 const { paths } = require('../core/paths');
 const { git } = require('../core/git');
 const sessionsStore = require('../store/sessions');
-const { processTable, findClaudePid } = require('../proc/table');
+const { alive, processTable, findClaudePid } = require('../proc/table');
 const { waitPid, orphanWaiter, needsProcesses, stopSessionProcesses } = require('../proc/waiter');
 const supervisor = require('../proc/supervisor');
 const { isEnded, isStale, transition } = require('../domain/session');
@@ -110,7 +110,8 @@ function markEnded(sid) {
   // A wait command with no live Claude above it (bug-005, e.g. one from an older plugin version) is not activity.
   let table = null;
   const wp = waitPid(sid);
-  const waiting = wp && !orphanWaiter(wp, (table = processTable()));
+  // A waiter that exited before the table was read is missing from it (orphanWaiter is then false): not waiting.
+  const waiting = wp && !orphanWaiter(wp, (table = processTable())) && alive(wp);
   const ctx = { reason: 'marked', gone, waiting: Boolean(waiting), stale: isStale(s), seen: false, ts: new Date().toISOString() };
   const check = transition(s, 'end', ctx);
   if (!check.ok) return { ok: false, code: check.code, error: check.error };
