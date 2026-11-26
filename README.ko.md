@@ -37,7 +37,10 @@ Claude Code 안에서 실행합니다.
    /ddashboard:dashboard
    ```
 2. 브라우저에서 http://127.0.0.1:7357 을 엽니다.
-3. 세션이 답글 대기 명령(`wait-inbox.js`)을 실행하려고 권한을 물으면 **항상 허용**을 선택합니다. 이 명령은 답글이 올 때까지 조용히 기다리기만 합니다.
+3. 세션이 답글 대기 명령(`node "<홈>/.ddashboard/bin/wait.js" <세션 ID>`)을 실행하려고 권한을 물으면 **항상 허용**을 선택합니다. 이 명령은 답글이 올 때까지 조용히 기다리기만 합니다. 미리 허용하려면 `~/.claude/settings.json`의 `permissions.allow`에 다음 규칙을 넣습니다 (`DDASH_BOARD_DIR`을 바꿨다면 폴더도 맞춰 바꿉니다):
+   ```json
+   "Bash(node *.ddashboard/bin/wait.js*)"
+   ```
 4. 평소처럼 일을 시킵니다. 보고할 결과가 생기면 카드가 올라옵니다.
 5. 카드에 답글을 달면(Ctrl+Enter) 그 세션이 받아서 처리합니다.
 

@@ -37,7 +37,10 @@ Run inside Claude Code:
    /ddashboard:dashboard
    ```
 2. Open http://127.0.0.1:7357 in your browser.
-3. When the session asks for permission to run the wait command (`wait-inbox.js`), choose **always allow**. It only waits quietly for your replies.
+3. When the session asks for permission to run the wait command (`node "<home>/.ddashboard/bin/wait.js" <session id>`), choose **always allow**. It only waits quietly for your replies. To allow it ahead of time, add this rule to `permissions.allow` in `~/.claude/settings.json` (change the folder if you set `DDASH_BOARD_DIR`):
+   ```json
+   "Bash(node *.ddashboard/bin/wait.js*)"
+   ```
 4. Work as usual. A card shows up whenever there's a result worth reporting.
 5. Reply on a card (Ctrl+Enter) and that session handles it.
 
