@@ -265,8 +265,15 @@ function resumeWindow(m, text) {
 // This lead's members: [{ s, state, waiting, pending }]. Members that died without their SessionEnd hook (e.g. Orca
 // terminal closed by hand) are marked ended first.
 function listMembers(leadSid) {
-  const { sessions } = context(leadSid);
+  const { sessions, project } = context(leadSid);
   let members = Object.values(sessions).filter((s) => s.kind === 'member' && s.lead === leadSid);
+  // A session that leads no team and has no members gets told why, instead of an empty list.
+  if (!members.length && !teamOfLead(project, leadSid)) {
+    const me = sessions[leadSid];
+    throw new Error(me.kind === 'member'
+      ? `this session is a member (role ${me.role || 'member'}); only its lead (${String(me.lead || '?').slice(0, 8)}) can list members.`
+      : 'this session is not the lead of a team in this project. Make it one with /ddashboard:dashboard team <name>.');
+  }
   if (endGone(members.filter((s) => supervisor.gone(s, orca.terminalOpen)).map((s) => s.session_id)).length) {
     const now = sessionsStore.read();
     members = members.map((s) => now[s.session_id] || s);

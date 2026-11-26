@@ -188,6 +188,19 @@ test('list: a member whose Claude process is dead is marked ended (gone); others
   assert.notEqual(by.M2.state, 'ended');
 });
 
+test('list: a lead with no members gets an empty list; a member or a plain session is told it is no lead', () => {
+  const base = { cwd: CWD, project: 'proj', project_key: KEY, state: 'idle', last_seen: new Date().toISOString() };
+  reset({ M1: member('M1'), S1: { ...base, session_id: 'S1', name: 'S1' } });
+  writeJson(paths.sessions, { ...sessions(), M1: member('M1', { lead: 'L0' }) }); // L1 keeps no members
+  assert.deepEqual(members.listMembers('L1'), []);
+  assert.throws(() => members.listMembers('M1'), /is a member \(role qa\); only its lead \(L0\)/);
+  assert.throws(() => members.listMembers('S1'), /not the lead of a team.*\/ddashboard:dashboard team/);
+  const team = require(path.join(SCRIPTS, 'team.js'));
+  const r = team.main(['S1', 'list']);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /not the lead of a team/);
+});
+
 test('errors: unknown lead, a session that leads no team, an unknown member', () => {
   reset({ M1: member('M1') });
   assert.throws(() => members.spawnMember('nobody', { role: 'x', task: 'y' }), /unknown session nobody/);
