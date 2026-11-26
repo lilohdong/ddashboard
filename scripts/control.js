@@ -5,10 +5,17 @@
 //   node control.js status
 const { start, stop, status } = require('./app/server-control');
 
+const USAGE = `Usage: node control.js start|stop|status
+  start   start the dashboard server, detached from the session
+  stop    stop the server
+  status  say whether it is running`;
+
 async function main(cmd) {
   if (cmd === 'start') return start();
   if (cmd === 'stop') return stop();
-  return status();
+  if (cmd === 'status') return status();
+  process.exitCode = 1;
+  return USAGE;
 }
 
 module.exports = { start, stop };
