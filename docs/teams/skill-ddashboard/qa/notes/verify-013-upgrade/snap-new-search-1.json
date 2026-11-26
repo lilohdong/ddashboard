@@ -1,0 +1,605 @@
+{
+ "cards": [
+  {
+   "id": "1795670426231-isool",
+   "ts": "2026-11-26T05:20:26.231Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "review",
+   "title": "review card",
+   "summary": [
+    "please look"
+   ],
+   "review": [
+    "r1",
+    "r2"
+   ],
+   "outcome": "review",
+   "archived": false
+  },
+  {
+   "id": "1795670426095-52mhl",
+   "ts": "2026-11-26T05:20:26.095Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "blocked",
+   "title": "blocked card",
+   "summary": [
+    "need input"
+   ],
+   "review": [
+    "answer?"
+   ],
+   "outcome": "blocked",
+   "archived": false
+  },
+  {
+   "id": "1795670425921-goa2b",
+   "ts": "2026-11-26T05:20:25.921Z",
+   "session_id": "s-gamma-m",
+   "session_name": "qa-x",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-m wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670425750-7vcw6",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670425750-7vcw6",
+   "ts": "2026-11-26T05:20:25.750Z",
+   "session_id": "s-gamma-m",
+   "session_name": "qa-x",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-m wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670425592-8dqfj",
+   "ts": "2026-11-26T05:20:25.592Z",
+   "session_id": "s-gamma-m",
+   "session_name": "qa-x",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-gamma-m first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": true
+  },
+  {
+   "id": "1795670425403-aqn7p",
+   "ts": "2026-11-26T05:20:25.403Z",
+   "session_id": "s-gamma-solo",
+   "session_name": "gamma",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670425233-78ftb",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670425233-78ftb",
+   "ts": "2026-11-26T05:20:25.233Z",
+   "session_id": "s-gamma-solo",
+   "session_name": "gamma",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-gamma-solo wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670425080-13ej0",
+   "ts": "2026-11-26T05:20:25.080Z",
+   "session_id": "s-gamma-solo",
+   "session_name": "gamma",
+   "project": "gamma",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-gamma-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": false
+  },
+  {
+   "id": "1795670424923-52ylv",
+   "ts": "2026-11-26T05:20:24.923Z",
+   "session_id": "s-beta-ended",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-ended wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670424748-3gffh",
+   "outcome": "stopped",
+   "stopped": true,
+   "archived": false
+  },
+  {
+   "id": "1795670424748-3gffh",
+   "ts": "2026-11-26T05:20:24.748Z",
+   "session_id": "s-beta-ended",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-ended wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670424592-5swsw",
+   "ts": "2026-11-26T05:20:24.592Z",
+   "session_id": "s-beta-ended",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-beta-ended first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": true
+  },
+  {
+   "id": "1795670424439-wbn7x",
+   "ts": "2026-11-26T05:20:24.439Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670424282-fvdsu",
+   "outcome": "review",
+   "folded_into": "1795670426231-isool",
+   "archived": false
+  },
+  {
+   "id": "1795670424282-fvdsu",
+   "ts": "2026-11-26T05:20:24.282Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-beta-solo wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670424126-hzjp7",
+   "ts": "2026-11-26T05:20:24.126Z",
+   "session_id": "s-beta-solo",
+   "session_name": "beta",
+   "project": "beta",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-beta-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": false
+  },
+  {
+   "id": "1795670423974-15o8j",
+   "ts": "2026-11-26T05:20:23.974Z",
+   "session_id": "s-alpha-wt",
+   "session_name": "alpha-wt",
+   "project": "alpha",
+   "branch": "feat-x",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-wt wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670423802-h1fhc",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670423802-h1fhc",
+   "ts": "2026-11-26T05:20:23.802Z",
+   "session_id": "s-alpha-wt",
+   "session_name": "alpha-wt",
+   "project": "alpha",
+   "branch": "feat-x",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-wt wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670423648-y9b7h",
+   "ts": "2026-11-26T05:20:23.648Z",
+   "session_id": "s-alpha-wt",
+   "session_name": "alpha-wt",
+   "project": "alpha",
+   "branch": "feat-x",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-wt first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": true
+  },
+  {
+   "id": "1795670423491-cgzbp",
+   "ts": "2026-11-26T05:20:23.491Z",
+   "session_id": "s-alpha-be",
+   "session_name": "be",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-be wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670423334-qe2xr",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670423334-qe2xr",
+   "ts": "2026-11-26T05:20:23.334Z",
+   "session_id": "s-alpha-be",
+   "session_name": "be",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-be wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670423181-thcdn",
+   "ts": "2026-11-26T05:20:23.181Z",
+   "session_id": "s-alpha-be",
+   "session_name": "be",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-be first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": false
+  },
+  {
+   "id": "1795670423027-lxfe0",
+   "ts": "2026-11-26T05:20:23.027Z",
+   "session_id": "s-alpha-fe",
+   "session_name": "fe",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-fe wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670422853-dxrkb",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670422853-dxrkb",
+   "ts": "2026-11-26T05:20:22.853Z",
+   "session_id": "s-alpha-fe",
+   "session_name": "fe",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-fe wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670422685-gghlm",
+   "ts": "2026-11-26T05:20:22.685Z",
+   "session_id": "s-alpha-fe",
+   "session_name": "fe",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-fe first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": true
+  },
+  {
+   "id": "1795670422530-qfwh7",
+   "ts": "2026-11-26T05:20:22.530Z",
+   "session_id": "s-alpha-lead",
+   "session_name": "lead-alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-lead wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670422340-dgwhw",
+   "outcome": "wip",
+   "archived": false
+  },
+  {
+   "id": "1795670422340-dgwhw",
+   "ts": "2026-11-26T05:20:22.340Z",
+   "session_id": "s-alpha-lead",
+   "session_name": "lead-alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-lead wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670422188-mjqni",
+   "ts": "2026-11-26T05:20:22.188Z",
+   "session_id": "s-alpha-lead",
+   "session_name": "lead-alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-lead first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": false
+  },
+  {
+   "id": "1795670422032-707wb",
+   "ts": "2026-11-26T05:20:22.032Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-solo wip plan v2",
+   "summary": [
+    "revised"
+   ],
+   "review": [],
+   "replaces": "1795670421860-xbto9",
+   "outcome": "blocked",
+   "folded_into": "1795670426095-52mhl",
+   "archived": false
+  },
+  {
+   "id": "1795670421860-xbto9",
+   "ts": "2026-11-26T05:20:21.860Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "s-alpha-solo wip plan",
+   "summary": [
+    "working"
+   ],
+   "review": [],
+   "outcome": "wip",
+   "replaced": true,
+   "archived": true
+  },
+  {
+   "id": "1795670421697-crh7a",
+   "ts": "2026-11-26T05:20:21.697Z",
+   "session_id": "s-alpha-solo",
+   "session_name": "alpha",
+   "project": "alpha",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "s-alpha-solo first",
+   "summary": [
+    "a",
+    "b"
+   ],
+   "review": [
+    "check x"
+   ],
+   "details": "# details\nline1\nline2 한글 ✓",
+   "outcome": "done",
+   "archived": false
+  },
+  {
+   "id": "sep-1",
+   "ts": "2026-09-05T10:00:00.000Z",
+   "session_id": "s-old",
+   "session_name": "old",
+   "project": "alpha",
+   "status": "wip",
+   "title": "september wip",
+   "summary": [
+    "x"
+   ],
+   "review": [],
+   "outcome": "stopped",
+   "stopped": true,
+   "archived": true
+  },
+  {
+   "id": "legacy-2",
+   "ts": "2026-01-02T10:00:00.000Z",
+   "session_id": "s-old",
+   "session_name": "old",
+   "project": "alpha",
+   "status": "done",
+   "title": "legacy card 2",
+   "summary": [
+    "x"
+   ],
+   "review": [],
+   "outcome": "done",
+   "archived": true
+  },
+  {
+   "id": "legacy-1",
+   "ts": "2026-01-01T10:00:00.000Z",
+   "session_id": "s-old",
+   "session_name": "old",
+   "project": "alpha",
+   "status": "done",
+   "title": "legacy card 1",
+   "summary": [
+    "x"
+   ],
+   "review": [],
+   "outcome": "done",
+   "archived": true
+  }
+ ]
+}

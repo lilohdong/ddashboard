@@ -1,0 +1,1 @@
+const L=require('./lib');const c=L.cp.spawn(process.execPath,['-e','setTimeout(()=>{},3600000)','claude-code-qa-dummy'],{detached:true,stdio:'ignore'});c.unref();L.S.dummy=c.pid;L.save();console.log('dummy',c.pid);

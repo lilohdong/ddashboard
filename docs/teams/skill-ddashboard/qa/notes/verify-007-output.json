@@ -1,0 +1,46 @@
+{
+  "t1": {
+    "before": "line one of card 1",
+    "after": "line one of card 1",
+    "rangeCount": 1,
+    "sameNode": true,
+    "renders": 0
+  },
+  "t2": {
+    "selectedWhileDragging": "line one of card 1",
+    "afterPollStillHeld": "line one of card 1",
+    "renders": 0
+  },
+  "t3": {
+    "before": {
+      "win": 1026,
+      "details": 100,
+      "detailsScrollable": true,
+      "aside": 0
+    },
+    "after": {
+      "win": 1026,
+      "details": 100,
+      "aside": 0,
+      "detailsSameNode": true
+    }
+  }
+}
+{
+  "duringSelection": {
+    "selection": "line one of card 1",
+    "newCardShown": false
+  },
+  "afterClear": {
+    "newCardShown": true
+  },
+  "keyTags": [
+    "fix|PK1",
+    "fix-2|PK1",
+    "fix|PK2"
+  ],
+  "afterClick": [
+    "Card 1",
+    "Card 2"
+  ]
+}

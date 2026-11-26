@@ -1,0 +1,649 @@
+{
+ "teams": {
+  "proj": {
+   "key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "mode": "solo",
+   "mode_ver": 4,
+   "teams": {},
+   "runner_lead": "headless",
+   "runner_member": "headless"
+  }
+ },
+ "sessions": {
+  "S1": {
+   "session_id": "S1",
+   "name": "proj",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "state": "ended",
+   "last_seen": "2026-11-26T08:26:55.795Z",
+   "started": "2026-11-26T08:26:09.768Z",
+   "rules_ver": 3,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "claude_pid": 12284,
+   "last_card": "{\"status\":\"done\",\"title\":\"Login done\",\"summary\":[\"Login done s\"],\"review\":[],\"details\":\"line one\\nline two\"}",
+   "last_card_id": "1795681576905-c6cbd",
+   "last_status": "done",
+   "last_title": "Login done",
+   "usage_mark": {
+    "boundary": "uS11795681606754",
+    "ids": [
+     "msg_S11795681606754"
+    ]
+   },
+   "usage": {
+    "input": 310,
+    "cache_read": 3100,
+    "cache_write": 155,
+    "output": 62,
+    "turns": 4
+   },
+   "last_context": 115,
+   "lead_baseline": 1150,
+   "context_window": 200000,
+   "lead_handoff_at": 101150,
+   "reply_handed": "report",
+   "ended": "2026-11-26T08:26:55.795Z",
+   "end_reason": "handoff",
+   "replaced_by": "S5",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "S2": {
+   "session_id": "S2",
+   "name": "proj",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "state": "idle",
+   "last_seen": "2026-11-26T08:27:00.545Z",
+   "started": "2026-11-26T08:26:12.962Z",
+   "rules_ver": 1,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "claude_pid": 31852,
+   "last_card": "{\"status\":\"done\",\"title\":\"Solo again card\",\"summary\":[],\"review\":[]}",
+   "last_card_id": "1795681620481-zjylv",
+   "last_status": "done",
+   "last_title": "Solo again card",
+   "usage_mark": {
+    "boundary": "uS21795681620297",
+    "ids": [
+     "msg_S21795681620297"
+    ]
+   },
+   "usage": {
+    "input": 720,
+    "cache_read": 7200,
+    "cache_write": 360,
+    "output": 144,
+    "turns": 9
+   },
+   "last_context": 115,
+   "pending": 0,
+   "waiting": false,
+   "view": "idle",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "S3": {
+   "session_id": "S3",
+   "name": "proj",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "state": "idle",
+   "last_seen": "2026-11-26T08:26:39.883Z",
+   "started": "2026-11-26T08:26:13.963Z",
+   "rules_ver": 0,
+   "lang_ver": 4,
+   "text_ver": 1,
+   "claude_pid": 31852,
+   "last_card": "{\"status\":\"done\",\"title\":\"Fresh draft\",\"summary\":[\"Fresh draft s\"],\"review\":[],\"replaces\":\"last\"}",
+   "last_card_id": "1795681579216-b81t6",
+   "last_status": "done",
+   "last_title": "Fresh draft",
+   "usage_mark": {
+    "boundary": "uS33",
+    "ids": [
+     "msg_S33"
+    ]
+   },
+   "usage": {
+    "input": 300,
+    "cache_read": 3000,
+    "cache_write": 150,
+    "output": 60,
+    "turns": 3
+   },
+   "last_context": 1150,
+   "pending": 0,
+   "waiting": false,
+   "view": "idle",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "S4": {
+   "session_id": "S4",
+   "name": "proj",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "state": "ended",
+   "last_seen": "2026-11-26T08:26:21.174Z",
+   "started": "2026-11-26T08:26:14.982Z",
+   "rules_ver": 0,
+   "lang_ver": 0,
+   "text_ver": 1,
+   "claude_pid": 31852,
+   "last_card": "{\"status\":\"wip\",\"title\":\"Half done work\",\"summary\":[\"Half done work s\"],\"review\":[]}",
+   "last_card_id": "1795681579591-fyi0y",
+   "last_status": "wip",
+   "last_title": "Half done work",
+   "usage_mark": {
+    "boundary": "uS41",
+    "ids": [
+     "msg_S41"
+    ]
+   },
+   "usage": {
+    "input": 100,
+    "cache_read": 1000,
+    "cache_write": 50,
+    "output": 20,
+    "turns": 1
+   },
+   "last_context": 1150,
+   "ended": "2026-11-26T08:26:21.174Z",
+   "end_reason": "exit",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "628f1279-6bda-45bf-9222-25602a80a841": {
+   "session_id": "628f1279-6bda-45bf-9222-25602a80a841",
+   "name": "qa-a",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "role": "qa-a",
+   "stay": false,
+   "headless": true,
+   "runner": "headless",
+   "spawn": {
+    "permission_mode": "auto",
+    "allowed_tools": [
+     "Bash(git *)",
+     "Bash(node *)",
+     "Bash(npm *)"
+    ],
+    "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj"
+   },
+   "log": "C:\\Users\\rhkdr\\AppData\\Local\\Temp\\qa012-GIPyyo\\board\\logs\\628f1279-6bda-45bf-9222-25602a80a841.log",
+   "state": "ended",
+   "started": "2026-11-26T08:26:42.995Z",
+   "last_seen": "2026-11-26T08:26:51.193Z",
+   "pid": 25612,
+   "rules_ver": 3,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "start_rules": true,
+   "last_card": "{\"status\":\"review\",\"title\":\"qa-a report\",\"summary\":[\"done checking\"],\"review\":[\"look\"],\"key\":\"task-x\"}",
+   "last_card_id": "1795681606612-f9f9p",
+   "last_status": "review",
+   "last_title": "qa-a report",
+   "usage_mark": {
+    "boundary": "u628f1279-6bda-45bf-9222-25602a80a8411795681607109",
+    "ids": [
+     "msg_628f1279-6bda-45bf-9222-25602a80a8411795681607109"
+    ]
+   },
+   "usage": {
+    "input": 20,
+    "cache_read": 200,
+    "cache_write": 10,
+    "output": 4,
+    "turns": 2
+   },
+   "last_context": 115,
+   "reply_handed": "order",
+   "ended": "2026-11-26T08:26:51.193Z",
+   "end_reason": "stopped",
+   "former_lead": "S5",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "cbbc4563-2b21-4761-9f3d-d24fe8832533": {
+   "session_id": "cbbc4563-2b21-4761-9f3d-d24fe8832533",
+   "name": "qa-b",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "role": "qa-b",
+   "stay": false,
+   "headless": true,
+   "runner": "headless",
+   "spawn": {
+    "model": "haiku",
+    "permission_mode": "auto",
+    "allowed_tools": [
+     "Bash(git *)",
+     "Bash(node *)",
+     "Bash(npm *)"
+    ],
+    "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj"
+   },
+   "log": "C:\\Users\\rhkdr\\AppData\\Local\\Temp\\qa012-GIPyyo\\board\\logs\\cbbc4563-2b21-4761-9f3d-d24fe8832533.log",
+   "state": "ended",
+   "started": "2026-11-26T08:26:43.932Z",
+   "last_seen": "2026-11-26T08:26:52.261Z",
+   "pid": 31624,
+   "rules_ver": 3,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "start_rules": true,
+   "ended": "2026-11-26T08:26:52.261Z",
+   "end_reason": "stopped",
+   "former_lead": "S5",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "99603481-ced7-44ce-bca7-a724b0f08fc6": {
+   "session_id": "99603481-ced7-44ce-bca7-a724b0f08fc6",
+   "name": "qa-c",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "role": "qa-c",
+   "stay": false,
+   "headless": true,
+   "runner": "headless",
+   "spawn": {
+    "permission_mode": "auto",
+    "allowed_tools": [
+     "Bash(git *)",
+     "Bash(node *)",
+     "Bash(npm *)"
+    ],
+    "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj"
+   },
+   "log": "C:\\Users\\rhkdr\\AppData\\Local\\Temp\\qa012-GIPyyo\\board\\logs\\99603481-ced7-44ce-bca7-a724b0f08fc6.log",
+   "state": "ended",
+   "started": "2026-11-26T08:26:52.603Z",
+   "last_seen": "2026-11-26T08:26:59.711Z",
+   "pid": 23916,
+   "rules_ver": 3,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "start_rules": true,
+   "ended": "2026-11-26T08:26:59.711Z",
+   "end_reason": "stopped",
+   "former_lead": "S5",
+   "pending": 0,
+   "waiting": false,
+   "view": "ended",
+   "unresponsive": false,
+   "team": "solo"
+  },
+  "S5": {
+   "session_id": "S5",
+   "name": "proj",
+   "cwd": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj",
+   "branch": "main",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "state": "working",
+   "last_seen": "2026-11-26T08:27:00.216Z",
+   "started": "2026-11-26T08:26:55.129Z",
+   "handoff_from": "S1",
+   "handoff_doc": "C:/Users/rhkdr/AppData/Local/Temp/qa012-GIPyyo/proj/docs/teams/Alpha/g1/lead-handoff.md",
+   "rules_ver": 4,
+   "lang_ver": 6,
+   "text_ver": 1,
+   "claude_pid": 31852,
+   "pending": 0,
+   "waiting": false,
+   "view": "working",
+   "unresponsive": false,
+   "team": "solo"
+  }
+ },
+ "replies": [
+  {
+   "id": "1795681582754-h5gxg",
+   "ts": "2026-11-26T08:26:22.754Z",
+   "type": "reply",
+   "card_id": "1795681576905-c6cbd",
+   "card_title": "Login done",
+   "text": "Please also fix the logout bug ✓",
+   "session_id": "S1"
+  },
+  {
+   "id": "1795681583174-36ma4",
+   "ts": "2026-11-26T08:26:23.174Z",
+   "type": "reply",
+   "card_id": null,
+   "card_title": null,
+   "text": "Reply for the Stop hook",
+   "session_id": "S2"
+  }
+ ],
+ "cards": [
+  {
+   "id": "1795681576905-c6cbd",
+   "ts": "2026-11-26T08:26:16.905Z",
+   "session_id": "S1",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "Login done",
+   "summary": [
+    "Login done s"
+   ],
+   "review": [],
+   "details": "line one\nline two",
+   "outcome": "done",
+   "folded": [
+    {
+     "id": "1795681576110-xtdkr",
+     "ts": "2026-11-26T08:26:16.110Z",
+     "session_id": "S1",
+     "session_name": "proj",
+     "project": "proj",
+     "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+     "branch": "main",
+     "diffstat": "",
+     "status": "wip",
+     "title": "Login wip 1",
+     "summary": [
+      "Login wip 1 s"
+     ],
+     "review": [],
+     "key": "login-fix",
+     "outcome": "done",
+     "folded_into": "1795681576905-c6cbd"
+    },
+    {
+     "id": "1795681576521-6a017",
+     "ts": "2026-11-26T08:26:16.521Z",
+     "session_id": "S1",
+     "session_name": "proj",
+     "project": "proj",
+     "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+     "branch": "main",
+     "diffstat": "",
+     "status": "wip",
+     "title": "Login wip 2",
+     "summary": [
+      "Login wip 2 s"
+     ],
+     "review": [],
+     "outcome": "done",
+     "folded_into": "1795681576905-c6cbd"
+    }
+   ]
+  },
+  {
+   "id": "1795681577276-2n474",
+   "ts": "2026-11-26T08:26:17.276Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "review",
+   "title": "Review me",
+   "summary": [
+    "Review me s"
+   ],
+   "review": [
+    "check A",
+    "check B"
+   ],
+   "outcome": "review"
+  },
+  {
+   "id": "1795681577702-r0xfo",
+   "ts": "2026-11-26T08:26:17.702Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "blocked",
+   "title": "Blocked on key",
+   "summary": [
+    "need the key"
+   ],
+   "review": [],
+   "outcome": "blocked"
+  },
+  {
+   "id": "1795681578487-mfols",
+   "ts": "2026-11-26T08:26:18.487Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "New payments card",
+   "summary": [
+    "New payments card s"
+   ],
+   "review": [],
+   "key": "payments",
+   "key_prev": 1,
+   "outcome": "done"
+  },
+  {
+   "id": "1795681579216-b81t6",
+   "ts": "2026-11-26T08:26:19.216Z",
+   "session_id": "S3",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "Fresh draft",
+   "summary": [
+    "Fresh draft s"
+   ],
+   "review": [],
+   "replaces": "1795681578870-an01y",
+   "outcome": "done"
+  },
+  {
+   "id": "1795681579591-fyi0y",
+   "ts": "2026-11-26T08:26:19.591Z",
+   "session_id": "S4",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "wip",
+   "title": "Half done work",
+   "summary": [
+    "Half done work s"
+   ],
+   "review": [],
+   "outcome": "stopped",
+   "stopped": true
+  },
+  {
+   "id": "1795681580329-zr5c3",
+   "ts": "2026-11-26T08:26:20.329Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "{not json at all",
+   "summary": [
+    "second line"
+   ],
+   "review": [],
+   "outcome": "done"
+  },
+  {
+   "id": "1795681580730-thmvj",
+   "ts": "2026-11-26T08:26:20.730Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "Idem card",
+   "summary": [
+    "Idem card s"
+   ],
+   "review": [],
+   "outcome": "done"
+  },
+  {
+   "id": "1795681602089-lihy1",
+   "ts": "2026-11-26T08:26:42.089Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "Outside card",
+   "summary": [],
+   "review": [],
+   "outcome": "done"
+  },
+  {
+   "id": "1795681606612-f9f9p",
+   "ts": "2026-11-26T08:26:46.612Z",
+   "session_id": "628f1279-6bda-45bf-9222-25602a80a841",
+   "session_name": "qa-a",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "review",
+   "title": "qa-a report",
+   "summary": [
+    "done checking"
+   ],
+   "review": [
+    "look"
+   ],
+   "via_lead": "S1",
+   "outcome": "review"
+  },
+  {
+   "id": "1795681620481-zjylv",
+   "ts": "2026-11-26T08:27:00.481Z",
+   "session_id": "S2",
+   "session_name": "proj",
+   "project": "proj",
+   "project_key": "c:\\users\\rhkdr\\appdata\\local\\temp\\qa012-gipyyo\\proj\\.git",
+   "branch": "main",
+   "diffstat": "",
+   "status": "done",
+   "title": "Solo again card",
+   "summary": [],
+   "review": [],
+   "outcome": "done"
+  }
+ ],
+ "last_by_session": {
+  "S1": {
+   "id": "1795681576905-c6cbd",
+   "status": "done",
+   "outcome": "done",
+   "title": "Login done",
+   "ts": "2026-11-26T08:26:16.905Z",
+   "archived": false
+  },
+  "S2": {
+   "id": "1795681620481-zjylv",
+   "status": "done",
+   "outcome": "done",
+   "title": "Solo again card",
+   "ts": "2026-11-26T08:27:00.481Z",
+   "archived": false
+  },
+  "S3": {
+   "id": "1795681579216-b81t6",
+   "status": "done",
+   "outcome": "done",
+   "title": "Fresh draft",
+   "ts": "2026-11-26T08:26:19.216Z",
+   "archived": false
+  },
+  "S4": {
+   "id": "1795681579591-fyi0y",
+   "status": "wip",
+   "outcome": "stopped",
+   "title": "Half done work",
+   "ts": "2026-11-26T08:26:19.591Z",
+   "archived": false
+  },
+  "628f1279-6bda-45bf-9222-25602a80a841": {
+   "id": "1795681606612-f9f9p",
+   "status": "review",
+   "outcome": "review",
+   "title": "qa-a report",
+   "ts": "2026-11-26T08:26:46.612Z",
+   "archived": false,
+   "via_lead": "S1"
+  }
+ },
+ "archived_count": 2,
+ "usage_total": {
+  "input": 1450,
+  "cache_read": 14500,
+  "cache_write": 725,
+  "output": 290,
+  "turns": 19
+ },
+ "usage_today": {
+  "input": 1450,
+  "cache_read": 14500,
+  "cache_write": 725,
+  "output": 290,
+  "turns": 19
+ },
+ "context_warn": 150000,
+ "stale_min": 60,
+ "settings": {
+  "lang": "en"
+ }
+}

@@ -1,0 +1,20 @@
+
+19/19 test files passed
+FAIL orphans.test.js 21/22 passed (19.2s)
+FAIL stopWaiter: stops the waiter and its wrapper, removes the lock; never kills a pid that is not a waiter
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
++ []
+- [
+-   4368,
+-   18532
+- ]
+
+    at Object.fn (C:\Users\rhkdr\AppData\Local\Temp\qa012-GIPyyo\src\test\orphans.test.js:249:10)
+    at async C:\Users\rhkdr\AppData\Local\Temp\qa012-GIPyyo\src\test\orphans.test.js:566:7
+
+21/22 passed
+
+
+18/19 test files passed

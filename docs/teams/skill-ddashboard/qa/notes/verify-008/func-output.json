@@ -1,0 +1,70 @@
+﻿{
+ "formOpen": false,
+ "draftKept": null,
+ "spawnBody": "[]",
+ "formClosed": true,
+ "cancel": 1,
+ "cancelClosed": true,
+ "groupsBefore": [
+  "g1",
+  "g2"
+ ],
+ "delPanel": true,
+ "delCancelKept": "g1,g2 panelGone=true",
+ "groupsAfter": [
+  "g1"
+ ],
+ "g2Gone": true,
+ "g2Folder": false,
+ "groupsAdd": [
+  "g1",
+  "g3"
+ ],
+ "runnerSelects": [
+  "runner_lead=headless",
+  "runner_member=headless"
+ ],
+ "runnerSaved": "orca/headless",
+ "runnerSelAfter": "orca",
+ "modeOpts": [
+  "",
+  "team:sA",
+  "team:sB"
+ ],
+ "teamAdded": "[\"teamB\"]",
+ "teamLead": "sB",
+ "modeNow": "팀 1개",
+ "soloBack": "{}",
+ "dialogs": [
+  {
+   "type": "prompt",
+   "msg": "T1 팀의 새 그룹 이름 (영문, 숫자, -, _). 폴더는 팀장 worktree의 docs/teams/T1/<이름>/입니다."
+  },
+  {
+   "type": "prompt",
+   "msg": "soloproj에 \"beta\" 세션을 팀장으로 하는 팀을 추가합니다. 다른 팀은 그대로입니다. 팀 이름 (영문, 숫자, -, _):"
+  },
+  {
+   "type": "confirm",
+   "msg": "soloproj의 팀을 모두 해제할까요? 모든 세션이 직접 카드를 올립니다."
+  }
+ ],
+ "cardsBefore": 5,
+ "afterArchive": {
+  "cards": 4,
+  "archivedApi": [
+   "1795644017568-new",
+   "1"
+  ],
+  "badge": "보관함 (2)"
+ },
+ "archivedView": [
+  "1795644017568-new",
+  "1"
+ ],
+ "afterRestore": {
+  "cards": 5,
+  "archivedApi": 1
+ },
+ "errors": []
+}
