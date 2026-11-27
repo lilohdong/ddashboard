@@ -1,6 +1,6 @@
 {
   "name": "ddashboard",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A local dashboard for Claude Code: see each session's results as a short card, and reply on the card to instruct that session. Recording cards and waiting for replies cost zero model tokens.",
   "author": {
     "name": "lilohdong"

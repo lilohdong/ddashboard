@@ -4,7 +4,7 @@
 
 **A local dashboard for Claude Code: see each session's results as a short card, and reply on the card to instruct that session.**
 
-![version](https://img.shields.io/badge/version-0.3.1-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
+![version](https://img.shields.io/badge/version-0.3.2-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
 
 AI writes code faster than people can follow, and leaves more text in the terminal than anyone wants to read. ddashboard keeps only **what you need to know**: a status, a three-line summary, and what you should check. You watch the dashboard, and reply on a card to tell that session what to do next.
 
@@ -187,7 +187,9 @@ Delete the `~/.ddashboard` folder.
 
 ## Roadmap
 
-- [ ] Handle replies to closed sessions automatically with `claude -p --resume`
+- [ ] Easier team-mode onboarding
+- [ ] Handle replies to closed sessions automatically with `claude -p --resume`; notifications and remote access
+- [ ] Agent adapters, so other CLIs such as Codex or Gemini CLI can be added later
 - [x] Team mode: a lead session that splits work and launches member sessions
 - [x] Archive and search cards (0.2.0)
 - [x] Task keys on cards

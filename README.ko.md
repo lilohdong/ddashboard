@@ -4,7 +4,7 @@
 
 **Claude Code 세션의 작업 결과를 카드 한 장으로 받아 보고, 카드에 단 답글로 그 세션에 바로 지시하는 로컬 대시보드 플러그인입니다.**
 
-![version](https://img.shields.io/badge/version-0.3.1-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
+![version](https://img.shields.io/badge/version-0.3.2-blue) ![claude code](https://img.shields.io/badge/Claude_Code-plugin-d97757) ![node](https://img.shields.io/badge/node-%3E%3D18-339933) ![license](https://img.shields.io/badge/license-MIT-green)
 
 AI는 사람이 따라가기 어려울 만큼 빠르게 개발하고, 터미널에는 읽기 벅찬 양의 글을 남깁니다. ddashboard는 그중 **사람이 알아야 할 것만** 남깁니다. 카드에는 상태, 핵심 요약 3줄, 확인할 것이 들어갑니다. 사람은 대시보드만 보고, 카드에 답글을 달아 그 세션에 다음 일을 시킵니다.
 
@@ -187,7 +187,9 @@ node <플러그인 경로>/scripts/control.js start | stop | status
 
 ## 로드맵
 
-- [ ] 닫힌 세션에 온 답글을 `claude -p --resume`으로 자동 처리
+- [ ] team 모드를 더 쉽게 시작하기
+- [ ] 닫힌 세션에 온 답글을 `claude -p --resume`으로 자동 처리, 알림과 원격 접속
+- [ ] 에이전트 어댑터: 나중에 Codex, Gemini CLI 같은 다른 CLI를 붙일 수 있게
 - [x] team 모드: 팀장 세션이 작업을 나눠 팀원 세션을 띄움
 - [x] 카드 보관(아카이브)과 검색 (0.2.0)
 - [x] 카드 작업 key
