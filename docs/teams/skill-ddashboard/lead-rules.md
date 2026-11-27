@@ -36,6 +36,7 @@ Fixed rules for every lead of this team. Handoff docs hold only the current stat
 ## Repo layout (since 0.3.1)
 
 - main/develop/release carry only the plugin runtime, `test/` and the public docs. Internal docs (`docs/teams/ docs/qa/ docs/handoff/ docs/research/ docs/plan-*.md`) are gitignored there and live on the orphan branch `notes`. To save them, rebuild `notes` with a temp `GIT_INDEX_FILE` (read-tree --empty, update-index from the files, write-tree, commit-tree with parent `notes`, update-ref) and push `notes`.
+- Since 0.3.2 the runtime lives in `plugin/` (marketplace source `./plugin`; bump the version in both `.claude-plugin/marketplace.json` and `plugin/.claude-plugin/plugin.json`). README screenshots live on the orphan branch `media` (`en/`, `ko/`) and load from raw.githubusercontent URLs; update them by rebuilding `media` with one commit and pushing it.
 
 ## External posting
 
